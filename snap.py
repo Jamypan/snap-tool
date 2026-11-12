@@ -730,7 +730,7 @@ class App:
             self._ocr_busy = False
             overlay.show_ocr_message(
                 "OCR 不可用：\n" + msg
-                + "\n\n请确认已安装 PaddleOCR 依赖（paddlepaddle / paddleocr）。"
+                + "\n\n请确认已安装 OCR 依赖（rapidocr / onnxruntime）。"
             )
 
         worker.ok.connect(on_ok)
@@ -813,7 +813,7 @@ class App:
             if self.editor is not None:
                 self.editor.show_ocr_message(
                     "OCR 不可用：\n" + msg
-                    + "\n\n请确认已安装 PaddleOCR 依赖（paddlepaddle / paddleocr）。"
+                    + "\n\n请确认已安装 OCR 依赖（rapidocr / onnxruntime）。"
                 )
 
         worker.ok.connect(on_ok)
@@ -860,6 +860,78 @@ class App:
 
 
 # ---------------------------------------------------------------------------
+def _run_selftest() -> int:
+    """不进入 GUI 的自检：依赖 + OCR 后端可用性。
+
+    结果同时打印到 stdout 和写入 %APPDATA%/SnapTool/selftest.log —— 打包成
+    --windowed exe 后没有控制台，靠这份日志验证产物是否完整（模型/DLL 是否收齐）。
+    """
+    import importlib
+
+    out: list[str] = [
+        f"{APP_NAME} 自检 {datetime.now():%Y-%m-%d %H:%M:%S}",
+        f"python    : {sys.version.split()[0]}",
+        f"frozen    : {bool(getattr(sys, 'frozen', False))}",
+        f"executable: {sys.executable}",
+    ]
+    ok = True
+    for mod in ("PySide6", "PIL", "numpy", "rapidocr", "onnxruntime"):
+        try:
+            m = importlib.import_module(mod)
+            out.append(f"[OK]   import {mod:12s} {getattr(m, '__version__', '')}")
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            out.append(f"[FAIL] import {mod:12s} {type(exc).__name__}: {exc}")
+    for mod in ("cv2", "paddleocr", "pytesseract"):
+        try:
+            importlib.import_module(mod)
+            out.append(f"[ok]   optional {mod} 可用")
+        except Exception:  # noqa: BLE001
+            out.append(f"[--]   optional {mod} 未安装（对应功能不可用）")
+
+    try:
+        base = getattr(sys, "_MEIPASS", None) or str(Path(__file__).resolve().parent)
+        png = Path(base) / "ocr_test.png"
+        out.append(f"测试图   : {png} (exists={png.is_file()})")
+        if not png.is_file():
+            ok = False
+            out.append("[FAIL] 找不到 ocr_test.png")
+        else:
+            from PIL import Image
+
+            lines, backend = snapback.ocr_image_lines(Image.open(png).convert("RGB"))
+            out.append(f"[OK]   OCR backend={backend} lines={len(lines)}")
+            for d in lines[:5]:
+                out.append(
+                    f"       {d['text']!r} box={d['box']} score={d['score']:.3f}"
+                )
+            if not lines:
+                ok = False
+                out.append("[FAIL] OCR 返回 0 行")
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        out.append(f"[FAIL] OCR: {type(exc).__name__}: {exc}")
+
+    out.append(f"RESULT: {'PASS' if ok else 'FAIL'}")
+    text = "\n".join(out)
+    log = (
+        Path(os.environ.get("APPDATA") or os.path.expanduser("~"))
+        / "SnapTool"
+        / "selftest.log"
+    )
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(text, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    # frozen(--windowed) exe 没有控制台，stdout 编码与终端不一致会输出乱码，
+    # 发行版一律以日志文件为准；源码模式才额外打印到控制台。
+    if getattr(sys, "stdout", None) is not None and not getattr(sys, "frozen", False):
+        print(text)
+        print(f"[selftest] 日志：{log}")
+    return 0 if ok else 1
+
+
 def main() -> int:
     # --help 不进入 Qt，也不检查单实例；pythonw 无控制台时改用系统弹窗
     if any(a in ("-h", "--help", "/?") for a in sys.argv[1:]):
@@ -870,6 +942,10 @@ def main() -> int:
         else:
             print(CLI_HELP)
         return 0
+
+    # --selftest 不建 QApplication、不检查单实例，供打包产物做冒烟验证
+    if "--selftest" in sys.argv[1:]:
+        return _run_selftest()
 
     snapback.set_dpi_awareness()
     if not acquire_single_instance():

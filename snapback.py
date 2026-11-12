@@ -430,6 +430,18 @@ def _box_from_points(points) -> tuple[float, float, float, float] | None:
         return None
 
 
+def _clean_windows_text(text: str) -> str:
+    """Windows OCR 按「字」切词会在汉字间插空格，只合并 CJK 之间的空白。
+
+    故意不动英文单词 / 数字之间的空格：截图里可能是表格的两个单元格，
+    无脑粘连会把「480 160」错拼成「480160」。
+    """
+    import re
+
+    cjk = r"\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef"
+    return re.sub(rf"(?<=[{cjk}])[ \t]+(?=[{cjk}])", "", text)
+
+
 def _ocr_windows_lines(img: Image.Image) -> list[dict]:
     """使用 Windows 内置 OCR 引擎（Windows.Media.Ocr），按行带包围框。"""
     import asyncio
@@ -443,8 +455,40 @@ def _ocr_windows_lines(img: Image.Image) -> list[dict]:
         raise OcrUnavailable("未安装 winrt 包（Windows OCR 绑定）") from exc
 
     async def _run() -> list[dict]:
+        # 明确优先中文引擎：英文系统上 try_create_from_user_profile_languages()
+        # 会拿到 en-US，中文识别会退化甚至返回空。
+        engine = None
+        try:
+            engine = OcrEngine.try_create_from_language(Language("zh-Hans-CN"))
+        except Exception:  # noqa: BLE001
+            engine = None
+        if engine is None:
+            engine = OcrEngine.try_create_from_user_profile_languages()
+        if engine is None:
+            raise OcrUnavailable("系统未安装可用的 OCR 语言包（需 zh-CN OCR 语言包）")
+
+        # Windows OCR 对输入图有最大边长限制，4K / 多显示器全屏截图会直接失败；
+        # 超限先缩放，识别完再把行框坐标乘回原图尺度（否则「盖回原位」会整体偏移）。
+        max_dim = 0
+        for attr in ("max_image_dimension", "MaxImageDimension"):
+            try:
+                val = getattr(engine, attr, 0)
+                max_dim = int(val) if val else 0
+            except Exception:  # noqa: BLE001
+                max_dim = 0
+            if max_dim:
+                break
+        w, h = img.size
+        scale = 1.0
+        work = img
+        if max_dim and max(w, h) > max_dim:
+            scale = max_dim / float(max(w, h))
+            work = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS
+            )
+
         buf = io.BytesIO()
-        img.convert("RGB").save(buf, format="BMP")
+        work.convert("RGB").save(buf, format="BMP")
         raw = buf.getvalue()
 
         stream = InMemoryRandomAccessStream()
@@ -456,13 +500,6 @@ def _ocr_windows_lines(img: Image.Image) -> list[dict]:
 
         decoder = await BitmapDecoder.create_async(stream)
         bitmap = await decoder.get_software_bitmap_async()
-
-        engine = OcrEngine.try_create_from_user_profile_languages()
-        if engine is None:
-            engine = OcrEngine.try_create_from_language(Language("zh-Hans-CN"))
-        if engine is None:
-            raise OcrUnavailable("系统未安装可用的 OCR 语言包")
-
         result = await engine.recognize_async(bitmap)
         lines: list[dict] = []
         for ln in result.lines:
@@ -486,7 +523,9 @@ def _ocr_windows_lines(img: Image.Image) -> list[dict]:
                     )
             except Exception:  # noqa: BLE001
                 box = None
-            lines.append(_line(ln.text, box))
+            if box is not None and scale != 1.0:
+                box = tuple(v / scale for v in box)
+            lines.append(_line(_clean_windows_text(ln.text), box))
         return lines
 
     return asyncio.run(_run())
@@ -529,6 +568,87 @@ def _ocr_tesseract_lines(img: Image.Image) -> list[dict]:
         txt = " ".join(t for _, t in sorted(g["parts"]))
         out.append(_line(txt, tuple(g["box"])))
     return out
+
+
+# ---------------------------------------------------------------------------
+# RapidOCR 后端（默认首选：PP-OCR 模型的 ONNX 版，轻量、中文效果好）
+# ---------------------------------------------------------------------------
+_rapid_engine = None  # 单例缓存：首次推理要加载 3 个 ONNX 模型
+
+
+def _get_rapid_engine():
+    """懒加载 RapidOCR 引擎（单例）。模型随 wheel 自带，不需要联网下载。"""
+    global _rapid_engine
+    if _rapid_engine is None:
+        import io
+        import logging
+        import sys
+
+        def _silence() -> None:
+            # RapidOCR 模块级 logger("RapidOCR") 带一个 StreamHandler，且
+            # RapidOCR() 构造时会把 level 重设回 config.yaml 的 INFO。
+            # 换掉 handler 可避免无控制台时往 None 写入，也顺手止住 INFO 刷屏。
+            for name in ("rapidocr", "RapidOCR", "onnxruntime"):
+                lg = logging.getLogger(name)
+                lg.setLevel(logging.ERROR)
+                for h in list(lg.handlers):
+                    lg.removeHandler(h)
+                lg.addHandler(logging.NullHandler())
+                lg.propagate = False
+
+        # pythonw / --windowed exe 下 sys.stderr 为 None：导入 rapidocr 时
+        # StreamHandler() 会绑到 None，临时给个内存流，构造完再还原。
+        saved_stderr = getattr(sys, "stderr", None)
+        if saved_stderr is None:
+            sys.stderr = io.StringIO()
+        try:
+            _silence()
+            from rapidocr import RapidOCR
+
+            _silence()  # import 之后 logger 才被创建
+            engine = RapidOCR()
+            _silence()  # 构造之后 level 又被改回 INFO
+        finally:
+            sys.stderr = saved_stderr
+
+        _rapid_engine = engine
+    return _rapid_engine
+
+
+def _ocr_rapid_lines(img: Image.Image) -> list[dict]:
+    """RapidOCR 中文（+英文）识别，返回带行框与置信度的行列表。
+
+    rapidocr 3.x 的 RapidOCROutput 提供 boxes(N×2 四点) / txts / scores，
+    坐标已映射回输入图像像素尺度，可直接用于「逐行盖回原文位置」。
+    """
+    engine = _get_rapid_engine()
+    arr = np.array(img.convert("RGB"))
+    out = engine(arr)
+    if out is None:
+        return []
+    boxes = getattr(out, "boxes", None)
+    texts = getattr(out, "txts", None)
+    scores = getattr(out, "scores", None)
+    if boxes is None or texts is None:
+        return []
+    lines: list[dict] = []
+    for i, text in enumerate(texts):
+        if not text:
+            continue
+        box = None
+        try:
+            if i < len(boxes):
+                box = _box_from_points(boxes[i])
+        except Exception:  # noqa: BLE001
+            box = None
+        score = 0.0
+        try:
+            if scores is not None and i < len(scores):
+                score = float(scores[i])
+        except Exception:  # noqa: BLE001
+            pass
+        lines.append(_line(str(text), box, score))
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -616,10 +736,13 @@ def ocr_image_lines(img: Image.Image) -> tuple[list[dict], str]:
     对图像做文字识别。返回 (行列表, 后端名)。
 
     行结构见 _line()：text + 原图像素坐标 box(x1,y1,x2,y2) + score。
-    后端按可用性依次尝试：PaddleOCR（首选，中文效果好）→ Windows 内置 OCR → Tesseract。
+    后端按可用性依次尝试：RapidOCR（首选，轻量且中文效果好）→ PaddleOCR
+    → Windows 内置 OCR → Tesseract。打包成 exe 时 PaddleOCR 通常被排除，
+    会自动落到后面的后端，因此 RapidOCR 是发行版的实际主力。
     """
     errors: list[str] = []
     for name, fn in (
+        ("rapidocr", _ocr_rapid_lines),
         ("paddleocr", _ocr_paddle_lines),
         ("windows-ocr", _ocr_windows_lines),
         ("tesseract", _ocr_tesseract_lines),

@@ -9,6 +9,11 @@ __pycache__/
 venv/
 env/
 
+# PyInstaller 构建产物（体积大，不入库；用 build-exe.bat 重新生成）
+build/
+dist/
+*.manifest
+
 # 运行期日志 / 临时产物
 run_out.txt
 *.log

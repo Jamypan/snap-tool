@@ -16,10 +16,13 @@
 - **选定截图后统一进入程序窗口编辑**：框选 / 窗口截图先确认选区（可移动、拖控制点调整），点「确定」后把**裁好的那块图**送进一个普通程序窗口继续编辑；**全屏截图直接进程序窗口**，无需确定。窗口里可标注（矩形 / 椭圆 / 箭头 / 画笔 / 马赛克 / 文字）、撤销、改样式、OCR 取字、复制、另存为文件，导出始终是全分辨率原图
 - **「确定」按钮就近浮出、位置固定**：框选松手 / 窗口单击的瞬间，「确定 / 取消」浮在鼠标旁（贴屏幕边缘会自动收缩、不会镜像到对角）；之后鼠标移到别处点击，按钮保持不动
 - **退出时静默**：托盘右键「退出」或主窗口「文件 → 退出」时直接安静退出，不再弹「已最小化到托盘，程序仍在运行」等任何提示，托盘图标也随之移除
+- **内置离线中文 OCR（RapidOCR）**：PP-OCR 的 ONNX 模型随程序自带，完全离线、不上传、不依赖系统中文语言包，识别结果逐行盖回原文位置
+- **可打包成绿色版 exe**：无需安装包，解压即用、不需要 Python，见下方「Windows 绿色版 exe」
 
 ## 快速开始
 
 双击 `run-silent.bat`（推荐，无黑窗口）或 `run.bat`，也可命令行 `python snap.py`。
+**不想装 Python**：直接用绿色版发行包，解压后双击 `SnapTool.exe`（见「Windows 绿色版 exe」）。
 
 启动后会弹出「截屏助手」主窗口，右下角同时出现托盘图标——**看到窗口就说明程序已成功启动**。
 关闭主窗口只会最小化到托盘，程序继续运行；要彻底退出请用「文件 → 退出」或托盘右键「退出」。
@@ -37,18 +40,57 @@ python snap.py --help      打印命令行说明，不进入界面
 - Windows 10/11
 - Python 3.10+（已在 3.13 验证）
 
-安装依赖：
+安装依赖（源码运行）：
 
 ```
-pip install PySide6 Pillow numpy
+pip install PySide6 Pillow numpy rapidocr onnxruntime
 ```
 
-可选依赖（按需安装，代码里是懒加载，缺了只会影响对应功能）：
+可选依赖（按需安装，代码里都是懒加载，缺了只会影响对应功能）：
 
 - `opencv-python`：滚动长截图的图像拼接
-- `paddlepaddle` + `paddleocr`：离线中文 OCR 取字（首次使用会初始化引擎并自动下载模型）
+- `paddlepaddle` + `paddleocr`：**第二 OCR 后端**，中文效果好但体积很大（380 MB+），绿色版 exe 不含
+- `winrt-*`：Windows 内置 OCR 兜底（还要求系统装了 `zh-CN` OCR 语言包）
+- `pytesseract` + 系统 Tesseract：最后兜底
 
 `run.bat` / `run-silent.bat` 会**优先使用 PATH 里已装好 PySide6 的 `python` / `pythonw`**；若 PATH 里的解释器缺依赖，则回退到开发机自带的 Python 环境（保证原有部署不受影响）；两者都不可用会给出明确报错。从仓库 clone 下来后，建议先建虚拟环境装好依赖，再双击启动脚本。
+
+## Windows 绿色版 exe（分发给其他人）
+
+**不需要做安装包**：程序不写系统目录、不注册 COM/服务/驱动、不需要管理员权限；配置存 `%APPDATA%\SnapTool\`，截图存用户图片目录。发一个压缩包就够了。
+
+构建（开发机，需先装好依赖）：
+
+```
+pip install PySide6 Pillow numpy opencv-python pyinstaller rapidocr onnxruntime
+pyinstaller --noconfirm --clean SnapTool.spec
+```
+
+也可以直接双击 `build-exe.bat`（自动挑选装齐依赖的解释器）。产物是 `dist\SnapTool\` 里的 `SnapTool.exe` + `_internal\`，约 290 MB；压成 zip 后约 130 MB（本机已生成 `dist\SnapTool-win-x64.zip`；`build/` 与 `dist/` 按 `.gitignore` 不入库，随时可用 `build-exe.bat` 重建）。
+
+**分发时把整个 `SnapTool` 目录压缩成 zip / 7z，不要只单独拷 exe。**
+
+验证产物（不进界面）：
+
+```
+SnapTool.exe --selftest
+```
+
+结果写入 `%APPDATA%\SnapTool\selftest.log`；看到 `RESULT: PASS` 且 `OCR backend=rapidocr` 即说明模型与 DLL 都收齐了。
+
+构建要点：
+
+| 项 | 说明 |
+|---|---|
+| OCR 模型 | 3 个 `.onnx`（约 31 MB）随包自带，**不联网、不上传、不依赖系统中文语言包** |
+| 排除 Paddle | `SnapTool.spec` 显式排除 `paddle / paddleocr / paddlex / ppocr`，否则懒加载 import 会把 380 MB+ 框架拖进产物 |
+| 体积裁剪 | 剔除 cv2 的两份 ffmpeg 视频 DLL、Qt 的 QML/PDF/软件 OpenGL/翻译文件，省约 97 MB |
+| UPX | 保持 `upx=False`：onnxruntime / OpenCV 的 DLL 压缩后容易加载失败 |
+| 无控制台 | `--windowed`，不会弹黑框；程序内异常不会打到 stderr（RapidOCR 日志已静默） |
+| 首次取字 | 加载模型约 1~5 秒，之后引擎常驻缓存 |
+| 杀软误报 | 未签名的 PyInstaller exe 可能被误报；正式分发建议加代码签名 |
+
+想要开始菜单快捷方式 / 开机自启 / 卸载入口时，再用 Inno Setup 把这个目录包一层即可，**不需要改任何 Python 代码**。
 
 ## 操作说明
 
@@ -134,9 +176,11 @@ pip install PySide6 Pillow numpy
 - 复制后显示「已复制到剪贴板 ✓」，约 0.4 秒后自动收起文本层，回到正常截图编辑态（剪贴板变化、按钮、Ctrl+C、右键复制都会触发）。
 - 点「返回」或按 `Esc` 只收起文本层，不会取消整次截图；识别**过程中**按 `Esc` 则取消整次截图。取字期间回车不会把截图直接复制走。
 - 识别中显示「正在识别文字…」；失败或没识别到文字时给轻提示，不再弹独立窗口。
-- 若后端不返回位置坐标（Windows OCR / Tesseract 兜底），自动降级成整块文本面板，仍可拖选复制。
+- 若后端不返回位置坐标（个别兜底场景），自动降级成整块文本面板，仍可拖选复制。
 
-OCR 默认走 **PaddleOCR**（离线中文识别，返回 `rec_boxes` 坐标；首次取字会初始化引擎约 1~2 秒）。需要 `paddlepaddle` + `paddleocr`，模型会自动下载到当前用户目录下的 `.paddlex\official_models\`。
+OCR 默认走 **RapidOCR**（PP-OCR 模型的 ONNX 版，由 ONNX Runtime 推理），返回行级 bbox + 置信度；模型随程序自带、完全离线、不依赖系统中文语言包，首次取字加载模型约 1~5 秒，之后引擎常驻缓存。
+
+后端按可用性依次降级：`RapidOCR → PaddleOCR → Windows 内置 OCR → Tesseract`。绿色版 exe 已排除 PaddleOCR，实际链路是 `RapidOCR → Windows 内置 OCR`；后者要求目标机器装了 `zh-CN` OCR 语言包，且对倾斜 / 低对比度图片较弱，所以只作为兜底。
 
 ## 文件说明
 
@@ -150,13 +194,18 @@ OCR 默认走 **PaddleOCR**（离线中文识别，返回 `rec_boxes` 坐标；�
 | `snap_editor.py` | 窗口化编辑器（选定截图后进入）：缩放显示截图 + 对象化标注交互，导出全分辨率 |
 | `selftest_backend.py` | 后端自检脚本 |
 | `selftest_editor.py` | 离屏自测脚本（画布 / 选区裁剪 / 确认按钮定位 / 编辑器接收 / 退出静默），共 23 项 |
-| `run.bat` | 一键启动 |
+| `run.bat` | 一键启动（带控制台，便于看报错） |
+| `run-silent.bat` | 一键启动（无黑窗口） |
+| `SnapTool.spec` | PyInstaller 构建配置：收集 ONNX 模型、排除 Paddle、裁剪无用 DLL |
+| `app.ico` | exe 图标（与托盘相机图标同风格） |
+| `build-exe.bat` | 一键构建绿色版 exe |
 
-## 打包成 exe（可选）
+## 关于旧的打包命令
 
-```
-pip install pyinstaller
-pyinstaller -F -w -n 截屏助手 snap.py
-```
+早期文档里的 `pyinstaller -F -w snap.py` **已废弃**，请用 `SnapTool.spec` + `build-exe.bat`：
+
+- `-F` 单文件模式会把 PaddlePaddle 全家桶（380 MB+）拖进产物，且启动时解压几百 MB 到临时目录；
+- 它不会收集 RapidOCR 的 `.onnx` 模型，换一台机器「取字」就会失败；
+- 无控制台模式下 RapidOCR 的日志还可能往 `None` 写入（现已在 `snapback.py` 里静默处理）。
 
 产物在 `dist/` 目录。

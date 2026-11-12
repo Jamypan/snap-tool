@@ -105,7 +105,7 @@ code { background:#f3f4f6; padding:1px 4px; }
 <h2>5. 取字（OCR）</h2>
 <p>点工具条「取字」后，识别结果会<b>逐行盖回原文位置</b>：每行文字可选中、拖选、Ctrl+A / Ctrl+C 复制，
 也可用选区外侧工具条的「复制选中」「复制全部」。复制后约 0.4 秒自动收起，回到正常编辑态。
-识别中或后端不返回坐标时会显示整块结果面板。首次取字需初始化 PaddleOCR 引擎，约 1~2 秒。</p>
+识别中或后端不返回坐标时会显示整块结果面板。取字默认走 RapidOCR（ONNX 模型随程序自带），首次取字需加载模型约 1~5 秒，之后常驻缓存。</p>
 
 <h2>6. 文件与配置</h2>
 <p>截图默认保存到 <code>%USERPROFILE%\\Pictures\\Screenshots</code>（主窗口状态栏显示实际路径，托盘「打开保存目录」可直接打开）。
@@ -131,6 +131,7 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
   python snap.py              正常启动：显示主窗口 + 托盘常驻
   python snap.py --shot       启动后立即截一次图（使用默认截图模式）
   python snap.py --selftest   只跑后端自检，不进入界面
+                              结果写入 %APPDATA%\\SnapTool\\selftest.log
   python snap.py --help       显示本说明（也可写 -h 或 /?）
 
 日常使用请双击 run-silent.bat（无黑窗口）。程序是单实例，
@@ -147,8 +148,8 @@ ABOUT_HTML = f"""
 <p style="font-size:16px;"><b>{APP_NAME}</b></p>
 <p>一个模仿微信截屏体验的 Windows 桌面截图工具。<b>纯原创实现，与微信无关</b>，不涉及任何逆向。</p>
 <p>功能：三种截图模式、对象化标注编辑、滚动长截图、中文 OCR 逐行盖回取字、全局热键自定义。</p>
-<p class="hint">技术栈：Python 3.13 + PySide6 + Win32 API + PaddleOCR。<br>
-第三方组件许可：PySide6 (LGPL)、PaddleOCR / PaddlePaddle / OpenCV (Apache-2.0)。</p>
+<p class="hint">技术栈：Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime)。<br>
+第三方组件许可：PySide6 (LGPL)、RapidOCR / PaddleOCR / OpenCV (Apache-2.0)、ONNX Runtime (MIT)。</p>
 """
 
 
