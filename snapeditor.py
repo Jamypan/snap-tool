@@ -866,6 +866,34 @@ class OcrLayer(QWidget):
 
         self.bar.set_status(len(self._lines), backend)
 
+    def set_lines_view(
+        self,
+        lines: list[dict],
+        scale: float,
+        ox: float,
+        oy: float,
+        backend: str = "",
+    ) -> None:
+        """窗口化编辑器用：把原图物理像素 bbox 换算到缩放后的画布坐标。
+
+        Overlay 里 bbox 是「选区裁剪图的物理像素」，靠 sel + dpr 换算；编辑器
+        里整张图被 view_scale 缩放并居中在 (off_x, off_y)，所以先在这里把
+        坐标乘缩放再加偏移，然后复用 set_lines() 的同一套铺块逻辑。
+        """
+        s = scale or 1.0
+        mapped: list[dict] = []
+        for d in lines:
+            box = d.get("box") if isinstance(d, dict) else None
+            if not box:
+                mapped.append(d)
+                continue
+            x1, y1, x2, y2 = box
+            nd = dict(d)
+            nd["box"] = [ox + x1 * s, oy + y1 * s, ox + x2 * s, oy + y2 * s]
+            mapped.append(nd)
+        # set_lines() 内部还会加 sel.left()/top() 并除以 d；这里传零偏移 + d=1
+        self.set_lines(mapped, QRect(0, 0, 0, 0), 1.0, backend)
+
     def place_bar(self, sel: QRect) -> None:
         """优先选区上方；上方不够放下方；始终避开选区内容。"""
         self.bar.adjustSize()

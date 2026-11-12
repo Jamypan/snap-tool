@@ -29,6 +29,18 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     D4  quit() 放行窗口关闭 / 撤托盘图标 / 退出事件循环
     D5  退出后无迟到通知、quit() 幂等
 
+  Stage E  编辑器窗口内取字逐行盖回原文（方案 B）
+    E1  识别中收起工具条、显示提示面板
+    E2  结果按行生成文本框、文本一致、整块面板隐藏
+    E3  行块位置 = 居中偏移 + bbox×缩放（不是堆在面板里）
+    E4  窗口缩放后行块重新盖回新位置
+    E5  取字态画布鼠标不误画标注
+    E6  复制全部按阅读顺序拼接
+    E7  Esc 收起取字层并恢复工具条
+    E8  无 bbox 的后端降级为整块文本面板
+    E9  收起后导出仍是全分辨率、工具条恢复
+    E10 识别中按 Esc 取消本次取字，迟到的结果不弹出
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -425,6 +437,145 @@ def test_quit_silent() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stage E — 窗口化编辑器里「取字逐行盖回原文位置」
+# ---------------------------------------------------------------------------
+def test_line_ocr() -> None:
+    print("\n--- Stage E: 编辑器窗口内取字逐行盖回原文 ---")
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    base = make_image(1600, 900)
+    ed = EditorWindow(base, [], None)
+    ed.resize(1000, 680)
+    ed.show()                 # 父链可见，isVisible() 才反映子控件真实状态
+    cv = ed.canvas
+    cv._fit()
+
+    lines = [
+        {"text": "第一行文字", "box": [100, 80, 420, 120], "score": 0.98},
+        {"text": "第二行文字", "box": [100, 200, 420, 240], "score": 0.95},
+        {"text": "末行", "box": [600, 700, 900, 745], "score": 0.90},
+    ]
+
+    # E1 识别中：工具条/样式面板收起，浮出提示
+    cv.show_ocr_busy()
+    ok_e1 = cv.ocr_panel.isVisible() and not cv.toolbar.isVisible() and cv._ocr_active()
+    record(
+        "E1 识别中收起工具条并显示提示",
+        ok_e1,
+        f"panel={cv.ocr_panel.isVisible()} toolbar={cv.toolbar.isVisible()}",
+    )
+
+    # E2 结果逐行盖回：每行一个只读文本框，整块面板不再显示
+    cv.show_ocr_lines(lines, "rapidocr")
+    blocks = list(cv.ocr_layer._blocks)
+    texts = [b.toPlainText() for b in blocks]
+    ok_e2 = (
+        len(blocks) == 3
+        and texts == ["第一行文字", "第二行文字", "末行"]
+        and cv.ocr_layer.isVisible()
+        and not cv.ocr_panel.isVisible()
+        and not cv.toolbar.isVisible()
+    )
+    record(
+        "E2 逐行生成文本框(非整块面板)",
+        ok_e2,
+        f"blocks={len(blocks)} texts={texts} layer={cv.ocr_layer.isVisible()}",
+    )
+
+    # E3 位置换算：off + bbox*scale，再减去 2px 内边距
+    g0 = blocks[0].geometry() if blocks else QRect()
+    exp_x = cv.off_x + 100 * cv.view_scale - 2
+    exp_y = cv.off_y + 80 * cv.view_scale - 2
+    ok_e3 = abs(g0.x() - exp_x) <= 3 and abs(g0.y() - exp_y) <= 3
+    record(
+        "E3 行块盖回原文位置",
+        ok_e3,
+        f"geom=({g0.x()},{g0.y()}) 期望≈({exp_x:.1f},{exp_y:.1f}) scale={cv.view_scale:.3f}",
+    )
+
+    # E4 窗口缩放后重新排布，仍贴在原文上
+    cv.resize(820, 620)
+    cv._fit()
+    cv._place_ocr_layer()
+    blocks2 = list(cv.ocr_layer._blocks)
+    g1 = blocks2[0].geometry() if blocks2 else QRect()
+    exp1_x = cv.off_x + 100 * cv.view_scale - 2
+    exp1_y = cv.off_y + 80 * cv.view_scale - 2
+    ok_e4 = (
+        len(blocks2) == 3
+        and abs(g1.x() - exp1_x) <= 3
+        and abs(g1.y() - exp1_y) <= 3
+    )
+    record(
+        "E4 缩放后行块重新盖回",
+        ok_e4,
+        f"geom=({g1.x()},{g1.y()}) 期望≈({exp1_x:.1f},{exp1_y:.1f}) scale={cv.view_scale:.3f}",
+    )
+
+    # E5 取字态：画布鼠标事件被取字层接管，不会误画标注
+    before = len(cv.shapes)
+    cv.mousePressEvent(mouse_event(QEvent.Type.MouseButtonPress, cv, QPoint(300, 300)))
+    cv.mouseReleaseEvent(mouse_event(QEvent.Type.MouseButtonRelease, cv, QPoint(500, 400)))
+    ok_e5 = len(cv.shapes) == before
+    record("E5 取字态不误画标注", ok_e5, f"shapes {before} → {len(cv.shapes)}")
+
+    # E6 复制全部：按从上到下、同排从左到右的阅读顺序
+    cv.ocr_layer.copy_all()
+    clip = QApplication.clipboard().text()
+    ok_e6 = clip == "第一行文字\n第二行文字\n末行"
+    record("E6 复制全部按阅读顺序", ok_e6, f"clip={clip!r}")
+
+    # E7 Esc 收起取字层，恢复工具条与正常编辑态
+    cv.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+    ok_e7 = not cv._ocr_active() and cv.toolbar.isVisible() and cv._ocr_lines == []
+    record(
+        "E7 Esc 返回编辑态",
+        ok_e7,
+        f"active={cv._ocr_active()} toolbar={cv.toolbar.isVisible()} lines={len(cv._ocr_lines)}",
+    )
+
+    # E8 后端没有 bbox 时降级成整块文本面板，保证仍可选可复制
+    cv.show_ocr_lines([{"text": "甲"}, {"text": "乙"}], "windows-ocr")
+    ok_e8 = (
+        cv.ocr_panel.isVisible()
+        and not cv.ocr_layer.isVisible()
+        and cv.ocr_panel.edit.toPlainText() == "甲\n乙"
+    )
+    record(
+        "E8 无坐标后端降级整块面板",
+        ok_e8,
+        f"panel={cv.ocr_panel.isVisible()} text={cv.ocr_panel.edit.toPlainText()!r}",
+    )
+
+    # E9 收起后导出仍为全分辨率，工具条恢复
+    cv._hide_ocr_panel()
+    out = cv.compose()
+    ok_e9 = out.size() == base.size() and cv.toolbar.isVisible()
+    record(
+        "E9 收起后导出全分辨率",
+        ok_e9,
+        f"out={out.width()}x{out.height()} toolbar={cv.toolbar.isVisible()}",
+    )
+
+    # E10 识别中按 Esc 放弃：迟到的识别结果不再弹出，下次取字可重新开始
+    cv.show_ocr_busy()
+    cv.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+    cv.show_ocr_lines(lines, "rapidocr")       # 模拟子线程迟到的回调
+    ok_e10a = not cv._ocr_active() and not cv.ocr_layer.isVisible()
+    cv.show_ocr_busy()
+    cv.show_ocr_lines(lines[:1], "rapidocr")
+    ok_e10b = cv.ocr_layer.isVisible() and len(cv.ocr_layer._blocks) == 1
+    record(
+        "E10 识别中 Esc 取消且可重新取字",
+        ok_e10a and ok_e10b,
+        f"迟到结果被忽略={ok_e10a} 重新取字={ok_e10b}",
+    )
+    cv._hide_ocr_panel()
+    ed.close()
+
+
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -438,6 +589,7 @@ if __name__ == "__main__":
     test_overlay()
     test_editor_window()
     test_quit_silent()
+    test_line_ocr()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

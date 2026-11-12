@@ -7,10 +7,12 @@ snap_editor.py —— 窗口化截图编辑器。
 也可 OCR 取字、复制到剪贴板、另存为文件。
 
 复用 snapeditor 里的数据模型（Shape）与绘制原语（draw_shape）、浮动工具条
-（Toolbar）、样式面板（StylePanel）、OCR 结果面板（OcrPanel），避免重复造轮子。
+（Toolbar）、样式面板（StylePanel）、OCR 结果面板（OcrPanel）、逐行盖回原文的
+取字层（OcrLayer），避免重复造轮子。
 
 坐标约定：所有标注都以「物理像素图像坐标」存储（与截图原图 1:1），显示时再按
 view_scale 缩放并 letterbox 居中。这样导出的图像始终是全分辨率，不丢细节。
+OCR 的 bbox 也是原图物理像素，取字层按同样的视图变换铺回原文位置。
 """
 from __future__ import annotations
 
@@ -49,11 +51,13 @@ from snapeditor import (
     FONT_SIZE,
     HANDLE_SIZE,
     MIN_SELECT,
+    OcrLayer,
     OcrPanel,
     PEN_WIDTH,
     Shape,
     StylePanel,
     Toolbar,
+    _reading_order,
     draw_shape,
 )
 
@@ -124,9 +128,16 @@ class Canvas(QWidget):
         self.style_panel.hide()
         self.style_panel.style_changed.connect(self._apply_style)
 
+        # 取字：逐行盖回原文位置的覆盖层 + 识别中/降级用的整块文本面板
         self.ocr_panel = OcrPanel(self)
         self.ocr_panel.hide()
         self.ocr_panel.closed.connect(self._hide_ocr_panel)
+        self.ocr_layer = OcrLayer(self)
+        self.ocr_layer.hide()
+        self.ocr_layer.closed.connect(self._hide_ocr_panel)
+        self._ocr_lines: list[dict] = []
+        self._ocr_backend = ""
+        self._ocr_cancelled = False     # 识别中按 Esc：忽略迟到的识别结果
 
         self._fit()
         self._set_tool("select")
@@ -469,8 +480,11 @@ class Canvas(QWidget):
     def keyPressEvent(self, ev) -> None:
         k = ev.key()
         mods = ev.modifiers()
-        if self.ocr_panel.isVisible():
+        if self._ocr_active():
             if k == Qt.Key_Escape:
+                # 识别过程中按 Esc = 放弃本次取字；迟到的结果不再弹出
+                if self.ocr_panel.isVisible() and self.ocr_panel.is_busy():
+                    self._ocr_cancelled = True
                 self._hide_ocr_panel()
                 return
             super().keyPressEvent(ev)
@@ -491,7 +505,7 @@ class Canvas(QWidget):
 
     # ------------------------------------------------------------ 鼠标
     def mouseDoubleClickEvent(self, ev) -> None:
-        if self.ocr_panel.isVisible():
+        if self._ocr_active():
             return
         pos = self._to_image(ev.position().toPoint())
         if ev.button() != Qt.LeftButton:
@@ -504,7 +518,7 @@ class Canvas(QWidget):
                 return
 
     def mousePressEvent(self, ev) -> None:
-        if self.ocr_panel.isVisible():
+        if self._ocr_active():
             return
         self._commit_text()
         pos = self._to_image(ev.position().toPoint())
@@ -551,7 +565,7 @@ class Canvas(QWidget):
         self.update()
 
     def mouseMoveEvent(self, ev) -> None:
-        if self.ocr_panel.isVisible():
+        if self._ocr_active():
             return
         pos = self._to_image(ev.position().toPoint())
 
@@ -622,6 +636,8 @@ class Canvas(QWidget):
         return False
 
     def mouseReleaseEvent(self, ev) -> None:
+        if self._ocr_active():
+            return
         if self._mode == "drawing" and self._draft:
             d = self._draft
             keep = False
@@ -761,6 +777,7 @@ class Canvas(QWidget):
         self._place_toolbar()
         self._place_style_panel()
         self._place_ocr_panel()
+        self._place_ocr_layer()   # 窗口缩放后，取字行块要跟着重新盖回原文位置
         super().resizeEvent(ev)
 
     def _place_toolbar(self) -> None:
@@ -770,37 +787,112 @@ class Canvas(QWidget):
         self.toolbar.setGeometry(x, 8, tb.width(), tb.height())
 
     def _place_ocr_panel(self) -> None:
-        if not self.ocr_panel.isVisible():
-            return
+        """识别中 / 降级用的整块文本面板，居中靠下（显示前也会调用）。"""
         self.ocr_panel.adjustSize()
         ow = min(self.width() - 20, self.ocr_panel.sizeHint().width())
         oh = min(self.height() - 60, self.ocr_panel.sizeHint().height())
+        ow, oh = max(240, ow), max(120, oh)
         x = max(10, (self.width() - ow) // 2)
-        y = self.height() - oh - 16
+        y = max(8, self.height() - oh - 16)
         self.ocr_panel.setGeometry(x, y, ow, oh)
 
-    # ------------------------------------------------------------ OCR 面板
+    # ------------------------------------------------------------ 取字
     def _ocr_active(self) -> bool:
-        return self.ocr_panel.isVisible()
+        """识别中 / 结果展示中：画布的鼠标键盘交互让给取字层或结果面板。"""
+        return self.ocr_panel.isVisible() or self.ocr_layer.isVisible()
 
     def _hide_ocr_panel(self) -> None:
+        """复制完成 / 点返回 / Esc：收起取字层，恢复工具条与正常编辑态。"""
         self.ocr_panel.hide()
+        self.ocr_layer.hide()
+        self._ocr_lines = []
+        self._ocr_backend = ""
+        self._place_toolbar()
+        self.toolbar.show()
+        self.toolbar.raise_()
         self._place_style_panel()
+        if self._selected is not None:
+            self.style_panel.show()
+            self.style_panel.raise_()
+        self.setCursor(Qt.CrossCursor)
+        self.setFocus()
         self.update()
 
+    def _place_ocr_layer(self) -> None:
+        """按当前视图缩放，把每一行文字重新盖回它在图里的位置。"""
+        if not self._ocr_lines:
+            return
+        self.ocr_layer.setGeometry(0, 0, self.width(), self.height())
+        self.ocr_layer.set_lines_view(
+            self._ocr_lines, self.view_scale, self.off_x, self.off_y, self._ocr_backend
+        )
+        self._place_ocr_bar()
+
+    def _place_ocr_bar(self) -> None:
+        """取字工具条优先放窗口顶部；若压住文字行就改放底部。"""
+        bar = self.ocr_layer.bar
+        bar.adjustSize()
+        hint = bar.sizeHint()
+        w = max(360, min(hint.width(), self.width() - 16))
+        h = max(34, hint.height())
+        x = max(8, (self.width() - w) // 2)
+
+        def overlap(y: int) -> int:
+            r = QRect(x, y, w, h)
+            total = 0
+            for block in self.ocr_layer._blocks:
+                inter = r.intersected(block.geometry())
+                total += max(0, inter.width()) * max(0, inter.height())
+            return total
+
+        y = min((8, max(8, self.height() - h - 8)), key=overlap)
+        bar.setGeometry(x, y, w, h)
+        bar.raise_()
+
     def show_ocr_busy(self) -> None:
+        self._ocr_cancelled = False
+        self._commit_text()
+        self.toolbar.hide()
+        self.style_panel.hide()
+        self.ocr_layer.hide()
         self.ocr_panel.set_busy()
         self._place_ocr_panel()
         self.ocr_panel.show()
         self.ocr_panel.raise_()
 
+    def show_ocr_lines(self, lines: list, backend: str = "") -> None:
+        """方案 B：每行文字按识别框盖回原文位置，可就地拖选 / 复制。"""
+        if self._ocr_cancelled:
+            return
+        usable = [d for d in lines if isinstance(d, dict) and d.get("box")]
+        if not usable:
+            # 后端没有位置信息（Windows OCR / Tesseract 兜底）时降级成整块面板
+            self.show_ocr_text("\n".join(_reading_order(lines)), backend)
+            return
+        self._commit_text()
+        self.toolbar.hide()
+        self.style_panel.hide()
+        self.ocr_panel.hide()
+        self._ocr_lines = list(lines)
+        self._ocr_backend = backend
+        self._place_ocr_layer()
+        self.ocr_layer.show()
+        self.ocr_layer.raise_()
+        self.ocr_layer.arm()
+        self.setCursor(Qt.ArrowCursor)
+
     def show_ocr_text(self, text: str, backend: str = "") -> None:
+        self.ocr_layer.hide()
         self.ocr_panel.set_result(text, backend)
         self._place_ocr_panel()
         self.ocr_panel.show()
         self.ocr_panel.raise_()
+        self.ocr_panel.focus_edit()
 
     def show_ocr_message(self, msg: str) -> None:
+        if self._ocr_cancelled:
+            return
+        self.ocr_layer.hide()
         self.ocr_panel.set_message(msg)
         self._place_ocr_panel()
         self.ocr_panel.show()
@@ -828,7 +920,7 @@ class Canvas(QWidget):
 # 窗口化编辑器主窗口
 # ---------------------------------------------------------------------------
 class EditorWindow(QMainWindow):
-    """双击「全屏截图」后弹出的窗口化编辑器：标题栏 + 菜单 + 画布。"""
+    """选定截图后弹出的窗口化编辑器：标题栏 + 菜单 + 画布。"""
 
     copy_requested = Signal(QImage)
     save_requested = Signal(QImage)
@@ -878,6 +970,9 @@ class EditorWindow(QMainWindow):
 
     def show_ocr_busy(self) -> None:
         self.canvas.show_ocr_busy()
+
+    def show_ocr_lines(self, lines: list, backend: str = "") -> None:
+        self.canvas.show_ocr_lines(lines, backend)
 
     def show_ocr_text(self, text: str, backend: str = "") -> None:
         self.canvas.show_ocr_text(text, backend)

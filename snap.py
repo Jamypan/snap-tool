@@ -9,7 +9,7 @@ snap.py —— 截图工具主程序。
   · 矩形/椭圆/箭头/画笔/马赛克/文字标注
   · 复制到剪贴板 / 另存为
   · 滚动长截图（自动拼接）
-  · 选区 OCR 取字
+  · OCR 取字：逐行盖回原文位置，可就地拖选 / 复制
 
 用法：python snap.py           正常启动（主窗口 + 托盘常驻）
      python snap.py --shot    启动后立刻截一次
@@ -66,7 +66,7 @@ from hotkeys import (  # noqa: E402
     save_hotkey,
     save_mode,
 )
-from snapeditor import Overlay, _reading_order  # noqa: E402
+from snapeditor import Overlay  # noqa: E402
 from snap_editor import EditorWindow  # noqa: E402
 from snapui import (  # noqa: E402
     ABOUT_HTML,
@@ -792,6 +792,7 @@ class App:
         self._tray_message(APP_NAME, f"已保存：{path}", QSystemTrayIcon.Information, 2200)
 
     def _on_editor_ocr(self, img: QImage) -> None:
+        """窗口化编辑器里取字：结果逐行盖回原文位置（方案 B）。"""
         if self._ocr_busy or self.editor is None:
             return
         self._ocr_busy = True
@@ -803,8 +804,8 @@ class App:
             if self.editor is None:
                 return
             if lines:
-                text = "\n".join(_reading_order(lines))
-                self.editor.show_ocr_text(text, backend)
+                # 保留每行的 bbox 交给编辑器，按原图位置逐行盖回
+                self.editor.show_ocr_lines(lines, backend)
             else:
                 self.editor.show_ocr_message("没有识别到文字。")
 
