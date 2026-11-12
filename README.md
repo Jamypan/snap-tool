@@ -35,7 +35,20 @@ python snap.py --help      打印命令行说明，不进入界面
 ## 运行环境
 
 - Windows 10/11
-- Python 3.13（推荐使用本机已有的虚拟环境，已装 PySide6 / Pillow / OpenCV / NumPy）
+- Python 3.10+（已在 3.13 验证）
+
+安装依赖：
+
+```
+pip install PySide6 Pillow numpy
+```
+
+可选依赖（按需安装，代码里是懒加载，缺了只会影响对应功能）：
+
+- `opencv-python`：滚动长截图的图像拼接
+- `paddlepaddle` + `paddleocr`：离线中文 OCR 取字（首次使用会初始化引擎并自动下载模型）
+
+`run.bat` / `run-silent.bat` 会**优先使用 PATH 里已装好 PySide6 的 `python` / `pythonw`**；若 PATH 里的解释器缺依赖，则回退到开发机自带的 Python 环境（保证原有部署不受影响）；两者都不可用会给出明确报错。从仓库 clone 下来后，建议先建虚拟环境装好依赖，再双击启动脚本。
 
 ## 操作说明
 
@@ -123,7 +136,7 @@ python snap.py --help      打印命令行说明，不进入界面
 - 识别中显示「正在识别文字…」；失败或没识别到文字时给轻提示，不再弹独立窗口。
 - 若后端不返回位置坐标（Windows OCR / Tesseract 兜底），自动降级成整块文本面板，仍可拖选复制。
 
-OCR 默认走 **PaddleOCR**（离线中文识别，返回 `rec_boxes` 坐标；首次取字会初始化引擎约 1~2 秒）。依赖 paddlepaddle + paddleocr 已装进虚拟环境，模型自动下载到 `C:\Users\Administrator\.paddlex\official_models\`。
+OCR 默认走 **PaddleOCR**（离线中文识别，返回 `rec_boxes` 坐标；首次取字会初始化引擎约 1~2 秒）。需要 `paddlepaddle` + `paddleocr`，模型会自动下载到当前用户目录下的 `.paddlex\official_models\`。
 
 ## 文件说明
 
