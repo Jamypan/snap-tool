@@ -290,6 +290,54 @@ def _unit_dir(a: QPoint, b: QPoint, fallback=(0.0, -1.0)) -> tuple[float, float]
     return dx / n, dy / n
 
 
+def _path_arclengths(points) -> list[float]:
+    """累计弧长表：cum[i] = points[0] 沿路径到 points[i] 的长度。"""
+    import math
+
+    cum = [0.0]
+    for i in range(1, len(points)):
+        cum.append(cum[-1] + math.hypot(
+            points[i].x() - points[i - 1].x(),
+            points[i].y() - points[i - 1].y(),
+        ))
+    return cum
+
+
+def _point_at_arclen(points, cum, s: float) -> QPointF:
+    """按累计弧长 s 在折线路径上取点（段内线性插值），s 会夹到 [0, 总长]。"""
+    import bisect
+
+    total = cum[-1]
+    s = max(0.0, min(float(s), total))
+    # bisect_right 能在有重复点（cum 值相同）时跳到最后一个可用段
+    i = bisect.bisect_right(cum, s) - 1
+    i = max(0, min(i, len(points) - 2))
+    seg = cum[i + 1] - cum[i]
+    if seg <= 1e-9:
+        return QPointF(points[i + 1])
+    t = (s - cum[i]) / seg
+    a, b = points[i], points[i + 1]
+    return QPointF(a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t)
+
+
+def _pen_tangent(points, cum, at_start: bool, span: float) -> tuple[float, float]:
+    """曲线端点处「朝端点外侧」的稳定切线方向（单位向量）。
+
+    不能只用最后两个采样点算方向：鼠标采样很密时相邻两点常常只差 1~2px
+    甚至完全重合，算出来的方向会剧烈抖动，或者退化成写死的水平方向，
+    看上去就是「箭头方向和曲线走向对不上」。这里沿路径回溯 span 弧长取
+    一个参考点，用「参考点 → 端点」的方向，反映端点附近这一小段的走势。
+    """
+    total = cum[-1]
+    if total <= 0:
+        return (-1.0, 0.0) if at_start else (1.0, 0.0)
+    L = min(span, total * 0.5)
+    s = L if at_start else total - L
+    ref = _point_at_arclen(points, cum, s)
+    tip = points[0] if at_start else points[-1]
+    return _unit_dir(ref, tip, (-1.0, 0.0) if at_start else (1.0, 0.0))
+
+
 def _arrow_head(p: QPainter, tipx: float, tipy: float, ux: float, uy: float,
                 color: QColor, width: int, head_override: float | None = None) -> None:
     """在 (tipx,tipy) 处画一个指向 (ux,uy) 方向的实心箭头。
@@ -352,11 +400,11 @@ def _draw_line_arrows(p, a, b, color, width, line_style, with_start, with_end) -
 def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) -> None:
     """画画笔路径，并在两端（可选）加箭头。
 
-    仅当有箭头时才把路径端点截断到箭头根部并用平头，避免圆头盖住箭头尖；
-    无箭头时保持原来的圆头自由笔触。
+    箭头方向取端点附近一小段弧长的「稳定切线」，不用最后两个采样点：鼠标
+    采样很密时那一段可能只有 1~2px 甚至重合，方向会乱转，看起来与曲线
+    走向不一致。线也沿同一方向截断到箭头根部并改用平头，保证粗线时箭头
+    依然尖锐、且线不会在箭头根部突然拐一下。无箭头时保持圆头自由笔触。
     """
-    import math
-
     n = len(points)
     if n == 1:
         p.setPen(QPen(color))
@@ -366,33 +414,34 @@ def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) 
     if n < 2:
         return
 
+    cum = _path_arclengths(points)
+    total = cum[-1]
+    if total < 1:
+        # 采样点几乎重合，没形成线：只画点，别画出乱指的箭头
+        p.setPen(QPen(color))
+        p.setBrush(Qt.NoBrush)
+        p.drawPoint(QPointF(points[0]))
+        return
+
     need_trim = with_start or with_end
     head = max(12.0, width * 3.0)
-    scale = 1.0
-    if need_trim:
-        full_len = 0.0
-        for i in range(n - 1):
-            full_len += math.hypot(
-                points[i + 1].x() - points[i].x(), points[i + 1].y() - points[i].y()
-            )
-        max_total = max(0.0, full_len * 0.8)
-        total = (head if with_start else 0) + (head if with_end else 0)
-        scale = (max_total / total) if (total > max_total and total > 0) else 1.0
-        hs = head * scale if with_start else 0.0
-        he = head * scale if with_end else 0.0
-    else:
-        hs = he = 0.0
+    # 两端箭头加起来不超过路径的 80%，极短曲线时按比例收缩
+    max_total = total * 0.8
+    raw = (head if with_start else 0.0) + (head if with_end else 0.0)
+    scale = (max_total / raw) if (raw > max_total and raw > 0) else 1.0
+    hs = head * scale if with_start else 0.0
+    he = head * scale if with_end else 0.0
 
-    if with_start:
-        ux, uy = _unit_dir(points[0], points[1], (1.0, 0.0))
-        s0 = QPointF(points[0].x() + ux * hs, points[0].y() + uy * hs)
-    else:
-        s0 = QPointF(points[0])
-    if with_end:
-        ux, uy = _unit_dir(points[-2], points[-1], (1.0, 0.0))
-        e0 = QPointF(points[-1].x() - ux * he, points[-1].y() - uy * he)
-    else:
-        e0 = QPointF(points[-1])
+    # 回溯约一个箭头长度（路径很短时最多取一半），得到端点处的稳定切线
+    span = min(max(head, 12.0), total * 0.5)
+    us = _pen_tangent(points, cum, True, span) if with_start else None
+    ue = _pen_tangent(points, cum, False, span) if with_end else None
+
+    # 截断端点 = 端点沿「朝外方向」回退箭头长度，正好落在箭头底边中心
+    s0 = (QPointF(points[0].x() - us[0] * hs, points[0].y() - us[1] * hs)
+          if with_start else QPointF(points[0]))
+    e0 = (QPointF(points[-1].x() - ue[0] * he, points[-1].y() - ue[1] * he)
+          if with_end else QPointF(points[-1]))
 
     lp = QPen(color)
     lp.setWidth(width)
@@ -400,23 +449,24 @@ def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) 
     lp.setStyle(LINE_STYLES.get(line_style, Qt.SolidLine))
     lp.setCapStyle(Qt.FlatCap if need_trim else Qt.RoundCap)
     path = QPainterPath(s0)
-    if need_trim:
-        for i in range(1, n - 1):
+    # 只保留落在两个截断点之间的原始采样点；被裁掉的尾部不再画，
+    # 避免「最后一段很短、却要从它硬连到截断点」造成方向突然折一下
+    lo = hs if with_start else 0.0
+    hi = (total - he) if with_end else total
+    for i in range(1, n - 1):
+        if lo < cum[i] < hi:
             path.lineTo(QPointF(points[i]))
-    else:
-        for pt in points[1:]:
-            path.lineTo(QPointF(pt))
     path.lineTo(e0)
     p.setPen(lp)
     p.setBrush(Qt.NoBrush)
     p.drawPath(path)
 
     if with_end:
-        ux, uy = _unit_dir(points[-2], points[-1], (1.0, 0.0))
-        _arrow_head(p, points[-1].x(), points[-1].y(), ux, uy, color, width, head * scale)
+        _arrow_head(p, points[-1].x(), points[-1].y(), ue[0], ue[1],
+                    color, width, head * scale)
     if with_start:
-        ux, uy = _unit_dir(points[1], points[0], (-1.0, 0.0))
-        _arrow_head(p, points[0].x(), points[0].y(), ux, uy, color, width, head * scale)
+        _arrow_head(p, points[0].x(), points[0].y(), us[0], us[1],
+                    color, width, head * scale)
 
 
 def draw_shape(p: QPainter, s: Shape, base_image: QImage, dpr: float) -> None:
@@ -1364,7 +1414,8 @@ class Toolbar(QWidget):
             self._actions[key] = b
 
         add_action("撤销", "撤销上一步标注 (Ctrl+Z)", self.undo_clicked)
-        add_action("样式", "颜色/线宽/字号/箭头设置", self.style_clicked)
+        # 工具栏不再放「样式」按钮：选中标注时样式面板会自动弹出，
+        # 窗口编辑器菜单里也有「样式面板」入口，不必多占一个图标位。
 
         # 整图变换分组（仅窗口化编辑器显示；截屏遮罩里隐藏）
         sep = QLabel("│")
@@ -1403,7 +1454,7 @@ class Toolbar(QWidget):
 
     def set_confirm_mode(self, on: bool) -> None:
         """选择阶段（确认前）：只保留「确定 / 取消」，隐藏全部标注工具与
-        其它动作（撤销 / 样式 / 长截图 / 取字 / 保存 / 复制）。on=False 时恢复
+        其它动作（撤销 / 长截图 / 取字 / 保存 / 复制）。on=False 时恢复
         （被排除的项保持隐藏）。"""
         for b in self._buttons.values():
             b.setVisible(not on)

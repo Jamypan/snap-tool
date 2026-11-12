@@ -473,24 +473,51 @@ class App:
         self._tray_message(APP_NAME, msg, QSystemTrayIcon.Information, 3000)
 
     # ------------------------------------------------------------ 自有窗口显隐
+    def _own_top_levels(self) -> list[QWidget]:
+        """本进程所有顶层窗口，去重。
+
+        除了主窗口 / 编辑器 / 预览窗，还包括浮动工具条、样式面板、取字面板、
+        帮助与关于对话框等。截屏前它们都必须从屏幕上消失，否则会被拍进图里。
+        """
+        known = (
+            self.main_window, self.preview, self.editor,
+            self._help_window, self._about_box, self.busy,
+        )
+        out, seen = [], set()
+        for w in list(known) + QApplication.topLevelWidgets():
+            if w is None:
+                continue
+            key = id(w)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(w)
+        return out
+
+    def _hide_visible_own_windows(self) -> None:
+        """隐藏当前所有可见的自有窗口，并记下来供之后恢复。可重复调用。"""
+        for w in self._own_top_levels():
+            try:
+                if not w.isVisible():
+                    continue
+                w.hide()
+                if not any(x is w for x in self._hidden_windows):
+                    self._hidden_windows.append(w)
+            except RuntimeError:
+                pass  # 窗口已被 C++ 层销毁
+
     def _hide_own_windows(self) -> None:
         """截图前隐藏自己的全部窗口，避免被拍进图里；结束后按原状态恢复。"""
         self._hidden_windows = []
-        for w in (
-            self.main_window,
-            self.preview,
-            self._help_window,
-            self._about_box,
-            self.busy,
-        ):
-            if w is not None and w.isVisible():
-                w.hide()
-                self._hidden_windows.append(w)
+        self._hide_visible_own_windows()
 
     def _restore_own_windows(self) -> None:
         for w in self._hidden_windows:
-            w.show()
-            w.raise_()
+            try:
+                w.show()
+                w.raise_()
+            except RuntimeError:
+                pass  # 已被关闭 / 销毁的窗口不必再恢复
         self._hidden_windows = []
 
     def open_hotkey_settings(self) -> None:
@@ -546,11 +573,16 @@ class App:
         if not isinstance(mode, str) or mode not in CAPTURE_MODES:
             mode = self.capture_mode
 
-        # 先把自己的窗口藏起来，避免拍进截图里
+        # 先把自己的窗口全部藏起来，避免拍进截图里
         self._hide_own_windows()
         self.tray.setVisible(False)
-        self.app.processEvents()
-        time.sleep(0.12)
+        # hide() 之后 Windows 合成器还有淡出动画，残留的半透明窗口影子会
+        # 被拍进截图。分多轮刷新 + 等待，让屏幕合成完成；期间若又有自有
+        # 窗口冒出来（迟到重绘 / 子面板），一并补隐藏后再抓屏。
+        for _ in range(6):
+            self.app.processEvents()
+            time.sleep(0.06)
+            self._hide_visible_own_windows()
         self.app.processEvents()
 
         try:
@@ -758,6 +790,11 @@ class App:
             self.overlay = None
         # 编辑器是一个普通程序窗口：隐藏主窗口，避免两个窗口叠在一起
         self.main_window.hide()
+        # 本次截图会打开新编辑器，旧编辑器不要留在「待恢复」列表里，
+        # 否则新编辑器关闭后，恢复逻辑会把已经关掉的旧窗口重新弹出来。
+        self._hidden_windows = [
+            w for w in self._hidden_windows if w is not self.editor
+        ]
         self._open_editor(base_img, shapes)
 
     def _open_editor(self, base_img: QImage, shapes: list) -> None:

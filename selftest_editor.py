@@ -93,6 +93,14 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     J6  直线（两端）与箭头（单端）在起点端有差异
     J7  直线命令经 Canvas 完整走通 + 样式面板勾选
 
+  Stage K  截屏前隐藏窗口 + 样式按钮 + 曲线端点箭头方向
+    K1  工具栏已移除「样式」按钮
+    K2  曲线末段抖动不影响终点箭头方向
+    K3  起点箭头方向朝曲线外侧
+    K4  末段采样点重合时不退化为水平箭头
+    K5  末段抖动/平滑两条曲线渲染出的箭头一致
+    K6  截屏前隐藏全部自有窗口（含编辑器/浮动面板）且可恢复
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -1141,7 +1149,8 @@ def test_toolbar_transform() -> None:
     ov.close()
 
     # I5 无选中标注时样式面板显示起点/终点箭头勾选框，勾选即设默认
-    c0.toolbar._actions["样式"].click()  # 打开样式面板（无选中）
+    # 工具栏已移除「样式」按钮，改由菜单 / 选中标注自动弹出的同一入口打开
+    c0._toggle_style_panel()  # 打开样式面板（无选中）
     app.processEvents()
     sp = c0.style_panel
     vis = sp._pen_arrow_start.isVisible() and sp._pen_arrow_end.isVisible()
@@ -1267,6 +1276,99 @@ def test_line_and_icons() -> None:
                f"可见={vis} 勾选(end)={cv.style_panel._pen_arrow_end.isChecked()}")
 
 
+# ---------------------------------------------------------------------------
+# Stage K — 截屏前隐藏窗口 / 移除样式按钮 / 曲线端点箭头方向
+# ---------------------------------------------------------------------------
+def test_capture_hygiene_and_curve_arrows() -> None:
+    print("\n--- Stage K: 截屏前隐藏窗口 + 样式按钮 + 曲线箭头方向 ---")
+    from PySide6.QtWidgets import QApplication, QWidget
+    from snapeditor import Toolbar, _path_arclengths, _pen_tangent
+
+    app = QApplication.instance()
+
+    # K1 工具栏不再有「样式」按钮，但样式面板仍可用（选中标注会自动弹出）
+    tb = Toolbar()
+    ok_k1 = "样式" not in tb._actions
+    record("K1 工具栏已移除样式按钮", ok_k1, f"actions={list(tb._actions)}")
+    tb.close()
+
+    # K2/K3 曲线整体水平向右，但最后两个采样点斜向上（旧逻辑会取到 45°）
+    pts = [QPoint(20, 100), QPoint(60, 100), QPoint(100, 100),
+           QPoint(140, 100), QPoint(170, 100), QPoint(171, 100),
+           QPoint(172, 99)]
+    cum = _path_arclengths(pts)
+    ue = _pen_tangent(pts, cum, False, 12.0)
+    us = _pen_tangent(pts, cum, True, 12.0)
+    ok_k2 = ue[0] > 0.9 and abs(ue[1]) < 0.25
+    record("K2 末段抖动不影响终点箭头方向", ok_k2,
+           f"终点切线=({ue[0]:.3f},{ue[1]:.3f}) 旧逻辑≈(0.707,-0.707)")
+    ok_k3 = us[0] < -0.9 and abs(us[1]) < 0.25
+    record("K3 起点箭头方向朝曲线外侧", ok_k3,
+           f"起点切线=({us[0]:.3f},{us[1]:.3f})")
+
+    # K4 末段两个采样点完全重合：旧逻辑会退回写死的水平 (1,0) 方向
+    pts2 = [QPoint(100, 180), QPoint(100, 150), QPoint(100, 120),
+            QPoint(100, 90), QPoint(100, 90)]
+    ue2 = _pen_tangent(pts2, _path_arclengths(pts2), False, 12.0)
+    ok_k4 = abs(ue2[0]) < 0.15 and ue2[1] < -0.9
+    record("K4 末段重合点不退化为水平箭头", ok_k4,
+           f"切线=({ue2[0]:.3f},{ue2[1]:.3f})")
+
+    # K5 像素级：同一条走向的曲线，末端有没有抖动点，箭头渲染应几乎一致
+    smooth = pts[:5] + [QPoint(172, 100)]   # 抹掉末段抖动，端点改为水平收尾
+    base = make_image(260, 200)
+
+    def render(pp) -> QImage:
+        return Canvas(base, [Shape(kind="pen", points=list(pp),
+                                  color=QColor(255, 0, 0), width=3,
+                                  pen_arrow_end=True)], None).compose()
+
+    pa, pb = render(pts), render(smooth)
+    region = QRect(148, 82, 34, 38)   # 只比较终点箭头附近
+    d_arrow = 0
+    for y in range(region.top(), region.bottom()):
+        for x in range(region.left(), region.right()):
+            if pa.pixelColor(x, y) != pb.pixelColor(x, y):
+                d_arrow += 1
+    # 实测：新逻辑 70 像素，旧逻辑（只用最后两点定方向）237 像素，
+    # 取 120 作为分界，两侧都留足抗锯齿/Qt 版本带来的波动余量
+    ok_k5 = d_arrow < 120
+    record("K5 箭头方向不受末段抖动带偏（渲染一致）", ok_k5,
+           f"抖动/平滑两图箭头区差异像素={d_arrow}")
+
+    # K6 截屏前隐藏本进程全部窗口（含编辑器、浮动面板），并能完整恢复
+    import snap as snapmod
+
+    holder = snapmod.App.__new__(snapmod.App)
+    holder.app = app
+    mw, edw, floatw = QWidget(), QWidget(), QWidget()
+    for w in (mw, edw, floatw):
+        w.show()
+    holder.main_window = mw
+    holder.preview = None
+    holder.editor = edw
+    holder._help_window = None
+    holder._about_box = None
+    holder.busy = None
+    holder._hidden_windows = []
+    app.processEvents()
+
+    holder._hide_own_windows()
+    hidden = (not mw.isVisible() and not edw.isVisible() and not floatw.isVisible())
+    # 模拟等待窗口淡出期间又冒出来的自有窗口（start_capture 的多轮补隐藏）
+    late = QWidget()
+    late.show()
+    holder._hide_visible_own_windows()
+    late_hidden = not late.isVisible()
+    holder._restore_own_windows()
+    restored = all(w.isVisible() for w in (mw, edw, floatw, late))
+    record("K6 截屏前隐藏全部自有窗口且可恢复",
+           hidden and late_hidden and restored,
+           f"隐藏={hidden} 补隐藏={late_hidden} 恢复={restored}")
+    for w in (mw, edw, floatw, late):
+        w.close()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1286,6 +1388,7 @@ if __name__ == "__main__":
     test_single_instance()
     test_toolbar_transform()
     test_line_and_icons()
+    test_capture_hygiene_and_curve_arrows()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
