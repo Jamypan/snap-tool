@@ -41,6 +41,27 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     E9  收起后导出仍是全分辨率、工具条恢复
     E10 识别中按 Esc 取消本次取字，迟到的结果不弹出
 
+  Stage F  整图旋转 / 镜像（底图 + 标注坐标一起变）
+    F1  顺时针 90°：宽高互换、左上角红点到右上角
+    F2  矩形/箭头/画笔/文字/马赛克坐标按公式变换
+    F3  逆时针 / 左右镜像 / 上下镜像的像素方向
+    F4  镜像后矩形坐标正确
+    F5  Ctrl+Z 撤销变换恢复底图与标注
+    F6  变换后再画标注，撤销顺序正确
+    F7  马赛克缓存失效
+    F8  旋转 4 次回到原图、导出始终全分辨率
+    F9  菜单入口（含快捷键）能真正触发变换与画笔箭头设置
+    F10 真实按键 Ctrl+R 能触发顺时针旋转
+
+  Stage G  画笔首尾端点箭头
+    G1  默认两端无箭头
+    G2  设默认后新建画笔带上箭头
+    G3  带箭头的画笔合成不报错且分辨率不变
+    G4  终点箭头确实画出像素（与无箭头对比）
+    G5  起点箭头确实画出像素
+    G6  样式面板改选中画笔的箭头开关
+    G7  整图变换后箭头字段保留、路径坐标跟着变
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -576,6 +597,293 @@ def test_line_ocr() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stage F — 整图旋转 / 镜像
+# ---------------------------------------------------------------------------
+def test_image_transform() -> None:
+    print("\n--- Stage F: 整图旋转 / 镜像 ---")
+    from PySide6.QtCore import QSize
+
+    W, H = 160, 90
+
+    def fresh() -> Canvas:
+        b = make_image(W, H)
+        b.setPixelColor(0, 0, QColor(255, 0, 0))   # 左上角红点，用来判方向
+        c = Canvas(b, [], None)
+        c.resize(1000, 680)
+        c._fit()
+        c.shapes = [
+            Shape(kind="rect", rect=QRect(10, 20, 40, 30)),
+            Shape(kind="arrow", start=QPoint(5, 5), end=QPoint(50, 5)),
+            Shape(kind="pen", points=[QPoint(1, 1), QPoint(30, 10), QPoint(60, 20)]),
+            Shape(kind="text", text="测试", pos=QPoint(20, 40)),
+            Shape(kind="mosaic", rect=QRect(70, 30, 20, 20)),
+        ]
+        return c
+
+    def red_at(c: Canvas) -> tuple[int, int]:
+        q = c.base
+        for y in range(q.height()):
+            for x in range(q.width()):
+                if q.pixelColor(x, y).red() > 200:
+                    return (x, y)
+        return (-1, -1)
+
+    # F1 顺时针 90°：宽高互换，左上角红点到右上角
+    cv = fresh()
+    cv.transform_image("cw")
+    ok_f1 = cv.base.size() == QSize(H, W) and red_at(cv) == (H - 1, 0)
+    record(
+        "F1 顺时针90°尺寸与像素方向",
+        ok_f1,
+        f"size=({cv.base.width()},{cv.base.height()}) red={red_at(cv)}",
+    )
+
+    # F2 各类标注坐标跟着变换（像素中心公式 / 矩形边界公式）
+    r, ar, pn, tx, mo = cv.shapes
+    ok_f2 = (
+        r.rect == QRect(40, 10, 30, 40)
+        and ar.start == QPoint(84, 5) and ar.end == QPoint(84, 50)
+        and pn.points[0] == QPoint(88, 1)
+        and tx.pos == QPoint(49, 20)
+        and mo.rect == QRect(40, 70, 20, 20)
+    )
+    record(
+        "F2 标注坐标随整图变换",
+        ok_f2,
+        f"rect={r.rect} arrow=({ar.start},{ar.end}) pen={pn.points[0]} text={tx.pos}",
+    )
+
+    # F3 逆时针 / 左右镜像 / 上下镜像的像素方向
+    c2, c3, c4 = fresh(), fresh(), fresh()
+    c2.transform_image("ccw")
+    c3.transform_image("flip_h")
+    c4.transform_image("flip_v")
+    ok_f3 = (
+        c2.base.size() == QSize(H, W) and red_at(c2) == (0, W - 1)
+        and c3.base.size() == QSize(W, H) and red_at(c3) == (W - 1, 0)
+        and c4.base.size() == QSize(W, H) and red_at(c4) == (0, H - 1)
+    )
+    record(
+        "F3 逆时针/左右/上下镜像方向",
+        ok_f3,
+        f"ccw={red_at(c2)} flip_h={red_at(c3)} flip_v={red_at(c4)}",
+    )
+
+    # F4 镜像后的矩形 / 端点 / 文字坐标
+    ok_f4 = (
+        c3.shapes[0].rect == QRect(110, 20, 40, 30)
+        and c3.shapes[1].start == QPoint(154, 5)
+        and c4.shapes[0].rect == QRect(10, 40, 40, 30)
+        and c4.shapes[3].pos == QPoint(20, 49)
+    )
+    record(
+        "F4 镜像后标注坐标",
+        ok_f4,
+        f"flip_h rect={c3.shapes[0].rect} flip_v rect={c4.shapes[0].rect}",
+    )
+
+    # F5 撤销变换：底图与全部标注恢复
+    cv.undo()
+    ok_f5 = (
+        cv.base.size() == QSize(W, H)
+        and red_at(cv) == (0, 0)
+        and len(cv.shapes) == 5
+        and cv.shapes[0].rect == QRect(10, 20, 40, 30)
+        and cv.shapes[1].start == QPoint(5, 5)
+    )
+    record(
+        "F5 Ctrl+Z 撤销整图变换",
+        ok_f5,
+        f"size=({cv.base.width()},{cv.base.height()}) red={red_at(cv)}",
+    )
+
+    # F6 变换后又画标注：先撤销标注、再撤销变换
+    c5 = fresh()
+    c5.transform_image("cw")
+    c5.shapes.append(Shape(kind="rect", rect=QRect(1, 1, 5, 5)))
+    c5._op_stack.append("shape")
+    c5.undo()
+    first = len(c5.shapes) == 5 and c5.base.width() == H
+    c5.undo()
+    second = c5.base.width() == W
+    record(
+        "F6 撤销顺序(先标注后变换)",
+        first and second,
+        f"先撤标注={first} 再撤变换={second}",
+    )
+
+    # F7 马赛克缓存取自旧图，变换后必须失效
+    c6 = fresh()
+    c6.shapes[4]._mosaic_cache = ((1, 2, 3, 4), QImage())
+    c6.transform_image("cw")
+    ok_f7 = not hasattr(c6.shapes[4], "_mosaic_cache")
+    record("F7 变换后马赛克缓存失效", ok_f7, f"has_cache={not ok_f7}")
+
+    # F8 旋转 4 次回到原图，导出始终全分辨率
+    c7 = fresh()
+    for _ in range(4):
+        c7.transform_image("cw")
+    out = c7.compose()
+    ok_f8 = (
+        c7.base.size() == QSize(W, H)
+        and red_at(c7) == (0, 0)
+        and out.size() == QSize(W, H)
+    )
+    record(
+        "F8 旋转4次复原且导出全分辨率",
+        ok_f8,
+        f"size=({c7.base.width()},{c7.base.height()}) red={red_at(c7)} out={out.size()}",
+    )
+
+    # F9 菜单是唯一入口，确认 QAction 的绑定与快捷键真的生效
+    ed = EditorWindow(make_image(W, H), [], None)
+    ed.resize(1000, 680)
+
+    def find_submenu(title: str):
+        for top in ed.menuBar().actions():
+            m = top.menu()
+            if m is None:
+                continue
+            for a in m.actions():
+                if a.text() == title and a.menu() is not None:
+                    return a.menu()
+        return None
+
+    m_t = find_submenu("图像变换")
+    m_p = find_submenu("画笔端点箭头")
+    ok_menu = (
+        m_t is not None and len(m_t.actions()) == 4
+        and m_p is not None and len(m_p.actions()) == 4
+    )
+    if m_t:
+        m_t.actions()[0].trigger()          # 顺时针 90°
+    if m_p:
+        m_p.actions()[3].trigger()          # 两端都加
+    ok_f9 = (
+        ok_menu
+        and ed.canvas.base.size() == QSize(H, W)
+        and ed.canvas._pen_arrow_start and ed.canvas._pen_arrow_end
+        and "Ctrl+R" in m_t.actions()[0].shortcut().toString()
+    )
+    record(
+        "F9 菜单入口与快捷键生效",
+        ok_f9,
+        f"menus={ok_menu} size=({ed.canvas.base.width()},{ed.canvas.base.height()}) "
+        f"arrows=({ed.canvas._pen_arrow_start},{ed.canvas._pen_arrow_end})",
+    )
+    ed.close()
+
+    # F10 真实按键：快捷键不只是菜单上的文字
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    ed2 = EditorWindow(make_image(W, H), [], None)
+    ed2.resize(1000, 680)
+    ed2.show()
+    ed2.activateWindow()
+    QApplication.instance().processEvents()
+    QTest.keyClick(ed2, Qt.Key_R, Qt.ControlModifier)
+    QApplication.instance().processEvents()
+    ok_f10 = ed2.canvas.base.size() == QSize(H, W)
+    record(
+        "F10 真实按键 Ctrl+R 触发旋转",
+        ok_f10,
+        f"按键后 size=({ed2.canvas.base.width()},{ed2.canvas.base.height()})",
+    )
+    ed2.close()
+
+
+# ---------------------------------------------------------------------------
+# Stage G — 画笔首尾端点箭头
+# ---------------------------------------------------------------------------
+def test_pen_arrows() -> None:
+    print("\n--- Stage G: 画笔首尾端点箭头 ---")
+    from PySide6.QtCore import QSize
+
+    base = make_image(400, 300)
+    cv = Canvas(base, [], None)
+    cv.resize(800, 600)
+    cv._fit()
+
+    ok_g1 = not cv._pen_arrow_start and not cv._pen_arrow_end
+    record("G1 默认画笔两端无箭头", ok_g1, f"start={cv._pen_arrow_start} end={cv._pen_arrow_end}")
+
+    # G2 设好默认后画一条画笔线
+    cv.set_pen_arrows(True, True)
+    cv._set_tool("pen")
+    cv.mousePressEvent(mouse_event(QEvent.Type.MouseButtonPress, cv, QPoint(50, 50)))
+    for p in (QPoint(80, 60), QPoint(120, 80)):
+        cv.mouseMoveEvent(mouse_event(QEvent.Type.MouseMove, cv, p))
+    cv.mouseReleaseEvent(mouse_event(QEvent.Type.MouseButtonRelease, cv, QPoint(120, 80)))
+    s = cv.shapes[0] if cv.shapes else None
+    ok_g2 = (
+        s is not None and s.kind == "pen"
+        and s.pen_arrow_start and s.pen_arrow_end
+    )
+    record(
+        "G2 新建画笔带首尾箭头",
+        ok_g2,
+        f"shapes={len(cv.shapes)} start={getattr(s, 'pen_arrow_start', None)} end={getattr(s, 'pen_arrow_end', None)}",
+    )
+
+    # G3 带箭头合成不报错，分辨率不变
+    out = cv.compose()
+    ok_g3 = out.size() == base.size()
+    record("G3 带箭头合成全分辨率", ok_g3, f"out={out.width()}x{out.height()}")
+
+    # G4/G5 像素级验证：箭头确实画在了端点附近
+    pts = [QPoint(50, 50), QPoint(80, 60), QPoint(120, 80)]
+
+    def with_pen(**kw) -> QImage:
+        c = Canvas(base, [Shape(kind="pen", points=list(pts),
+                                color=QColor(255, 0, 0), width=3, **kw)], None)
+        return c.compose()
+
+    def diff_count(a: QImage, b: QImage, r: QRect) -> int:
+        n = 0
+        for y in range(r.top(), r.bottom()):
+            for x in range(r.left(), r.right()):
+                if a.pixelColor(x, y) != b.pixelColor(x, y):
+                    n += 1
+        return n
+
+    plain = with_pen()
+    d_end = diff_count(plain, with_pen(pen_arrow_end=True), QRect(95, 55, 50, 50))
+    d_start = diff_count(plain, with_pen(pen_arrow_start=True), QRect(25, 25, 50, 50))
+    record("G4 终点箭头画出像素", d_end > 30, f"差异像素={d_end}")
+    record("G5 起点箭头画出像素", d_start > 30, f"差异像素={d_start}")
+
+    # G6 样式面板可改选中画笔，勾选状态回填正确
+    cv._selected = s
+    cv._apply_style({"pen_arrow_start": False, "pen_arrow_end": True})
+    cv._refresh_style_panel()
+    ok_g6 = (
+        not s.pen_arrow_start and s.pen_arrow_end
+        and not cv.style_panel._pen_arrow_start.isChecked()
+        and cv.style_panel._pen_arrow_end.isChecked()
+    )
+    record(
+        "G6 样式面板改选中画笔箭头",
+        ok_g6,
+        f"shape=({s.pen_arrow_start},{s.pen_arrow_end}) panel=({cv.style_panel._pen_arrow_start.isChecked()},{cv.style_panel._pen_arrow_end.isChecked()})",
+    )
+
+    # G7 整图变换后箭头标记保留，路径坐标跟着变
+    before = QPoint(s.points[0])
+    cv.transform_image("cw")
+    ok_g7 = (
+        s.pen_arrow_end and not s.pen_arrow_start
+        and s.points[0] != before
+        and cv.base.size() == QSize(300, 400)
+    )
+    record(
+        "G7 变换后箭头保留且坐标跟着变",
+        ok_g7,
+        f"arrow=({s.pen_arrow_start},{s.pen_arrow_end}) p0 {before}→{s.points[0]}",
+    )
+
+
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -590,6 +898,8 @@ if __name__ == "__main__":
     test_editor_window()
     test_quit_silent()
     test_line_ocr()
+    test_image_transform()
+    test_pen_arrows()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

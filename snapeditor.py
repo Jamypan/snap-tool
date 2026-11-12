@@ -70,6 +70,7 @@ class Shape:
     所有标注都支持：color（线条色/文字色）、width（粗细）、line_style（线型）。
     封闭图形（rect/ellipse/mosaic）的边框用 color，额外支持 fill_color（填充色）。
     文字额外支持 font_size、bg_color（背景色）。
+    画笔（pen）额外支持 pen_arrow_start / pen_arrow_end：在路径起点 / 终点画箭头。
     """
 
     kind: str
@@ -86,6 +87,8 @@ class Shape:
     bold: bool = False                        # text 加粗
     bg_color: QColor | None = None            # text 背景色（None=透明背景）
     fill_color: QColor | None = None          # 封闭图形填充色（None=不填充）
+    pen_arrow_start: bool = False             # pen 路径起点箭头
+    pen_arrow_end: bool = False               # pen 路径终点箭头
 
 
 def _pixelated(src: QImage, block: int = 12) -> QImage:
@@ -113,6 +116,37 @@ def _make_pen(s: Shape) -> QPen:
     pen.setCapStyle(Qt.RoundCap)
     pen.setStyle(LINE_STYLES.get(s.line_style, Qt.SolidLine))
     return pen
+
+
+def _unit_dir(a: QPoint, b: QPoint, fallback=(0.0, -1.0)) -> tuple[float, float]:
+    """从 a 指向 b 的单位方向向量；两点重合时退回默认方向。"""
+    import math
+
+    dx, dy = b.x() - a.x(), b.y() - a.y()
+    n = math.hypot(dx, dy)
+    if n < 1:
+        return fallback
+    return dx / n, dy / n
+
+
+def _draw_arrow_head(
+    p: QPainter,
+    tip: QPoint,
+    ux: float,
+    uy: float,
+    color: QColor,
+    width: int,
+) -> None:
+    """在 tip 处画一个指向 (ux, uy) 的实心箭头（画笔端点箭头用）。"""
+    head = max(10.0, 16.0 + width * 3.2)
+    wing = min(max(head * 0.28, width * 0.55), head * 0.5)
+    t = QPointF(tip)
+    back = QPointF(t.x() - ux * head, t.y() - uy * head)
+    left = QPointF(back.x() - uy * wing, back.y() + ux * wing)
+    right = QPointF(back.x() + uy * wing, back.y() - ux * wing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(color))
+    p.drawPolygon(QPolygonF([t, left, right]))
 
 
 def draw_shape(p: QPainter, s: Shape, base_image: QImage, dpr: float) -> None:
@@ -184,6 +218,14 @@ def draw_shape(p: QPainter, s: Shape, base_image: QImage, dpr: float) -> None:
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
+        # 端点箭头：终点沿最后一段方向，起点沿「第二个点 → 第一个点」方向
+        if getattr(s, "pen_arrow_end", False):
+            ux, uy = _unit_dir(s.points[-2], s.points[-1], (1.0, 0.0))
+            _draw_arrow_head(p, s.points[-1], ux, uy, s.color, s.width)
+        if getattr(s, "pen_arrow_start", False):
+            ux, uy = _unit_dir(s.points[1], s.points[0], (-1.0, 0.0))
+            _draw_arrow_head(p, s.points[0], ux, uy, s.color, s.width)
+
     elif s.kind == "mosaic":
         if not s.rect or s.rect.width() < 2 or s.rect.height() < 2:
             return
@@ -251,9 +293,11 @@ class StylePanel(QWidget):
 
     style_changed = Signal(dict)   # 携带 {key: value} 增量
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, show_pen_arrows: bool = False) -> None:
         # 作为 Overlay 的普通子控件（与 Toolbar 一致），确保稳定显示在遮罩上方。
+        # 画笔端点箭头只有窗口化编辑器支持（遮罩现在不做标注），按需显示。
         super().__init__(parent)
+        self._show_pen_arrows = show_pen_arrows
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
         # 面板内默认用常规箭头光标（避免继承遮罩的十字光标），
@@ -376,6 +420,22 @@ class StylePanel(QWidget):
             self._bg_grid.addWidget(b)
         root.addLayout(self._bg_grid)
 
+        # --- 画笔端点箭头（选中画笔时改当前线条；无选中时设新建画笔默认）---
+        self._pen_arrow_label = QLabel("画笔端点箭头")
+        root.addWidget(self._pen_arrow_label)
+        self._pen_arrow_start = QCheckBox("起点加箭头")
+        self._pen_arrow_start.setFocusPolicy(Qt.NoFocus)
+        self._pen_arrow_start.toggled.connect(
+            lambda on: self._emit("pen_arrow_start", on)
+        )
+        root.addWidget(self._pen_arrow_start)
+        self._pen_arrow_end = QCheckBox("终点加箭头")
+        self._pen_arrow_end.setFocusPolicy(Qt.NoFocus)
+        self._pen_arrow_end.toggled.connect(
+            lambda on: self._emit("pen_arrow_end", on)
+        )
+        root.addWidget(self._pen_arrow_end)
+
         # 按类型收集控件组，方便按需显隐
         self._shape_only = [
             self._fill_label, self._fill_check,
@@ -389,6 +449,11 @@ class StylePanel(QWidget):
         self._non_text = [
             self._width_label, self._width_slider,
             self._line_style_label, self._line_style_combo,
+        ]
+        self._pen_only = [
+            self._pen_arrow_label,
+            self._pen_arrow_start,
+            self._pen_arrow_end,
         ]
 
         # 初始隐藏填充/背景色块（勾选「启用」后才显示）
@@ -490,6 +555,8 @@ class StylePanel(QWidget):
         kind = shape.kind if shape else None
         is_shape = kind in ("rect", "ellipse", "mosaic")
         is_text = kind == "text"
+        # 没有选中标注时也显示，方便先设好「新建画笔」的默认箭头
+        is_pen = self._show_pen_arrows and (kind == "pen" or shape is None)
 
         # 顶部「颜色」标签按类型命名：封闭图形/线条=线条颜色，文字=文字颜色
         if is_text:
@@ -507,6 +574,8 @@ class StylePanel(QWidget):
         # 线宽/线型：文字时隐藏（对文字无意义）
         for w in self._non_text:
             w.setVisible(not is_text)
+        for w in self._pen_only:
+            w.setVisible(is_pen)
 
         # 线宽
         self._width_slider.blockSignals(True)
@@ -529,6 +598,16 @@ class StylePanel(QWidget):
         self._bold_check.blockSignals(True)
         self._bold_check.setChecked(bool(bold))
         self._bold_check.blockSignals(False)
+
+        # 画笔端点箭头
+        p_start = getattr(shape, "pen_arrow_start", False) if shape else defaults.get("pen_arrow_start", False)
+        p_end = getattr(shape, "pen_arrow_end", False) if shape else defaults.get("pen_arrow_end", False)
+        self._pen_arrow_start.blockSignals(True)
+        self._pen_arrow_start.setChecked(bool(p_start))
+        self._pen_arrow_start.blockSignals(False)
+        self._pen_arrow_end.blockSignals(True)
+        self._pen_arrow_end.setChecked(bool(p_end))
+        self._pen_arrow_end.blockSignals(False)
 
         # 填充色
         self._fill_check.blockSignals(True)

@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPolygonF,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -90,7 +91,14 @@ class Canvas(QWidget):
         self._font_size = FONT_SIZE
         self._bg_color: QColor | None = None
         self._line_style = "solid"
+        # 新建画笔的默认端点箭头（也可在样式面板里对选中的画笔单独改）
+        self._pen_arrow_start = False
+        self._pen_arrow_end = False
         self._selected: Shape | None = None
+
+        # 撤销栈：记录「新增标注 / 整图变换」的顺序，变换另存完整快照
+        self._op_stack: list[str] = []
+        self._transform_snapshots: list[tuple[QImage, list[Shape]]] = []
 
         self._mode = "idle"  # idle | drawing | dragging_shape | reshaping_arrow
         self._drag_origin: QPoint | None = None
@@ -124,7 +132,7 @@ class Canvas(QWidget):
         self.toolbar.ocr_clicked.connect(lambda: self.ocr_requested.emit(self.base.copy()))
         self.toolbar.style_clicked.connect(self._toggle_style_panel)
 
-        self.style_panel = StylePanel(self)
+        self.style_panel = StylePanel(self, show_pen_arrows=True)
         self.style_panel.hide()
         self.style_panel.style_changed.connect(self._apply_style)
 
@@ -144,6 +152,16 @@ class Canvas(QWidget):
         self.toolbar._on_tool("select")
 
     # ------------------------------------------------------------ 视图变换
+    def set_pen_arrows(self, start: bool, end: bool) -> None:
+        """设新建画笔的默认端点箭头；若正选中一条画笔，也同时改它。"""
+        self._pen_arrow_start = bool(start)
+        self._pen_arrow_end = bool(end)
+        if self._selected is not None and self._selected.kind == "pen":
+            self._selected.pen_arrow_start = self._pen_arrow_start
+            self._selected.pen_arrow_end = self._pen_arrow_end
+        self._refresh_style_panel()
+        self.update()
+
     def _fit(self) -> None:
         """根据当前窗口大小计算缩放与居中偏移，使整张截图恰好装下。"""
         if self.base.isNull():
@@ -192,6 +210,8 @@ class Canvas(QWidget):
             ns.points = [QPoint(p) for p in s.points]
         if s.pos is not None:
             ns.pos = QPoint(s.pos)
+        ns.pen_arrow_start = bool(getattr(s, "pen_arrow_start", False))
+        ns.pen_arrow_end = bool(getattr(s, "pen_arrow_end", False))
         return ns
 
     # ------------------------------------------------------------ 工具 / 样式
@@ -215,6 +235,8 @@ class Canvas(QWidget):
             "font_size": self._font_size,
             "bg_color": QColor(self._bg_color) if self._bg_color else None,
             "fill_color": None,
+            "pen_arrow_start": self._pen_arrow_start,
+            "pen_arrow_end": self._pen_arrow_end,
         }
         self.style_panel.set_state(self._selected, defaults)
 
@@ -243,6 +265,10 @@ class Canvas(QWidget):
                     target.bold = bool(value)
                 elif key == "bg_color":
                     target.bg_color = QColor(value) if value else None
+                elif key == "pen_arrow_start":
+                    target.pen_arrow_start = bool(value)
+                elif key == "pen_arrow_end":
+                    target.pen_arrow_end = bool(value)
             else:
                 if key == "color":
                     self._color = QColor(value)
@@ -254,6 +280,10 @@ class Canvas(QWidget):
                     self._font_size = int(value)
                 elif key == "bg_color":
                     self._bg_color = QColor(value) if value else None
+                elif key == "pen_arrow_start":
+                    self._pen_arrow_start = bool(value)
+                elif key == "pen_arrow_end":
+                    self._pen_arrow_end = bool(value)
         self.update()
 
     def _on_select_changed(self) -> None:
@@ -270,6 +300,19 @@ class Canvas(QWidget):
         if self._draft is not None:
             self._draft = None
             self._mode = "idle"
+            self.update()
+            return
+        # 按操作顺序撤销：整图变换恢复快照，新增标注则弹掉最后一条
+        op = self._op_stack.pop() if self._op_stack else "shape"
+        if op == "transform":
+            if self._transform_snapshots:
+                base, shapes = self._transform_snapshots.pop()
+                self.base = base
+                self.shapes = shapes
+            self._selected = None
+            self.style_panel.hide()
+            self._fit()
+            self._place_toolbar()
             self.update()
             return
         if self.shapes:
@@ -467,6 +510,7 @@ class Canvas(QWidget):
                 line_style=self._line_style,
             )
             self.shapes.append(s)
+            self._op_stack.append("shape")
             self._selected = s
         self._editing_shape = None
         self._set_tool("select")
@@ -553,6 +597,8 @@ class Canvas(QWidget):
             color=QColor(self._color),
             width=self._width,
             line_style=self._line_style,
+            pen_arrow_start=self._pen_arrow_start,
+            pen_arrow_end=self._pen_arrow_end,
         )
         if self._tool == "pen":
             self._draft.points = [pos]
@@ -651,6 +697,7 @@ class Canvas(QWidget):
                 keep = True
             if keep:
                 self.shapes.append(d)
+                self._op_stack.append("shape")
                 self._selected = d
             self._draft = None
             self._mode = "idle"
@@ -898,6 +945,84 @@ class Canvas(QWidget):
         self.ocr_panel.show()
         self.ocr_panel.raise_()
 
+    # ------------------------------------------------------------ 整图变换
+    @staticmethod
+    def _map_point(pt: QPoint, mode: str, w: int, h: int) -> QPoint:
+        """物理像素坐标 → 变换后坐标（w/h 为变换前的图尺寸）。"""
+        x, y = pt.x(), pt.y()
+        # 点/端点按像素中心换算（减 1），与 QImage 的旋转结果严格对齐；
+        # 矩形另用 _map_rect 的边界换算，两者差 1px 是正常的。
+        if mode == "cw":
+            return QPoint(h - 1 - y, x)
+        if mode == "ccw":
+            return QPoint(y, w - 1 - x)
+        if mode == "flip_h":
+            return QPoint(w - 1 - x, y)
+        return QPoint(x, h - 1 - y)                        # flip_v
+
+    @classmethod
+    def _map_rect(cls, r: QRect, mode: str, w: int, h: int) -> QRect:
+        """矩形随整图变换；旋转 90° 时宽高互换。"""
+        x, y, rw, rh = r.x(), r.y(), r.width(), r.height()
+        if mode == "cw":
+            return QRect(int(round(h - y - rh)), int(round(x)), int(round(rh)), int(round(rw)))
+        if mode == "ccw":
+            return QRect(int(round(y)), int(round(w - x - rw)), int(round(rh)), int(round(rw)))
+        if mode == "flip_h":
+            return QRect(int(round(w - x - rw)), int(round(y)), int(round(rw)), int(round(rh)))
+        return QRect(int(round(x)), int(round(h - y - rh)), int(round(rw)), int(round(rh)))
+
+    def transform_image(self, mode: str) -> None:
+        """整图变换：底图 + 全部标注坐标一起变，导出仍是全分辨率。
+
+        mode: cw 顺时针 90° / ccw 逆时针 90° / flip_h 左右镜像 / flip_v 上下镜像。
+        变换进撤销栈，Ctrl+Z 可恢复。文字标注只移动位置，字形保持水平可读。
+        """
+        if self.base.isNull() or mode not in ("cw", "ccw", "flip_h", "flip_v"):
+            return
+        if self._ocr_active():
+            self._hide_ocr_panel()
+        self._commit_text()
+        self._draft = None
+        self._mode = "idle"
+        self._selected = None
+        self.style_panel.hide()
+
+        w, h = self.base.width(), self.base.height()
+        self._transform_snapshots.append(
+            (self.base.copy(), [self._clone(s) for s in self.shapes])
+        )
+        self._op_stack.append("transform")
+
+        if mode == "cw":
+            tf = QTransform().rotate(90)
+        elif mode == "ccw":
+            tf = QTransform().rotate(-90)
+        elif mode == "flip_h":
+            tf = QTransform(-1, 0, 0, 1, w, 0)
+        else:
+            tf = QTransform(1, 0, 0, -1, 0, h)
+        self.base = self.base.transformed(tf)
+
+        for s in self.shapes:
+            if s.rect is not None and s.kind in ("rect", "ellipse", "mosaic"):
+                s.rect = self._map_rect(s.rect, mode, w, h)
+            if s.start is not None:
+                s.start = self._map_point(s.start, mode, w, h)
+            if s.end is not None:
+                s.end = self._map_point(s.end, mode, w, h)
+            if s.points:
+                s.points = [self._map_point(p, mode, w, h) for p in s.points]
+            if s.pos is not None:
+                s.pos = self._map_point(s.pos, mode, w, h)
+            # 马赛克缓存取自旧图，变换后必须丢弃重算
+            if hasattr(s, "_mosaic_cache"):
+                delattr(s, "_mosaic_cache")
+
+        self._fit()
+        self._place_toolbar()
+        self.update()
+
     # -------------------------------------------------------------- 合成
     def compose(self) -> QImage:
         """把底图 + 标注渲染成最终图像（物理像素，与原图同分辨率）。"""
@@ -967,6 +1092,33 @@ class EditorWindow(QMainWindow):
             a = QAction(text, self)
             a.triggered.connect(slot)
             m_edit.addAction(a)
+
+        # 整图变换：底图和标注一起变，可用 Ctrl+Z 撤销
+        m_transform = m_edit.addMenu("图像变换")
+        for text, mode, shortcut in (
+            ("顺时针旋转 90°", "cw", "Ctrl+R"),
+            ("逆时针旋转 90°", "ccw", "Ctrl+Shift+R"),
+            ("左右镜像", "flip_h", "Ctrl+H"),
+            ("上下镜像", "flip_v", "Ctrl+Shift+H"),
+        ):
+            a = QAction(text, self)
+            a.setShortcut(shortcut)
+            a.triggered.connect(lambda _=False, m=mode: self.canvas.transform_image(m))
+            m_transform.addAction(a)
+
+        # 画笔端点箭头：既是新建画笔的默认，也作用于当前选中的画笔
+        m_pen = m_edit.addMenu("画笔端点箭头")
+        for text, st, en in (
+            ("不加箭头", False, False),
+            ("只加起点", True, False),
+            ("只加终点", False, True),
+            ("两端都加", True, True),
+        ):
+            a = QAction(text, self)
+            a.triggered.connect(
+                lambda _=False, s=st, e=en: self.canvas.set_pen_arrows(s, e)
+            )
+            m_pen.addAction(a)
 
     def show_ocr_busy(self) -> None:
         self.canvas.show_ocr_busy()
