@@ -84,6 +84,15 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     I4  截屏遮罩工具栏隐藏变换按钮
     I5  无选中标注时样式面板显示起点/终点箭头勾选框，勾选即设新建画笔默认
 
+  Stage J  直线命令 + 工具栏图标化 + 箭头方向/尖锐度
+    J1  工具列表含「直线」
+    J2  所有工具 / 动作图标均可绘制成功
+    J3  直线两端加箭头后确实多出像素
+    J4  只加起点箭头：差异集中在起点端（方向正确）
+    J5  只加终点箭头：差异集中在终点端（方向正确）
+    J6  直线（两端）与箭头（单端）在起点端有差异
+    J7  直线命令经 Canvas 完整走通 + 样式面板勾选
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -98,7 +107,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
 
-from snapeditor import Overlay, Shape
+from snapeditor import Overlay, Shape, TOOLS, toolbar_icon
 from snap_editor import Canvas, EditorWindow
 
 
@@ -772,7 +781,7 @@ def test_image_transform() -> None:
         return None
 
     m_t = find_submenu("图像变换")
-    m_p = find_submenu("画笔端点箭头")
+    m_p = find_submenu("端点箭头")
     ok_menu = (
         m_t is not None and len(m_t.actions()) == 4
         and m_p is not None and len(m_p.actions()) == 4
@@ -1147,6 +1156,117 @@ def test_toolbar_transform() -> None:
     ed2.close()
 
 
+# ---------------------------------------------------------------------------
+# Stage J — 直线命令 + 箭头图标化 + 箭头方向/尖锐度
+# ---------------------------------------------------------------------------
+def test_line_and_icons() -> None:
+    """新增直线命令（两端加箭头）、工具栏图标、箭头方向/尖锐度。"""
+    from PySide6.QtCore import QSize
+
+    base = make_image(400, 300)
+
+    # J1 工具列表含「直线」
+    tool_keys = [k for k, _ in TOOLS]
+    ok_j1 = "line" in tool_keys
+    record("J1 工具列表含直线", ok_j1, f"tools={tool_keys}")
+
+    # J2 所有工具 / 动作图标都能绘制成功（不抛异常、非空白）
+    icon_names = tool_keys + [
+        "撤销", "样式", "顺旋", "逆旋", "左右", "上下",
+        "长截图", "取字", "保存", "复制", "确定", "✕",
+    ]
+    bad = []
+    for nm in icon_names:
+        try:
+            ic = toolbar_icon(nm)
+            pm = ic.pixmap(QSize(22, 22))
+            if ic.isNull() or pm.isNull():
+                bad.append(nm)
+        except Exception as e:  # noqa: BLE001
+            bad.append(f"{nm}:{e}")
+    record("J2 工具栏图标全部可绘制", not bad, f"异常={bad}")
+
+    def with_shape(s: Shape) -> QImage:
+        c = Canvas(base, [s], None)
+        return c.compose()
+
+    def diff_count(a: QImage, b: QImage, r: QRect) -> int:
+        n = 0
+        for y in range(r.top(), r.bottom()):
+            for x in range(r.left(), r.right()):
+                if a.pixelColor(x, y) != b.pixelColor(x, y):
+                    n += 1
+        return n
+
+    line_plain = Shape(kind="line", start=QPoint(20, 40), end=QPoint(180, 40),
+                       color=QColor(255, 0, 0), width=3)
+    line_both = Shape(kind="line", start=QPoint(20, 40), end=QPoint(180, 40),
+                      color=QColor(255, 0, 0), width=3,
+                      pen_arrow_start=True, pen_arrow_end=True)
+    line_end = Shape(kind="line", start=QPoint(20, 40), end=QPoint(180, 40),
+                     color=QColor(255, 0, 0), width=3, pen_arrow_end=True)
+    arrow_one = Shape(kind="arrow", start=QPoint(20, 40), end=QPoint(180, 40),
+                      color=QColor(255, 0, 0), width=3)
+
+    p_plain = with_shape(line_plain)
+    p_both = with_shape(line_both)
+    p_end = with_shape(line_end)
+    p_arrow = with_shape(arrow_one)
+
+    # J3 直线两端加箭头后确实多出像素
+    d_both = diff_count(p_plain, p_both, QRect(0, 0, 200, 80))
+    record("J3 直线两端箭头画出像素", d_both > 60, f"差异={d_both}")
+
+    # J4 只加起点箭头：差异集中在起点端（x<70），终点端（x>130）几乎无差异
+    d_start_near = diff_count(p_plain, with_shape(
+        Shape(kind="line", start=QPoint(20, 40), end=QPoint(180, 40),
+              color=QColor(255, 0, 0), width=3, pen_arrow_start=True)),
+        QRect(0, 0, 70, 80))
+    d_start_far = diff_count(p_plain, with_shape(
+        Shape(kind="line", start=QPoint(20, 40), end=QPoint(180, 40),
+              color=QColor(255, 0, 0), width=3, pen_arrow_start=True)),
+        QRect(130, 0, 70, 80))
+    record("J4 起点箭头画在起点端", d_start_near > 20 and d_start_far < d_start_near,
+           f"近={d_start_near} 远={d_start_far}")
+
+    # J5 只加终点箭头：差异集中在终点端（x>130），验证方向指向终点
+    d_end_near = diff_count(p_plain, p_end, QRect(130, 0, 70, 80))
+    d_end_far = diff_count(p_plain, p_end, QRect(0, 0, 70, 80))
+    record("J5 终点箭头画在终点端（方向正确）", d_end_near > 20 and d_end_far < d_end_near,
+           f"近={d_end_near} 远={d_end_far}")
+
+    # J6 直线（两端）与单端箭头（arrow 工具）在起点端有差异
+    d_vs_arrow = diff_count(p_arrow, p_both, QRect(0, 0, 70, 80))
+    record("J6 直线两端≠箭头单端（起点端不同）", d_vs_arrow > 20, f"差异={d_vs_arrow}")
+
+    # J7 直线命令可经 Canvas 完整走通（含默认箭头 / 样式面板勾选）
+    cv = Canvas(base, [], None)
+    cv.resize(800, 600)
+    cv._fit()
+    cv.set_pen_arrows(False, True)  # 默认只加终点箭头
+    cv._set_tool("line")
+    cv.mousePressEvent(mouse_event(QEvent.Type.MouseButtonPress, cv, QPoint(50, 50)))
+    cv.mouseMoveEvent(mouse_event(QEvent.Type.MouseMove, cv, QPoint(150, 50)))
+    cv.mouseReleaseEvent(mouse_event(QEvent.Type.MouseButtonRelease, cv, QPoint(150, 50)))
+    s = cv.shapes[0] if cv.shapes else None
+    ok_line_create = (
+        s is not None and s.kind == "line" and s.pen_arrow_end and not s.pen_arrow_start
+    )
+    record("J7a 直线命令画出、默认箭头生效",
+           ok_line_create, f"kind={getattr(s, 'kind', None)} end={getattr(s, 'pen_arrow_end', None)}")
+
+    if s is not None:
+        cv._selected = s
+        cv.show()
+        cv._refresh_style_panel()
+        cv.style_panel.show()
+        vis = cv.style_panel._pen_arrow_start.isVisible() and cv.style_panel._pen_arrow_end.isVisible()
+        chk = (cv.style_panel._pen_arrow_end.isChecked()
+               and not cv.style_panel._pen_arrow_start.isChecked())
+        record("J7b 选中直线显示端点箭头勾选框且回填正确", vis and chk,
+               f"可见={vis} 勾选(end)={cv.style_panel._pen_arrow_end.isChecked()}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1165,6 +1285,7 @@ if __name__ == "__main__":
     test_pen_arrows()
     test_single_instance()
     test_toolbar_transform()
+    test_line_and_icons()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

@@ -10,16 +10,18 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal, QTimer
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QSize, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
     QFontMetrics,
+    QIcon,
     QImage,
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
     QPolygonF,
 )
 from PySide6.QtWidgets import (
@@ -56,6 +58,7 @@ TOOLS = [
     ("rect", "矩形"),
     ("ellipse", "椭圆"),
     ("arrow", "箭头"),
+    ("line", "直线"),
     ("pen", "画笔"),
     ("mosaic", "马赛克"),
     ("text", "文字"),
@@ -64,6 +67,160 @@ TOOLS = [
 # 整图变换的 4 个命令按钮标签（窗口化编辑器工具栏用；截屏遮罩里隐藏，
 # 因为旋转/镜像只作用于「已进入程序窗口」的整张截图）。
 TRANSFORM_ACTIONS = ("顺旋", "逆旋", "左右", "上下")
+
+
+# ---------------------------------------------------------------------------
+# 工具栏图标（矢量绘制，避免依赖外部图片资源）
+# ---------------------------------------------------------------------------
+_ICON_SIZE = 26
+
+
+def _icon_pen(lw: int = 2) -> QPen:
+    pen = QPen(QColor(245, 247, 250))
+    pen.setWidth(lw)
+    pen.setJoinStyle(Qt.RoundJoin)
+    pen.setCapStyle(Qt.RoundCap)
+    return pen
+
+
+def _arrow_at(p: QPainter, x: float, y: float, tx: float, ty: float, size: float = 6.0) -> None:
+    """在 (x,y) 处画一个指向 (tx,ty) 方向（不必归一化）的实心小箭头。"""
+    import math
+
+    n = math.hypot(tx, ty) or 1.0
+    tx, ty = tx / n, ty / n
+    nx, ny = -ty, tx
+    bx, by = x - tx * size, y - ty * size
+    w = size * 0.62
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor(245, 247, 250)))
+    p.drawPolygon(
+        QPolygonF(
+            [
+                QPointF(x, y),
+                QPointF(bx - nx * w, by - ny * w),
+                QPointF(bx + nx * w, by + ny * w),
+            ]
+        )
+    )
+
+
+def _arc_arrow(p: QPainter, cx: float, cy: float, r: float,
+               start_deg: float, sweep_deg: float) -> None:
+    """画一段圆弧（带末端箭头），sweep_deg>0 顺时针、<0 逆时针（屏幕坐标）。"""
+    import math
+
+    p.drawArc(int(cx - r), int(cy - r), int(2 * r), int(2 * r),
+              int(start_deg * 16), int(sweep_deg * 16))
+    a = math.radians(start_deg + sweep_deg)
+    ex, ey = cx + r * math.cos(a), cy + r * math.sin(a)
+    if sweep_deg > 0:
+        tx, ty = -math.sin(a), math.cos(a)
+    else:
+        tx, ty = math.sin(a), -math.cos(a)
+    _arrow_at(p, ex, ey, tx, ty, size=6.0)
+
+
+def _draw_icon(name: str, p: QPainter) -> None:
+    p.setBrush(Qt.NoBrush)
+    p.setPen(_icon_pen(2))
+    S = _ICON_SIZE
+    # ---- 绘图工具 ----
+    if name == "rect":
+        p.drawRect(4, 4, S - 8, S - 8)
+    elif name == "ellipse":
+        p.drawEllipse(QRectF(4, 4, S - 8, S - 8))
+    elif name == "arrow":
+        p.drawLine(5, S - 5, S - 6, 6)
+        _arrow_at(p, S - 6, 6, 1.0, -1.0)
+    elif name == "line":
+        p.drawLine(5, S - 5, S - 6, 6)
+    elif name == "pen":
+        # 自由手绘笔触（波浪折线）
+        pts = [(5, 18), (9, 11), (13, 16), (17, 9), (21, 13)]
+        path = QPainterPath(QPointF(pts[0][0], pts[0][1]))
+        for x, y in pts[1:]:
+            path.lineTo(QPointF(x, y))
+        p.drawPath(path)
+    elif name == "mosaic":
+        p.drawRect(4, 4, S - 8, S - 8)
+        p.drawLine(4 + (S - 8) / 3, 4, 4 + (S - 8) / 3, S - 4)
+        p.drawLine(4 + 2 * (S - 8) / 3, 4, 4 + 2 * (S - 8) / 3, S - 4)
+        p.drawLine(4, 4 + (S - 8) / 3, S - 4, 4 + (S - 8) / 3)
+        p.drawLine(4, 4 + 2 * (S - 8) / 3, S - 4, 4 + 2 * (S - 8) / 3)
+    elif name == "text":
+        p.drawLine(S / 2, 4, S / 2, S - 4)
+        p.drawLine(5, 4, S - 5, 4)
+    # ---- 动作 ----
+    elif name == "撤销":
+        _arc_arrow(p, S / 2, S / 2, 7, 50, -200)
+    elif name == "样式":
+        p.drawEllipse(QRectF(5, 7, 15, 15))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(245, 247, 250)))
+        for dx, dy in ((9, 11), (15, 11), (12, 16.5)):
+            p.drawEllipse(QRectF(dx - 1.6, dy - 1.6, 3.2, 3.2))
+    elif name in ("顺旋", "逆旋"):
+        cw = name == "顺旋"
+        _arc_arrow(p, S / 2, S / 2, 7, 40, 290 if cw else -290)
+        p.setPen(_icon_pen(1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(10, 10, 6, 6)
+    elif name == "左右":
+        p.setPen(_icon_pen(1.5))
+        p.drawLine(S / 2, 4, S / 2, S - 4)
+        _arrow_at(p, 9, 9, -1, 0)
+        _arrow_at(p, S - 9, S - 9, 1, 0)
+    elif name == "上下":
+        p.setPen(_icon_pen(1.5))
+        p.drawLine(4, S / 2, S - 4, S / 2)
+        _arrow_at(p, 9, 9, 0, -1)
+        _arrow_at(p, S - 9, S - 9, 0, 1)
+    elif name == "长截图":
+        p.drawRoundedRect(8, 3, 10, 17, 2, 2)
+        p.drawLine(10, 9, 16, 9)
+        p.drawLine(10, 13, 16, 13)
+        p.drawLine(10, 17, 16, 17)
+        _arrow_at(p, S / 2, 23, 0, 1, size=5.0)
+    elif name == "取字":
+        p.drawEllipse(QRectF(5, 5, 13, 13))
+        p.drawLine(15, 15, 21, 21)
+        p.setPen(_icon_pen(1.5))
+        p.drawLine(S / 2, 7, 8, 15)
+        p.drawLine(S / 2, 7, 15, 15)
+        p.drawLine(8.5, 12, 14.5, 12)
+    elif name == "保存":
+        p.drawRect(5, 5, 16, 16)
+        p.drawRect(9, 5, 8, 5)
+        p.drawRect(9, 12, 8, 6)
+    elif name == "复制":
+        p.drawRect(6, 6, 12, 12)
+        p.drawRect(11, 11, 12, 12)
+    elif name == "确定":
+        p.drawLine(7, 14, 11, 18)
+        p.drawLine(11, 18, 19, 8)
+    elif name == "✕":
+        p.drawLine(7, 7, 19, 19)
+        p.drawLine(19, 7, 7, 19)
+
+
+_ICONS: dict[str, QIcon] = {}
+
+
+def toolbar_icon(name: str) -> QIcon:
+    """返回缓存的工具栏矢量图标（白色线条，适配深色按钮背景）。"""
+    if name in _ICONS:
+        return _ICONS[name]
+    pm = QPixmap(_ICON_SIZE, _ICON_SIZE)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    _draw_icon(name, p)
+    p.end()
+    icon = QIcon(pm)
+    _ICONS[name] = icon
+    return icon
+
 
 
 # ---------------------------------------------------------------------------
@@ -133,24 +290,133 @@ def _unit_dir(a: QPoint, b: QPoint, fallback=(0.0, -1.0)) -> tuple[float, float]
     return dx / n, dy / n
 
 
-def _draw_arrow_head(
-    p: QPainter,
-    tip: QPoint,
-    ux: float,
-    uy: float,
-    color: QColor,
-    width: int,
-) -> None:
-    """在 tip 处画一个指向 (ux, uy) 的实心箭头（画笔端点箭头用）。"""
-    head = max(10.0, 16.0 + width * 3.2)
-    wing = min(max(head * 0.28, width * 0.55), head * 0.5)
-    t = QPointF(tip)
-    back = QPointF(t.x() - ux * head, t.y() - uy * head)
-    left = QPointF(back.x() - uy * wing, back.y() + ux * wing)
-    right = QPointF(back.x() + uy * wing, back.y() - ux * wing)
+def _arrow_head(p: QPainter, tipx: float, tipy: float, ux: float, uy: float,
+                color: QColor, width: int, head_override: float | None = None) -> None:
+    """在 (tipx,tipy) 处画一个指向 (ux,uy) 方向的实心箭头。
+
+    大小随线宽合理缩放（head≈线宽×3，并设下限），半张角固定约 22.8°，
+    且底边不小于线宽，保证粗线时依然尖锐、不露圆头。head_override 用于
+    极短线段时按已收缩后的长度绘制，避免箭头盖住整条线。
+    """
+    head = head_override if head_override is not None else max(12.0, width * 3.0)
+    wing = max(head * 0.42, width * 0.62)
+    t = QPointF(tipx, tipy)
+    bx, by = tipx - ux * head, tipy - uy * head
+    lx, ly = bx - uy * wing, by + ux * wing
+    rx, ry = bx + uy * wing, by - ux * wing
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(color))
-    p.drawPolygon(QPolygonF([t, left, right]))
+    p.drawPolygon(QPolygonF([t, QPointF(lx, ly), QPointF(rx, ry)]))
+
+
+def _stroke_seg(p, ax, ay, bx, by, color, width, line_style, cap) -> None:
+    lp = QPen(color)
+    lp.setWidth(width)
+    lp.setJoinStyle(Qt.RoundJoin)
+    lp.setCapStyle(cap)
+    lp.setStyle(LINE_STYLES.get(line_style, Qt.SolidLine))
+    p.setPen(lp)
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(ax, ay), QPointF(bx, by))
+
+
+def _draw_line_arrows(p, a, b, color, width, line_style, with_start, with_end) -> None:
+    """画一条带（可选）两端箭头的直线段。
+
+    线在箭头根部截断并改用平头（FlatCap），让箭头始终尖锐；箭头方向沿线段
+    指向两个端点（起点箭头朝外、终点箭头朝外）。两端箭头过长时按比例收缩，
+    避免交叉。
+    """
+    import math
+
+    dx, dy = b.x() - a.x(), b.y() - a.y()
+    length = math.hypot(dx, dy)
+    ux, uy = 0.0, 0.0
+    if length >= 1:
+        ux, uy = dx / length, dy / length
+    head = max(12.0, width * 3.0)
+    max_total = length * 0.8
+    total = (head if with_start else 0) + (head if with_end else 0)
+    scale = (max_total / total) if (total > max_total and total > 0) else 1.0
+    hs = head * scale if with_start else 0.0
+    he = head * scale if with_end else 0.0
+    ax, ay = a.x() + ux * hs, a.y() + uy * hs
+    bx, by = b.x() - ux * he, b.y() - uy * he
+    _stroke_seg(p, ax, ay, bx, by, color, width, line_style, Qt.FlatCap)
+    if with_end:
+        _arrow_head(p, b.x(), b.y(), ux, uy, color, width, head * scale)
+    if with_start:
+        _arrow_head(p, a.x(), a.y(), -ux, -uy, color, width, head * scale)
+
+
+def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) -> None:
+    """画画笔路径，并在两端（可选）加箭头。
+
+    仅当有箭头时才把路径端点截断到箭头根部并用平头，避免圆头盖住箭头尖；
+    无箭头时保持原来的圆头自由笔触。
+    """
+    import math
+
+    n = len(points)
+    if n == 1:
+        p.setPen(QPen(color))
+        p.setBrush(Qt.NoBrush)
+        p.drawPoint(QPointF(points[0]))
+        return
+    if n < 2:
+        return
+
+    need_trim = with_start or with_end
+    head = max(12.0, width * 3.0)
+    scale = 1.0
+    if need_trim:
+        full_len = 0.0
+        for i in range(n - 1):
+            full_len += math.hypot(
+                points[i + 1].x() - points[i].x(), points[i + 1].y() - points[i].y()
+            )
+        max_total = max(0.0, full_len * 0.8)
+        total = (head if with_start else 0) + (head if with_end else 0)
+        scale = (max_total / total) if (total > max_total and total > 0) else 1.0
+        hs = head * scale if with_start else 0.0
+        he = head * scale if with_end else 0.0
+    else:
+        hs = he = 0.0
+
+    if with_start:
+        ux, uy = _unit_dir(points[0], points[1], (1.0, 0.0))
+        s0 = QPointF(points[0].x() + ux * hs, points[0].y() + uy * hs)
+    else:
+        s0 = QPointF(points[0])
+    if with_end:
+        ux, uy = _unit_dir(points[-2], points[-1], (1.0, 0.0))
+        e0 = QPointF(points[-1].x() - ux * he, points[-1].y() - uy * he)
+    else:
+        e0 = QPointF(points[-1])
+
+    lp = QPen(color)
+    lp.setWidth(width)
+    lp.setJoinStyle(Qt.RoundJoin)
+    lp.setStyle(LINE_STYLES.get(line_style, Qt.SolidLine))
+    lp.setCapStyle(Qt.FlatCap if need_trim else Qt.RoundCap)
+    path = QPainterPath(s0)
+    if need_trim:
+        for i in range(1, n - 1):
+            path.lineTo(QPointF(points[i]))
+    else:
+        for pt in points[1:]:
+            path.lineTo(QPointF(pt))
+    path.lineTo(e0)
+    p.setPen(lp)
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(path)
+
+    if with_end:
+        ux, uy = _unit_dir(points[-2], points[-1], (1.0, 0.0))
+        _arrow_head(p, points[-1].x(), points[-1].y(), ux, uy, color, width, head * scale)
+    if with_start:
+        ux, uy = _unit_dir(points[1], points[0], (-1.0, 0.0))
+        _arrow_head(p, points[0].x(), points[0].y(), ux, uy, color, width, head * scale)
 
 
 def draw_shape(p: QPainter, s: Shape, base_image: QImage, dpr: float) -> None:
@@ -181,54 +447,27 @@ def draw_shape(p: QPainter, s: Shape, base_image: QImage, dpr: float) -> None:
     elif s.kind == "arrow":
         if not s.start or not s.end:
             return
-        import math
+        # 箭头工具：固定终点带箭头，方向从起点指向终点
+        _draw_line_arrows(p, s.start, s.end, s.color, s.width, s.line_style, False, True)
 
-        dx = s.end.x() - s.start.x()
-        dy = s.end.y() - s.start.y()
-        length = math.hypot(dx, dy)
-        if length < 1:
+    elif s.kind == "line":
+        if not s.start or not s.end:
             return
-        ux, uy = dx / length, dy / length
-        # 箭头整体放大，且线越粗箭头越大（线宽系数 3.2），
-        # 但张角保持不变，所以粗线时依旧尖锐。长度不超过整条线长的 70%。
-        head = max(10.0, min(16.0 + s.width * 3.2, length * 0.7))
-        # 半张角固定约 15.6°（wing/head≈0.28），同时保证底边盖住线尾；
-        # 0.5 上限（半角≤26.6°）用于避免「极短又极粗」的箭头变成扁宽钝角。
-        wing = min(max(head * 0.28, s.width * 0.55), head * 0.5)
-        tip = QPointF(s.end)
-        back = QPointF(s.end.x() - ux * head, s.end.y() - uy * head)
-        left = QPointF(back.x() - uy * wing, back.y() + ux * wing)
-        right = QPointF(back.x() + uy * wing, back.y() - ux * wing)
-        # 线只画到三角形底边，并用平头端点：
-        # 若把粗线画到尖点，RoundCap 圆头会凸出到尖角前方，把箭头糊圆。
-        line_pen = QPen(pen)
-        line_pen.setCapStyle(Qt.FlatCap)
-        p.setPen(line_pen)
-        p.drawLine(QPointF(s.start), back)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(s.color))
-        p.drawPolygon(QPolygonF([tip, left, right]))
+        # 直线工具：两端箭头可在样式面板里分别开关
+        _draw_line_arrows(
+            p, s.start, s.end, s.color, s.width, s.line_style,
+            bool(getattr(s, "pen_arrow_start", False)),
+            bool(getattr(s, "pen_arrow_end", False)),
+        )
 
     elif s.kind == "pen":
-        if len(s.points) < 2:
-            if s.points:
-                p.setPen(pen)
-                p.drawPoint(s.points[0])
+        if not s.points:
             return
-        path = QPainterPath(QPointF(s.points[0]))
-        for pt in s.points[1:]:
-            path.lineTo(QPointF(pt))
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        p.drawPath(path)
-
-        # 端点箭头：终点沿最后一段方向，起点沿「第二个点 → 第一个点」方向
-        if getattr(s, "pen_arrow_end", False):
-            ux, uy = _unit_dir(s.points[-2], s.points[-1], (1.0, 0.0))
-            _draw_arrow_head(p, s.points[-1], ux, uy, s.color, s.width)
-        if getattr(s, "pen_arrow_start", False):
-            ux, uy = _unit_dir(s.points[1], s.points[0], (-1.0, 0.0))
-            _draw_arrow_head(p, s.points[0], ux, uy, s.color, s.width)
+        _draw_pen_arrows(
+            p, s.points, s.color, s.width, s.line_style,
+            bool(getattr(s, "pen_arrow_start", False)),
+            bool(getattr(s, "pen_arrow_end", False)),
+        )
 
     elif s.kind == "mosaic":
         if not s.rect or s.rect.width() < 2 or s.rect.height() < 2:
@@ -424,8 +663,8 @@ class StylePanel(QWidget):
             self._bg_grid.addWidget(b)
         root.addLayout(self._bg_grid)
 
-        # --- 画笔端点箭头（选中画笔时改当前线条；无选中时设新建画笔默认）---
-        self._pen_arrow_label = QLabel("画笔端点箭头")
+        # --- 端点箭头（画笔 / 直线：选中时改当前线条；无选中时设新建默认）---
+        self._pen_arrow_label = QLabel("端点箭头")
         root.addWidget(self._pen_arrow_label)
         self._pen_arrow_start = QCheckBox("起点加箭头")
         self._pen_arrow_start.setFocusPolicy(Qt.NoFocus)
@@ -559,13 +798,15 @@ class StylePanel(QWidget):
         kind = shape.kind if shape else None
         is_shape = kind in ("rect", "ellipse", "mosaic")
         is_text = kind == "text"
-        # 没有选中标注时也显示，方便先设好「新建画笔」的默认箭头
-        is_pen = self._show_pen_arrows and (kind == "pen" or shape is None)
+        # 没有选中标注时也显示，方便先设好「新建画笔/直线」的默认箭头
+        is_pen = self._show_pen_arrows and (
+            kind in ("pen", "line") or shape is None
+        )
 
         # 顶部「颜色」标签按类型命名：封闭图形/线条=线条颜色，文字=文字颜色
         if is_text:
             self._line_label.setText("文字颜色")
-        elif is_shape or kind in ("arrow", "pen"):
+        elif is_shape or kind in ("arrow", "pen", "line"):
             self._line_label.setText("线条颜色")
         else:
             self._line_label.setText("颜色")
@@ -1096,25 +1337,31 @@ class Toolbar(QWidget):
         lay.setSpacing(4)
 
         for key, label in TOOLS:
-            b = QPushButton(label)
+            b = QPushButton()
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(label)
             b.setFocusPolicy(Qt.NoFocus)
+            b.setIcon(toolbar_icon(key))
+            b.setIconSize(QSize(22, 22))
+            b.setFixedSize(34, 30)
             b.clicked.connect(lambda _=False, k=key: self._on_tool(k))
             lay.addWidget(b)
             self._buttons[key] = b
 
-        def add_action(text: str, tip: str, sig: Signal) -> None:
-            b = QPushButton(text)
+        def add_action(key: str, tip: str, sig: Signal) -> None:
+            b = QPushButton()
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(tip)
             b.setFocusPolicy(Qt.NoFocus)
+            b.setIcon(toolbar_icon(key))
+            b.setIconSize(QSize(22, 22))
+            b.setFixedSize(34, 30)
             b.clicked.connect(sig.emit)
             lay.addWidget(b)
-            if text in excluded:
+            if key in excluded:
                 b.hide()
-            self._actions[text] = b
+            self._actions[key] = b
 
         add_action("撤销", "撤销上一步标注 (Ctrl+Z)", self.undo_clicked)
         add_action("样式", "颜色/线宽/字号/箭头设置", self.style_clicked)
@@ -1141,7 +1388,7 @@ class Toolbar(QWidget):
             QWidget { background: #2b2b2b; border-radius: 8px; }
             QPushButton {
                 color: #e8e8e8; background: #3c3c3c; border: 1px solid #4a4a4a;
-                border-radius: 6px; padding: 5px 10px; font-size: 13px;
+                border-radius: 6px; padding: 2px; font-size: 13px;
             }
             QPushButton:hover { background: #4a4a4a; }
             QPushButton:checked { background: #0a84ff; border-color: #0a84ff; color: white; }
@@ -1162,11 +1409,11 @@ class Toolbar(QWidget):
             b.setVisible(not on)
         for s in self._separators:
             s.setVisible(not on)
-        for text, b in self._actions.items():
-            if text in ("确定", "✕"):
+        for key, b in self._actions.items():
+            if key in ("确定", "✕"):
                 b.setVisible(on)
             else:
-                b.setVisible((not on) and text not in self._excluded)
+                b.setVisible((not on) and key not in self._excluded)
 
 
 # ---------------------------------------------------------------------------
@@ -1222,6 +1469,9 @@ class Overlay(QWidget):
         self._font_size = FONT_SIZE
         self._bg_color: QColor | None = None
         self._line_style = "solid"
+        # 新建画笔 / 直线的默认端点箭头（也可在样式面板里对选中项单独改）
+        self._pen_arrow_start = False
+        self._pen_arrow_end = False
 
         # 当前选中的标注（用于"确定前修改已有标注"）
         self._selected: Shape | None = None
@@ -1265,7 +1515,7 @@ class Overlay(QWidget):
         self.toolbar.style_clicked.connect(self._toggle_style_panel)
         self.toolbar.confirm_clicked.connect(self._confirm)
 
-        self.style_panel = StylePanel(self)
+        self.style_panel = StylePanel(self, show_pen_arrows=True)
         self.style_panel.hide()
         self.style_panel.style_changed.connect(self._apply_style)
 
@@ -1425,6 +1675,8 @@ class Overlay(QWidget):
             "font_size": self._font_size,
             "bg_color": self._bg_color,
             "line_style": self._line_style,
+            "pen_arrow_start": self._pen_arrow_start,
+            "pen_arrow_end": self._pen_arrow_end,
         }
         self.style_panel.set_state(self._selected, defaults)
 
@@ -1567,6 +1819,10 @@ class Overlay(QWidget):
         if "bg_color" in changes:
             bg = changes["bg_color"]
             self._bg_color = QColor(bg) if bg else None
+        if "pen_arrow_start" in changes:
+            self._pen_arrow_start = bool(changes["pen_arrow_start"])
+        if "pen_arrow_end" in changes:
+            self._pen_arrow_end = bool(changes["pen_arrow_end"])
 
         # 应用到选中标注
         if self._selected:
@@ -1586,6 +1842,10 @@ class Overlay(QWidget):
             if "fill_color" in changes:
                 fc = changes["fill_color"]
                 s.fill_color = QColor(fc) if fc else None
+            if "pen_arrow_start" in changes:
+                s.pen_arrow_start = bool(changes["pen_arrow_start"])
+            if "pen_arrow_end" in changes:
+                s.pen_arrow_end = bool(changes["pen_arrow_end"])
         self.update()
 
     def _select_shape_at(self, pos: QPoint) -> None:
@@ -1595,7 +1855,7 @@ class Overlay(QWidget):
                 self._selected = s
                 self._on_select_changed()
                 return True
-            if s.kind == "arrow" and s.start and s.end:
+            if s.kind in ("arrow", "line") and s.start and s.end:
                 # 用点到线段的距离判定命中（阈值随线宽自适应，最小 10 像素），不限制箭头长度
                 hit = max(10, s.width + 6)
                 if self._dist_to_segment(pos, s.start, s.end) <= hit:
@@ -1659,7 +1919,7 @@ class Overlay(QWidget):
         """把一条标注整体平移 delta 像素。"""
         if s.kind in ("rect", "ellipse", "mosaic") and s.rect:
             s.rect.translate(delta)
-        elif s.kind == "arrow" and s.start and s.end:
+        elif s.kind in ("arrow", "line") and s.start and s.end:
             s.start += delta
             s.end += delta
         elif s.kind == "pen" and s.points:
@@ -1759,16 +2019,16 @@ class Overlay(QWidget):
         """命中箭头的起点/终点 → (shape, "start"/"end")，否则 None。"""
         if selected_only:
             candidates = [self._selected] if (
-                self._selected and self._selected.kind == "arrow"
+                self._selected and self._selected.kind in ("arrow", "line")
             ) else []
         else:
             # 当前选中的优先，其余按从上层到下层的顺序
             candidates = []
-            if self._selected and self._selected.kind == "arrow":
+            if self._selected and self._selected.kind in ("arrow", "line"):
                 candidates.append(self._selected)
             candidates += [
                 s for s in reversed(self.shapes)
-                if s.kind == "arrow" and s is not self._selected
+                if s.kind in ("arrow", "line") and s is not self._selected
             ]
         r2 = ARROW_HANDLE_HIT * ARROW_HANDLE_HIT
         for s in candidates:
@@ -1872,10 +2132,12 @@ class Overlay(QWidget):
                     color=QColor(self._color),
                     width=self._width,
                     line_style=self._line_style,
+                    pen_arrow_start=self._pen_arrow_start,
+                    pen_arrow_end=self._pen_arrow_end,
                 )
                 if self._tool == "pen":
                     self._draft.points = [start]
-                elif self._tool == "arrow":
+                elif self._tool in ("arrow", "line"):
                     self._draft.start = start
                     self._draft.end = start
                 else:
@@ -2006,7 +2268,7 @@ class Overlay(QWidget):
             d = self._draft
             if d.kind == "pen":
                 d.points.append(pos)
-            elif d.kind == "arrow":
+            elif d.kind in ("arrow", "line"):
                 d.end = pos
             else:
                 d.rect = QRect(d.rect.topLeft(), pos).normalized() if d.rect else QRect(pos, pos)
@@ -2049,7 +2311,7 @@ class Overlay(QWidget):
             keep = False
             if d.kind == "pen" and len(d.points) >= 2:
                 keep = True
-            elif d.kind == "arrow" and d.start and d.end and (
+            elif d.kind in ("arrow", "line") and d.start and d.end and (
                 d.start - d.end
             ).manhattanLength() > 4:
                 keep = True
@@ -2415,7 +2677,7 @@ class Overlay(QWidget):
                     s = self._selected
                     if s.kind in ("rect", "ellipse", "mosaic") and s.rect:
                         p.drawRect(s.rect.adjusted(-4, -4, 4, 4))
-                    elif s.kind == "arrow" and s.start and s.end:
+                    elif s.kind in ("arrow", "line") and s.start and s.end:
                         # 箭头改用沿轴虚线 + 两端控制柄表示选中，不再画大矩形框
                         p.drawLine(s.start, s.end)
                     elif s.kind == "text" and s.pos:
@@ -2424,7 +2686,7 @@ class Overlay(QWidget):
 
             # 选中箭头的两端控制柄：画在选区裁剪之外，端点贴近选区边缘时
             # 也能完整看到并拖动。拖动任一端即可改变方向/长度。
-            if self._selected and self._selected.kind == "arrow":
+            if self._selected and self._selected.kind in ("arrow", "line"):
                 s = self._selected
                 p.save()
                 p.setRenderHint(QPainter.Antialiasing, True)

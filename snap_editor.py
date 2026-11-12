@@ -157,10 +157,10 @@ class Canvas(QWidget):
 
     # ------------------------------------------------------------ 视图变换
     def set_pen_arrows(self, start: bool, end: bool) -> None:
-        """设新建画笔的默认端点箭头；若正选中一条画笔，也同时改它。"""
+        """设新建画笔/直线的默认端点箭头；若正选中一条画笔或直线，也同时改它。"""
         self._pen_arrow_start = bool(start)
         self._pen_arrow_end = bool(end)
-        if self._selected is not None and self._selected.kind == "pen":
+        if self._selected is not None and self._selected.kind in ("pen", "line"):
             self._selected.pen_arrow_start = self._pen_arrow_start
             self._selected.pen_arrow_end = self._pen_arrow_end
         self._refresh_style_panel()
@@ -332,7 +332,7 @@ class Canvas(QWidget):
     def _bbox(s: Shape) -> QRect | None:
         if s.kind in ("rect", "ellipse", "mosaic") and s.rect:
             return QRect(s.rect)
-        if s.kind == "arrow" and s.start and s.end:
+        if s.kind in ("arrow", "line") and s.start and s.end:
             return QRect(s.start, s.end).normalized()
         if s.kind == "pen" and len(s.points) >= 2:
             r = QRect(s.points[0], s.points[0])
@@ -368,7 +368,7 @@ class Canvas(QWidget):
                     self._selected = s
                     self._on_select_changed()
                     return True
-            elif s.kind == "arrow":
+            elif s.kind in ("arrow", "line"):
                 if self._near_seg(pos, s.start, s.end, tol):
                     self._selected = s
                     self._on_select_changed()
@@ -403,10 +403,10 @@ class Canvas(QWidget):
     def _hit_arrow_endpoint(self, pos: QPoint, selected_only: bool = False):
         cands = (
             [self._selected]
-            if (selected_only and self._selected and self._selected.kind == "arrow")
+            if (selected_only and self._selected and self._selected.kind in ("arrow", "line"))
             else (
-                ([self._selected] if (self._selected and self._selected.kind == "arrow") else [])
-                + [s for s in reversed(self.shapes) if s.kind == "arrow" and s is not self._selected]
+                ([self._selected] if (self._selected and self._selected.kind in ("arrow", "line")) else [])
+                + [s for s in reversed(self.shapes) if s.kind in ("arrow", "line") and s is not self._selected]
             )
         )
         r2 = (ARROW_HANDLE_HIT / max(self.view_scale, 1e-3)) ** 2
@@ -437,7 +437,7 @@ class Canvas(QWidget):
     def _translate_shape(s: Shape, delta: QPoint) -> None:
         if s.kind in ("rect", "ellipse", "mosaic") and s.rect:
             s.rect.translate(delta)
-        elif s.kind == "arrow" and s.start and s.end:
+        elif s.kind in ("arrow", "line") and s.start and s.end:
             s.start += delta
             s.end += delta
         elif s.kind == "pen" and s.points:
@@ -606,7 +606,7 @@ class Canvas(QWidget):
         )
         if self._tool == "pen":
             self._draft.points = [pos]
-        elif self._tool == "arrow":
+        elif self._tool in ("arrow", "line"):
             self._draft.start = pos
             self._draft.end = pos
         else:
@@ -648,7 +648,7 @@ class Canvas(QWidget):
             d = self._draft
             if d.kind == "pen":
                 d.points.append(pos)
-            elif d.kind == "arrow":
+            elif d.kind in ("arrow", "line"):
                 d.end = pos
             else:
                 d.rect = QRect(d.rect.topLeft(), pos).normalized() if d.rect else QRect(pos, pos)
@@ -677,7 +677,7 @@ class Canvas(QWidget):
             if s.kind in ("rect", "ellipse", "mosaic", "text"):
                 if bb.adjusted(-tol, -tol, tol, tol).contains(pos):
                     return True
-            elif s.kind == "arrow":
+            elif s.kind in ("arrow", "line"):
                 if self._near_seg(pos, s.start, s.end, tol):
                     return True
             elif s.kind == "pen":
@@ -693,7 +693,7 @@ class Canvas(QWidget):
             keep = False
             if d.kind == "pen" and len(d.points) >= 2:
                 keep = True
-            elif d.kind == "arrow" and d.start and d.end and (
+            elif d.kind in ("arrow", "line") and d.start and d.end and (
                 d.start - d.end
             ).manhattanLength() > 4:
                 keep = True
@@ -812,7 +812,7 @@ class Canvas(QWidget):
                 p.setPen(hl)
                 p.setBrush(Qt.NoBrush)
                 p.drawRect(hb.adjusted(-3, -3, 3, 3))
-            if self._selected.kind == "arrow":
+            if self._selected.kind in ("arrow", "line"):
                 s = self._selected
                 r = ARROW_HANDLE_R
                 for pt in (s.start, s.end):
@@ -1110,8 +1110,8 @@ class EditorWindow(QMainWindow):
             a.triggered.connect(lambda _=False, m=mode: self.canvas.transform_image(m))
             m_transform.addAction(a)
 
-        # 画笔端点箭头：既是新建画笔的默认，也作用于当前选中的画笔
-        m_pen = m_edit.addMenu("画笔端点箭头")
+        # 端点箭头：既是新建画笔/直线的默认，也作用于当前选中的画笔或直线
+        m_pen = m_edit.addMenu("端点箭头")
         for text, st, en in (
             ("不加箭头", False, False),
             ("只加起点", True, False),
