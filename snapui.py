@@ -118,13 +118,15 @@ code { background:#f3f4f6; padding:1px 4px; }
 <code>SNAPTOOL_HOME</code> 可把配置目录改到别处，方便便携版。</p>
 
 <h2>7. 命令行</h2>
-<p><code>python snap.py --help</code> 查看全部参数；<code>--shot</code> 启动后立即截一次图。
+<p><code>python snap.py --help</code> 查看全部参数；<code>--shot</code> 启动后立即截一次图；
+<code>--restart</code> 结束后台残留实例并重启（等价于双击 <code>restart.bat</code>）。
 图形界面里也可以点「帮助 → 命令行参数」。</p>
 
 <h2>8. 常见问题</h2>
 <ul>
 <li><b>按热键没反应：</b>多半是热键被别的程序占用。托盘会弹注册失败提示，去「设置热键…」换一个组合；也可以直接点主窗口的截图按钮。</li>
-<li><b>改了代码没变化：</b>程序是单实例 + 托盘常驻，旧进程仍在跑旧代码，需要退出托盘再重新启动。</li>
+<li><b>提示「已经在运行」却看不到程序：</b>托盘图标可能被折叠到通知区（点 ^ 展开）；也可能是旧实例只留下隐藏窗口。重复启动时会先把它唤醒并显示主窗口，弹窗里选「是」即可结束它并重启，或直接双击 restart.bat。</li>
+<li><b>改了代码没变化：</b>程序是单实例 + 托盘常驻，旧进程仍在跑旧代码，双击 restart.bat 即可用新代码重启。</li>
 <li><b>高分屏坐标不准：</b>程序已开启 per-monitor DPI 感知；若仍偏移，重启程序后再试。</li>
 <li><b>杀软误报：</b>全局热键 + 屏幕捕获容易被误报，未签名的 exe 需要加入信任。</li>
 </ul>
@@ -135,12 +137,14 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
 
   python snap.py              正常启动：显示主窗口 + 托盘常驻
   python snap.py --shot       启动后立即截一次图（使用默认截图模式）
+  python snap.py --restart    结束后台残留实例并重新启动（不弹确认框）
   python snap.py --selftest   只跑后端自检，不进入界面
                               结果写入 %APPDATA%\\SnapTool\\selftest.log
   python snap.py --help       显示本说明（也可写 -h 或 /?）
 
-日常使用请双击 run-silent.bat（无黑窗口）。程序是单实例，
-重复启动只会提示「已经在运行」。
+日常使用请双击 run-silent.bat（无黑窗口）。程序是单实例，重复启动会先唤醒
+已有实例并显示主窗口；若看不到界面，弹窗里选「是」即可结束后台实例并重启，
+也可直接双击 restart.bat 一键重启。启动诊断见 %APPDATA%\\SnapTool\\startup.log。
 
 三种截图模式：框选（拖鼠标选区域）、窗口（悬停高亮并单击）、全屏（自动选中整个虚拟屏幕）。
 默认模式与全局热键保存在 %APPDATA%\\SnapTool\\settings.json，

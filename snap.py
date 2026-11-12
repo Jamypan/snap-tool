@@ -12,10 +12,11 @@ snap.py —— 截图工具主程序。
   · 滚动长截图（自动拼接）
   · OCR 取字：逐行盖回原文位置，可就地拖选 / 复制
 
-用法：python snap.py           正常启动（主窗口 + 托盘常驻）
-     python snap.py --shot    启动后立刻截一次
+用法：python snap.py            正常启动（主窗口 + 托盘常驻）
+     python snap.py --shot     启动后立刻截一次
+     python snap.py --restart  结束后台残留实例并重新启动
      python snap.py --selftest 只做自检不进入界面
-     python snap.py --help    打印命令行说明（不进入界面）
+     python snap.py --help     打印命令行说明（不进入界面）
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from pathlib import Path
 # 让脚本无论从哪个目录启动都能 import 同目录模块
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import singleinstance  # noqa: E402
 import snapback  # noqa: E402
 from PySide6.QtCore import (  # noqa: E402
     QAbstractNativeEventFilter,
@@ -81,19 +83,6 @@ from snapui import (  # noqa: E402
 WM_HOTKEY = 0x0312
 
 user32 = ctypes.windll.user32
-
-# 单实例互斥锁：防止双击多次导致多个托盘图标
-_MUTEX_NAME = "SnapTool_SingleInstance_Mutex"
-_mutex_handle = None
-
-
-def acquire_single_instance() -> bool:
-    """拿到锁返回 True；已有实例在跑返回 False。"""
-    global _mutex_handle
-    k32 = ctypes.windll.kernel32
-    _mutex_handle = k32.CreateMutexW(None, False, _MUTEX_NAME)
-    return k32.GetLastError() != 183  # 183 = ERROR_ALREADY_EXISTS
-
 
 # ---------------------------------------------------------------------------
 # Win32 消息结构（用于全局热键）
@@ -378,6 +367,12 @@ class App:
         self.tray.activated.connect(self._on_tray)
         self.tray.show()
 
+        # 有人重复启动时请求「把主窗口显示出来」，避免用户以为程序没在运行
+        # 返回的是 QTimer（轮询唤醒事件），必须挂在 self 上保持引用
+        self._activate_notifier = singleinstance.install_activation_notifier(
+            self._on_activate_request
+        )
+
         self.filter = HotkeyFilter(self._on_hotkey)
         app.installNativeEventFilter(self.filter)
         self._hotkey_ok = self._try_register(self.hotkey)
@@ -413,6 +408,17 @@ class App:
         self.main_window.show()
         self.main_window.raise_()
         self.main_window.activateWindow()
+
+    def _on_activate_request(self) -> None:
+        """第二个实例启动时发来的唤醒请求：把主窗口与托盘图标都显出来。"""
+        if self._quitting:
+            return
+        self.tray.setVisible(True)
+        self.show_main_window()
+        self._tray_message(
+            APP_NAME, "程序本来就在运行，已为你显示主窗口。",
+            QSystemTrayIcon.Information, 3000,
+        )
 
     def _tray_message(self, title, msg, icon=QSystemTrayIcon.Information, msec=3000):
         """托盘气泡统一出口：程序正在退出时一律不显示任何通知。"""
@@ -848,6 +854,7 @@ class App:
         if self._quitting:
             return
         self._quitting = True
+        singleinstance.release()
         # 1) 让主窗口（及其它自有窗口）允许被真正关闭，closeEvent 不再
         #    「最小化到托盘」并弹"程序仍在运行"的气泡。
         self.main_window._allow_close = True
@@ -934,6 +941,59 @@ def _run_selftest() -> int:
     return 0 if ok else 1
 
 
+def _resolve_existing_instance(st, restart: bool) -> bool:
+    """检测到已有实例：先唤醒它，再决定退出还是「结束后台实例并重启」。
+
+    返回 True 表示继续启动新实例。这样「提示已运行却看不到界面」时，用户在
+    弹窗里点「是」就能直接进新版，不必去任务管理器里找进程。
+    """
+    rec = st.record or {}
+    pid = rec.get("pid", "?")
+    started = rec.get("started", "未知")
+    woken = singleinstance.signal_existing()
+    singleinstance.log(f"已有实例 pid={pid} 唤醒={woken} restart={restart}")
+
+    if not restart:
+        hint = (
+            "已请它把主窗口显示出来，请看任务栏。\n" if woken
+            else "托盘图标可能被收进了通知区折叠栏（点 ^ 展开看看）。\n"
+        )
+        text = (
+            f"截屏助手已在后台运行（PID {pid}，启动于 {started}）。\n\n"
+            + hint
+            + "如果确实看不到任何窗口，多半是残留的后台实例。\n\n"
+            "是否结束它并重新启动？（若有未保存的编辑内容会丢失）"
+        )
+        # MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
+        ans = ctypes.windll.user32.MessageBoxW(
+            None, text, APP_NAME, 0x04 | 0x20 | 0x40000
+        )
+        if ans != 6:  # IDYES
+            return False
+
+    killed = singleinstance.kill_recorded(rec)
+    singleinstance.log(f"结束后台实例结果={killed}")
+    if not killed:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "结束后台实例未成功，但仍会尝试继续启动。\n"
+            "若再次提示已在运行，请在任务管理器里结束残留的 pythonw.exe。",
+            APP_NAME, 0x30 | 0x40000,
+        )
+    time.sleep(0.25)
+    again = singleinstance.probe()
+    singleinstance.log(f"重启后 probe -> {again.state}/{again.reason}")
+    if again.state == "running":
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "仍有实例占用，启动中止。请在任务管理器中结束所有 pythonw.exe 后重试，"
+            "或双击 restart.bat。",
+            APP_NAME, 0x10 | 0x40000,
+        )
+        return False
+    return True
+
+
 def main() -> int:
     # --help 不进入 Qt，也不检查单实例；pythonw 无控制台时改用系统弹窗
     if any(a in ("-h", "--help", "/?") for a in sys.argv[1:]):
@@ -950,12 +1010,22 @@ def main() -> int:
         return _run_selftest()
 
     snapback.set_dpi_awareness()
-    if not acquire_single_instance():
-        # 已有实例在运行，直接退出（Qt 还没建，用系统弹窗提示）
-        ctypes.windll.user32.MessageBoxW(
-            None, "截屏助手已经在运行了，请看屏幕右下角托盘图标。", APP_NAME, 0x40
-        )
-        return 0
+    restart = "--restart" in sys.argv[1:]
+    if restart:
+        # 旧版本不写实例记录，只靠锁找不到那些「活着但没界面」的幽灵进程；
+        # 这里按命令行主动清一遍，避免它们继续占用全局热键。
+        killed = singleinstance.kill_other_instances()
+        if killed:
+            singleinstance.log(f"--restart 共清理 {len(killed)} 个残留进程：{killed}")
+            time.sleep(0.25)
+    st = singleinstance.probe()
+    if st.state == "running":
+        if not _resolve_existing_instance(st, restart):
+            return 0
+    elif st.state == "stale":
+        # 锁还在但记录里的进程已经不在（异常退出 / 残留后台进程）：静默接管
+        singleinstance.log("检测到陈旧锁，已自动接管，不再提示「已在运行」")
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)

@@ -62,6 +62,21 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     G6  样式面板改选中画笔的箭头开关
     G7  整图变换后箭头字段保留、路径坐标跟着变
 
+  Stage H  单实例守卫（singleinstance.py）
+    H1  新建互斥体可启动
+    H2  无实例记录却报「已存在」→ 陈旧锁自动接管
+    H3  记录中的进程已退出 → 自动接管
+    H4  活跃实例被识别为 running
+    H5  互斥体不可用不阻止启动
+    H6  不把自己误判为已有实例
+    H7  进程创建时间签名可用
+    H8  实例记录写读与 release 只删自己
+    H9  残留 last-error 183 不误报「已在运行」（子进程真实复现）
+    H10 唤醒事件可创建并可触发
+    H11 真实活实例被判定 running（子进程持锁）
+    H12 Qt 唤醒监听可安装
+    H13 可枚举旧版幽灵进程且不误列自己
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -884,6 +899,175 @@ def test_pen_arrows() -> None:
 
 
 # ---------------------------------------------------------------------------
+def test_single_instance() -> None:
+    """Stage H：单实例守卫的判定逻辑、陈旧锁自愈与唤醒事件。"""
+    import json
+    import subprocess
+    import tempfile
+    import time
+    import uuid
+    from pathlib import Path
+
+    import singleinstance as si
+
+    here = str(Path(__file__).resolve().parent)
+    me = os.getpid()
+    own_sig = si.pid_signature(me)
+
+    s1, r1 = si.classify(0, True, {}, me)
+    record("H1 新建互斥体可启动", s1 == "ok" and r1 == "new-instance", f"{s1}/{r1}")
+
+    # 旧版本不写实例记录；锁还在但没有记录时必须自动接管，不再弹「已在运行」
+    s2, r2 = si.classify(183, True, {}, me)
+    record(
+        "H2 无记录却报已存在→陈旧锁接管",
+        s2 == "stale" and r2 == "no-record", f"{s2}/{r2}",
+    )
+    s3, r3 = si.classify(183, True, {"pid": 99999999, "sig": "bogus"}, me)
+    record("H3 记录进程已死→自动接管", s3 == "stale" and r3 == "dead-or-reused-pid", f"{s3}/{r3}")
+    s4, r4 = si.classify(183, True, {"pid": me, "sig": own_sig}, 1)
+    record("H4 活跃实例被识别为 running", s4 == "running" and r4 == "alive", f"{s4}/{r4}")
+    s5, _ = si.classify(183, False, {}, me)
+    record("H5 互斥体不可用不阻止启动", s5 == "ok", s5)
+    s6, _ = si.classify(183, True, {"pid": me, "sig": own_sig}, me)
+    record("H6 不把自己误判为已有实例", s6 == "stale", s6)
+    record(
+        "H7 进程创建时间签名可用",
+        bool(own_sig) and si.pid_signature(99999999) is None, f"sig={own_sig}",
+    )
+
+    # H8 记录文件：写入内容正确；release 只删自己写的，不误删别的实例的
+    with tempfile.TemporaryDirectory() as td:
+        orig = si.INSTANCE_FILE
+        si.INSTANCE_FILE = Path(td) / "instance.json"
+        try:
+            si.write_record()
+            got = si.read_record()
+            ok_w = got.get("pid") == me and got.get("sig") == own_sig
+            si.INSTANCE_FILE.write_text(
+                json.dumps({"pid": 123, "sig": "other"}), encoding="utf-8"
+            )
+            si.release()
+            ok_keep = si.INSTANCE_FILE.exists()
+            si.write_record()
+            si.release()
+            ok_del = not si.INSTANCE_FILE.exists()
+            record(
+                "H8 实例记录写读与只删自己", ok_w and ok_keep and ok_del,
+                f"write={ok_w} keep={ok_keep} del={ok_del}",
+            )
+        finally:
+            si.INSTANCE_FILE = orig
+
+    tag = uuid.uuid4().hex[:8]
+    unique_mutex = f"SnapTool_Selftest_{tag}"
+    tmp_rec = Path(tempfile.gettempdir()) / f"snaptool-selftest-{tag}.json"
+
+    # H9 关键回归：CreateMutexW 前残留的 last-error 183 曾让程序误报「已在运行」。
+    # 用唯一互斥体名 + 子进程，确保与现场任何真实实例互不干扰。
+    code = (
+        "import ctypes, tempfile, singleinstance as si\n"
+        "from pathlib import Path\n"
+        f"si.MUTEX_NAME = {unique_mutex!r}\n"
+        f"si.INSTANCE_FILE = Path({str(tmp_rec)!r})\n"
+        "si._k32.SetLastError(183)\n"
+        "st = si.probe()\n"
+        "print(st.state + '/' + st.reason)\n"
+    )
+    try:
+        cp = subprocess.run(
+            [sys.executable, "-c", code], cwd=here,
+            capture_output=True, text=True, timeout=25,
+        )
+        lines = [x for x in (cp.stdout or "").splitlines() if "/" in x]
+        verdict = lines[-1] if lines else ""
+        record(
+            "H9 残留 last-error 不误报已运行", verdict == "ok/new-instance",
+            f"子进程={verdict} stderr={(cp.stderr or '')[-100:]}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        record("H9 残留 last-error 不误报已运行", False, repr(exc))
+    finally:
+        try:
+            tmp_rec.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # H10 / H12 唤醒：重复启动时请已有实例显示主窗口
+    orig_event = si.ACTIVATE_EVENT_NAME
+    si.ACTIVATE_EVENT_NAME = f"SnapTool_Selftest_Event_{tag}"
+    notifier = None
+    try:
+        before = si.signal_existing()
+        h = si.create_activation_event()
+        after = si.signal_existing()
+        record(
+            "H10 唤醒事件可创建并可触发",
+            (not before) and bool(h) and after,
+            f"before={before} handle={bool(h)} after={after}",
+        )
+        notifier = si.install_activation_notifier(lambda: None)
+        record(
+            "H12 Qt 唤醒监听可安装",
+            notifier is not None and notifier.isActive(),
+            f"timer_active={notifier is not None and notifier.isActive()}",
+        )
+    finally:
+        si.ACTIVATE_EVENT_NAME = orig_event
+        del notifier
+
+    others = si.find_other_instances()
+    record(
+        "H13 可枚举旧版幽灵进程且不误列自己",
+        isinstance(others, list) and me not in others,
+        f"others={others}",
+    )
+
+    # H11 真实场景：另一个进程持有互斥体并写了活跃记录，本进程应判 running
+    with tempfile.TemporaryDirectory() as td:
+        rec_file = Path(td) / "instance.json"
+        ready = Path(td) / "ready"
+        alive_mutex = f"{unique_mutex}_alive"
+        sub = (
+            "import ctypes, json, time, singleinstance as si\n"
+            "from pathlib import Path\n"
+            f"si.MUTEX_NAME = {alive_mutex!r}\n"
+            f"si.INSTANCE_FILE = Path({str(rec_file)!r})\n"
+            "si._k32.SetLastError(0)\n"
+            "h = si._k32.CreateMutexW(None, False, si.MUTEX_NAME)\n"
+            "si.write_record()\n"
+            f"Path({str(ready)!r}).write_text('ok', encoding='utf-8')\n"
+            "time.sleep(8)\n"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", sub], cwd=here,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            for _ in range(60):
+                if ready.exists():
+                    break
+                time.sleep(0.05)
+            orig_m, orig_f = si.MUTEX_NAME, si.INSTANCE_FILE
+            si.MUTEX_NAME, si.INSTANCE_FILE = alive_mutex, rec_file
+            try:
+                st = si.probe()
+                record(
+                    "H11 真实活实例判定 running",
+                    st.state == "running" and st.record.get("pid") not in (None, me),
+                    f"{st.state}/{st.reason} rec={st.record}",
+                )
+            finally:
+                si.MUTEX_NAME, si.INSTANCE_FILE = orig_m, orig_f
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                proc.kill()
+
+
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -900,6 +1084,7 @@ if __name__ == "__main__":
     test_line_ocr()
     test_image_transform()
     test_pen_arrows()
+    test_single_instance()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

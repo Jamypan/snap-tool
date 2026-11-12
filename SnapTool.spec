@@ -27,8 +27,10 @@ for _pkg in ('rapidocr', 'onnxruntime'):
     binaries += _b
     hiddenimports += _h
 
-# snapback.py 里有若干函数内懒加载，显式兜底防止静态分析漏收
+# snapback.py 里有若干函数内懒加载，显式兜底防止静态分析漏收；
+# singleinstance.py 是主程序顶层导入的本地模块，显式列出以防打包路径差异
 hiddenimports += [
+    'singleinstance',
     'rapidocr',
     'onnxruntime',
     'cv2',
