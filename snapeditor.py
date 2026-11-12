@@ -61,6 +61,10 @@ TOOLS = [
     ("text", "文字"),
 ]
 
+# 整图变换的 4 个命令按钮标签（窗口化编辑器工具栏用；截屏遮罩里隐藏，
+# 因为旋转/镜像只作用于「已进入程序窗口」的整张截图）。
+TRANSFORM_ACTIONS = ("顺旋", "逆旋", "左右", "上下")
+
 
 # ---------------------------------------------------------------------------
 @dataclass
@@ -1067,6 +1071,11 @@ class Toolbar(QWidget):
     style_clicked = Signal()
     close_clicked = Signal()
     confirm_clicked = Signal()  # 选择阶段「确定」：进入程序窗口继续编辑
+    # 整图变换（仅窗口化编辑器使用，截屏遮罩里通过 exclude 隐藏）
+    rot_cw_clicked = Signal()
+    rot_ccw_clicked = Signal()
+    flip_h_clicked = Signal()
+    flip_v_clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None, exclude: Iterable[str] = ()) -> None:
         super().__init__(parent)
@@ -1075,12 +1084,13 @@ class Toolbar(QWidget):
         self.setFocusPolicy(Qt.NoFocus)
         self.current = "select"
 
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QLabel
 
         excluded = set(exclude or ())
         self._excluded = excluded
         self._buttons: dict[str, QPushButton] = {}
         self._actions: dict[str, QPushButton] = {}
+        self._separators: list[QLabel] = []
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 6)
         lay.setSpacing(4)
@@ -1107,7 +1117,18 @@ class Toolbar(QWidget):
             self._actions[text] = b
 
         add_action("撤销", "撤销上一步标注 (Ctrl+Z)", self.undo_clicked)
-        add_action("样式", "颜色/线宽/字号设置", self.style_clicked)
+        add_action("样式", "颜色/线宽/字号/箭头设置", self.style_clicked)
+
+        # 整图变换分组（仅窗口化编辑器显示；截屏遮罩里隐藏）
+        sep = QLabel("│")
+        sep.setStyleSheet("QLabel { color:#666; font-size:14px; padding:0 2px; }")
+        lay.addWidget(sep)
+        self._separators.append(sep)
+        add_action("顺旋", "顺时针旋转 90° (Ctrl+R)", self.rot_cw_clicked)
+        add_action("逆旋", "逆时针旋转 90° (Ctrl+Shift+R)", self.rot_ccw_clicked)
+        add_action("左右", "左右镜像 / 水平翻转 (Ctrl+H)", self.flip_h_clicked)
+        add_action("上下", "上下镜像 / 垂直翻转 (Ctrl+Shift+H)", self.flip_v_clicked)
+
         add_action("长截图", "滚动长截图", self.long_clicked)
         add_action("取字", "识别选区文字 (OCR)", self.ocr_clicked)
         add_action("保存", "另存为文件 (Ctrl+S)", self.save_clicked)
@@ -1139,6 +1160,8 @@ class Toolbar(QWidget):
         （被排除的项保持隐藏）。"""
         for b in self._buttons.values():
             b.setVisible(not on)
+        for s in self._separators:
+            s.setVisible(not on)
         for text, b in self._actions.items():
             if text in ("确定", "✕"):
                 b.setVisible(on)
@@ -1230,7 +1253,7 @@ class Overlay(QWidget):
         self._label_font = QFont("", 10)
         self._label_cache: tuple[str, int, int] | None = None  # (文本, 宽, 高)
 
-        self.toolbar = Toolbar(self)
+        self.toolbar = Toolbar(self, exclude=TRANSFORM_ACTIONS)
         self.toolbar.hide()
         self.toolbar.tool_changed.connect(self._set_tool)
         self.toolbar.undo_clicked.connect(self.undo)

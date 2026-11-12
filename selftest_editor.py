@@ -77,6 +77,13 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     H12 Qt 唤醒监听可安装
     H13 可枚举旧版幽灵进程且不误列自己
 
+  Stage I  工具栏整图变换按钮 + 画笔起点/终点箭头勾选
+    I1  编辑器工具栏含 4 个变换按钮（顺旋/逆旋/左右/上下）且可见
+    I2  点「顺旋」触发顺时针 90°（宽高互换）
+    I3  点「上下」触发垂直镜像，像素方向正确
+    I4  截屏遮罩工具栏隐藏变换按钮
+    I5  无选中标注时样式面板显示起点/终点箭头勾选框，勾选即设新建画笔默认
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -1068,6 +1075,78 @@ def test_single_instance() -> None:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Stage I — 工具栏整图变换按钮 + 画笔起点/终点箭头勾选
+# ---------------------------------------------------------------------------
+def test_toolbar_transform() -> None:
+    print("\n--- Stage I: 工具栏整图变换按钮 + 画笔箭头勾选 ---")
+    from snapeditor import Toolbar, TRANSFORM_ACTIONS, Overlay
+
+    # I1 编辑器工具栏含 4 个变换按钮且未隐藏
+    tb = Toolbar(None)
+    have = all(a in tb._actions for a in TRANSFORM_ACTIONS)
+    shown = all(not tb._actions[a].isHidden() for a in TRANSFORM_ACTIONS)
+    record(
+        "I1 编辑器工具栏含 4 个变换按钮且可见",
+        have and shown,
+        f"have={have} shown={shown}",
+    )
+
+    # I2 点「顺旋」触发顺时针 90°（宽高互换）
+    ed = EditorWindow(make_image(160, 90), [], None)
+    ed.resize(1000, 680)
+    ed.show()
+    app.processEvents()
+    c0 = ed.canvas
+    w0, h0 = c0.base.width(), c0.base.height()
+    c0.toolbar._actions["顺旋"].click()
+    app.processEvents()
+    ok_i2 = (c0.base.width(), c0.base.height()) == (h0, w0)
+    record("I2 点「顺旋」顺时针旋转 90°", ok_i2,
+           f"before=({w0},{h0}) after=({c0.base.width()},{c0.base.height()})")
+
+    # I3 点「上下」触发垂直镜像（像素方向：左上红点→左下）
+    ed2 = EditorWindow(make_image(4, 2, (120, 160, 220)), [], None)
+    ed2.resize(1000, 680)
+    ed2.show()
+    app.processEvents()
+    c1 = ed2.canvas
+    img = QImage(4, 2, QImage.Format_RGB32)
+    img.fill(QColor(120, 160, 220))
+    img.setPixelColor(0, 0, QColor(255, 0, 0))
+    c1.base = img.copy()
+    c1._fit()
+    c1.toolbar._actions["上下"].click()
+    app.processEvents()
+    red = [(x, y) for y in range(c1.base.height())
+           for x in range(c1.base.width())
+           if c1.base.pixelColor(x, y).red() > 200]
+    ok_i3 = red == [(0, 1)]
+    record("I3 点「上下」垂直镜像方向正确", ok_i3, f"red_at={red}")
+
+    # I4 截屏遮罩工具栏隐藏变换按钮
+    ov = Overlay(make_image(200, 120))
+    ov.hide()
+    hidden = all(ov.toolbar._actions[a].isHidden() for a in TRANSFORM_ACTIONS)
+    record("I4 截屏遮罩工具栏隐藏变换按钮", hidden, f"hidden={hidden}")
+    ov.close()
+
+    # I5 无选中标注时样式面板显示起点/终点箭头勾选框，勾选即设默认
+    c0.toolbar._actions["样式"].click()  # 打开样式面板（无选中）
+    app.processEvents()
+    sp = c0.style_panel
+    vis = sp._pen_arrow_start.isVisible() and sp._pen_arrow_end.isVisible()
+    record("I5 无选中时样式面板显示箭头勾选框", vis, f"visible={vis}")
+    sp._pen_arrow_start.setChecked(True)
+    sp._pen_arrow_end.setChecked(True)
+    app.processEvents()
+    ok_arrows = c0._pen_arrow_start and c0._pen_arrow_end
+    record("I5b 勾选起点/终点箭头设为新建画笔默认", ok_arrows,
+           f"start={c0._pen_arrow_start} end={c0._pen_arrow_end}")
+    ed.close()
+    ed2.close()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1085,6 +1164,7 @@ if __name__ == "__main__":
     test_image_transform()
     test_pen_arrows()
     test_single_instance()
+    test_toolbar_transform()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

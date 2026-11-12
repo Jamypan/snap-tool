@@ -131,6 +131,10 @@ class Canvas(QWidget):
         self.toolbar.save_clicked.connect(lambda: self.save_requested.emit(self.compose()))
         self.toolbar.ocr_clicked.connect(lambda: self.ocr_requested.emit(self.base.copy()))
         self.toolbar.style_clicked.connect(self._toggle_style_panel)
+        self.toolbar.rot_cw_clicked.connect(lambda: self.transform_image("cw"))
+        self.toolbar.rot_ccw_clicked.connect(lambda: self.transform_image("ccw"))
+        self.toolbar.flip_h_clicked.connect(lambda: self.transform_image("flip_h"))
+        self.toolbar.flip_v_clicked.connect(lambda: self.transform_image("flip_v"))
 
         self.style_panel = StylePanel(self, show_pen_arrows=True)
         self.style_panel.hide()
