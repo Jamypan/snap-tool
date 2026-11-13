@@ -143,11 +143,21 @@ def _draw_icon(name: str, p: QPainter) -> None:
             path.lineTo(QPointF(x, y))
         p.drawPath(path)
     elif name == "mosaic":
+        # 保留原来的 3×3 九宫格，只在部分格子里「不规则」填入实心方块，
+        # 表达图像被打散成色块；块内缩留缝，网格线仍清晰可见。
+        g = (S - 8) / 3
         p.drawRect(4, 4, S - 8, S - 8)
-        p.drawLine(4 + (S - 8) / 3, 4, 4 + (S - 8) / 3, S - 4)
-        p.drawLine(4 + 2 * (S - 8) / 3, 4, 4 + 2 * (S - 8) / 3, S - 4)
-        p.drawLine(4, 4 + (S - 8) / 3, S - 4, 4 + (S - 8) / 3)
-        p.drawLine(4, 4 + 2 * (S - 8) / 3, S - 4, 4 + 2 * (S - 8) / 3)
+        p.drawLine(4 + g, 4, 4 + g, S - 4)
+        p.drawLine(4 + 2 * g, 4, 4 + 2 * g, S - 4)
+        p.drawLine(4, 4 + g, S - 4, 4 + g)
+        p.drawLine(4, 4 + 2 * g, S - 4, 4 + 2 * g)
+        p.setPen(Qt.NoPen)
+        # 方块用略淡的白：与纯白网格线拉开层次，22px 下才不会糊成一整片
+        p.setBrush(QBrush(QColor(245, 247, 250, 170)))
+        pad = 1.0
+        for r, c in ((0, 0), (0, 1), (1, 2), (2, 0), (2, 2)):
+            p.drawRect(QRectF(4 + c * g + pad, 4 + r * g + pad,
+                              g - 2 * pad, g - 2 * pad))
     elif name == "text":
         p.drawLine(S / 2, 4, S / 2, S - 4)
         p.drawLine(5, 4, S - 5, 4)

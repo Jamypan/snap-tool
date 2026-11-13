@@ -92,6 +92,7 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     J5  只加终点箭头：差异集中在终点端（方向正确）
     J6  直线（两端）与箭头（单端）在起点端有差异
     J7  直线命令经 Canvas 完整走通 + 样式面板勾选
+    J8  马赛克图标保留九宫格，且只在不规则的部分格子填实心方块
 
   Stage K  截屏前隐藏窗口 + 样式按钮 + 曲线端点箭头方向
     K1  工具栏已移除「样式」按钮
@@ -1194,6 +1195,32 @@ def test_line_and_icons() -> None:
         except Exception as e:  # noqa: BLE001
             bad.append(f"{nm}:{e}")
     record("J2 工具栏图标全部可绘制", not bad, f"异常={bad}")
+
+    # J8 马赛克图标：九宫格保留，只在部分格子不规则填入实心方块
+    from PySide6.QtGui import QPixmap, QPainter
+    from snapeditor import _draw_icon, _ICON_SIZE
+
+    pm_m = QPixmap(_ICON_SIZE, _ICON_SIZE)
+    pm_m.fill(QColor(0, 0, 0, 0))
+    pi = QPainter(pm_m)
+    pi.setRenderHint(QPainter.Antialiasing, True)
+    _draw_icon("mosaic", pi)
+    pi.end()
+    im_m = pm_m.toImage()
+    cell = (_ICON_SIZE - 8) / 3
+
+    def mid(r, c):
+        return int(4 + c * cell + cell / 2), int(4 + r * cell + cell / 2)
+
+    filled_cells = ((0, 0), (0, 1), (1, 2), (2, 0), (2, 2))
+    empty_cells = ((1, 0), (1, 1), (2, 1))
+    ok_fill = all(100 < im_m.pixelColor(*mid(r, c)).alpha() < 230
+                  for r, c in filled_cells)
+    ok_blank = all(im_m.pixelColor(*mid(r, c)).alpha() < 20 for r, c in empty_cells)
+    ok_grid = im_m.pixelColor(int(4 + cell), 7).alpha() > 230
+    record("J8 马赛克图标保留九宫格并不规则填块",
+           ok_fill and ok_blank and ok_grid,
+           f"淡白块={ok_fill} 留白={ok_blank} 纯白网格={ok_grid}")
 
     def with_shape(s: Shape) -> QImage:
         c = Canvas(base, [s], None)
