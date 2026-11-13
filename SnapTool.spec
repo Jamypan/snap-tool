@@ -35,6 +35,8 @@ for _pkg in ('rapidocr', 'onnxruntime'):
 # singleinstance.py 是主程序顶层导入的本地模块，显式列出以防打包路径差异
 hiddenimports += [
     'singleinstance',
+    # 多语言模块（i18n_docs 里有函数内延迟导入，显式列出防漏收）
+    'i18n', 'i18n_data', 'i18n_docs',
     'rapidocr',
     'onnxruntime',
     'cv2',

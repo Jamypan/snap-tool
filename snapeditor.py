@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import LANG, t
+
 # ---------------------------------------------------------------------------
 # 外观常量
 # ---------------------------------------------------------------------------
@@ -682,7 +684,8 @@ class StylePanel(QWidget):
         root.setSpacing(10)
 
         # --- 线条颜色（所有标注通用）---
-        self._line_label = QLabel("颜色")
+        self._line_key = "颜色"
+        self._line_label = QLabel(t("颜色"))
         root.addWidget(self._line_label)
         self._color_grid = QHBoxLayout()
         self._color_grid.setSpacing(4)
@@ -701,14 +704,14 @@ class StylePanel(QWidget):
             self._color_btns.append(b)
         root.addLayout(self._color_grid)
 
-        self._custom_btn = QPushButton("自定义颜色…")
+        self._custom_btn = QPushButton(t("自定义颜色…"))
         self._custom_btn.setCursor(Qt.PointingHandCursor)
         self._custom_btn.setFocusPolicy(Qt.NoFocus)
         self._custom_btn.clicked.connect(self._pick_custom)
         root.addWidget(self._custom_btn)
 
         # --- 线宽（所有标注通用）---
-        self._width_label = QLabel("线宽")
+        self._width_label = QLabel(t("线宽"))
         root.addWidget(self._width_label)
         self._width_slider = QSlider(Qt.Horizontal)
         self._width_slider.setRange(1, 20)
@@ -720,12 +723,13 @@ class StylePanel(QWidget):
         root.addWidget(self._width_slider)
 
         # --- 线型（所有标注通用）---
-        self._line_style_label = QLabel("线型")
+        self._line_style_keys = (("solid", "实线"), ("dash", "虚线"), ("dot", "点线"))
+        self._line_style_label = QLabel(t("线型"))
         root.addWidget(self._line_style_label)
         self._line_style_combo = QComboBox()
         self._line_style_combo.setFocusPolicy(Qt.NoFocus)
-        for key, name in (("solid", "实线"), ("dash", "虚线"), ("dot", "点线")):
-            self._line_style_combo.addItem(name, key)
+        for key, name in self._line_style_keys:
+            self._line_style_combo.addItem(t(name), key)
         self._line_style_combo.currentIndexChanged.connect(
             lambda i: self._emit(
                 "line_style", self._line_style_combo.itemData(i)
@@ -734,10 +738,10 @@ class StylePanel(QWidget):
         root.addWidget(self._line_style_combo)
 
         # --- 填充色（封闭图形）---
-        self._fill_label = QLabel("填充色")
+        self._fill_label = QLabel(t("填充色"))
         root.addWidget(self._fill_label)
         self._fill_row = QHBoxLayout()
-        self._fill_check = QCheckBox("启用")
+        self._fill_check = QCheckBox(t("启用"))
         self._fill_check.setFocusPolicy(Qt.NoFocus)
         self._fill_check.toggled.connect(self._on_fill_toggle)
         self._fill_row.addWidget(self._fill_check)
@@ -750,7 +754,7 @@ class StylePanel(QWidget):
         root.addLayout(self._fill_grid)
 
         # --- 字号（文字）---
-        self._size_label = QLabel("字号")
+        self._size_label = QLabel(t("字号"))
         root.addWidget(self._size_label)
         self._size_slider = QSlider(Qt.Horizontal)
         self._size_slider.setRange(10, 72)
@@ -762,16 +766,16 @@ class StylePanel(QWidget):
         root.addWidget(self._size_slider)
 
         # --- 加粗（文字）---
-        self._bold_check = QCheckBox("加粗")
+        self._bold_check = QCheckBox(t("加粗"))
         self._bold_check.setFocusPolicy(Qt.NoFocus)
         self._bold_check.toggled.connect(lambda on: self._emit("bold", on))
         root.addWidget(self._bold_check)
 
         # --- 文字背景色（文字）---
-        self._bg_label = QLabel("文字背景色")
+        self._bg_label = QLabel(t("文字背景色"))
         root.addWidget(self._bg_label)
         self._bg_row = QHBoxLayout()
-        self._bg_check = QCheckBox("启用")
+        self._bg_check = QCheckBox(t("启用"))
         self._bg_check.setFocusPolicy(Qt.NoFocus)
         self._bg_check.toggled.connect(self._on_bg_toggle)
         self._bg_row.addWidget(self._bg_check)
@@ -784,15 +788,15 @@ class StylePanel(QWidget):
         root.addLayout(self._bg_grid)
 
         # --- 端点箭头（画笔 / 直线：选中时改当前线条；无选中时设新建默认）---
-        self._pen_arrow_label = QLabel("端点箭头")
+        self._pen_arrow_label = QLabel(t("端点箭头"))
         root.addWidget(self._pen_arrow_label)
-        self._pen_arrow_start = QCheckBox("起点加箭头")
+        self._pen_arrow_start = QCheckBox(t("起点加箭头"))
         self._pen_arrow_start.setFocusPolicy(Qt.NoFocus)
         self._pen_arrow_start.toggled.connect(
             lambda on: self._emit("pen_arrow_start", on)
         )
         root.addWidget(self._pen_arrow_start)
-        self._pen_arrow_end = QCheckBox("终点加箭头")
+        self._pen_arrow_end = QCheckBox(t("终点加箭头"))
         self._pen_arrow_end.setFocusPolicy(Qt.NoFocus)
         self._pen_arrow_end.toggled.connect(
             lambda on: self._emit("pen_arrow_end", on)
@@ -841,6 +845,28 @@ class StylePanel(QWidget):
             QSlider::sub-page:horizontal { background:#0a84ff; border-radius:2px; }
             """
         )
+        LANG.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        self._line_label.setText(t(self._line_key))
+        self._custom_btn.setText(t("自定义颜色…"))
+        self._width_label.setText(t("线宽"))
+        self._line_style_label.setText(t("线型"))
+        idx = self._line_style_combo.currentIndex()
+        self._line_style_combo.blockSignals(True)
+        for i, (_key, name) in enumerate(self._line_style_keys):
+            self._line_style_combo.setItemText(i, t(name))
+        self._line_style_combo.blockSignals(False)
+        self._line_style_combo.setCurrentIndex(idx)
+        self._fill_label.setText(t("填充色"))
+        self._fill_check.setText(t("启用"))
+        self._size_label.setText(t("字号"))
+        self._bold_check.setText(t("加粗"))
+        self._bg_label.setText(t("文字背景色"))
+        self._bg_check.setText(t("启用"))
+        self._pen_arrow_label.setText(t("端点箭头"))
+        self._pen_arrow_start.setText(t("起点加箭头"))
+        self._pen_arrow_end.setText(t("终点加箭头"))
 
     # ---------------------------------------------------------- 工具方法
     def _emit(self, key: str, value) -> None:
@@ -880,7 +906,7 @@ class StylePanel(QWidget):
     def _pick_custom(self) -> None:
         from PySide6.QtWidgets import QColorDialog
 
-        c = QColorDialog.getColor(parent=self, title="选择颜色")
+        c = QColorDialog.getColor(parent=self, title=t("选择颜色"))
         if c.isValid():
             self._emit("color", c.name())
 
@@ -925,11 +951,12 @@ class StylePanel(QWidget):
 
         # 顶部「颜色」标签按类型命名：封闭图形/线条=线条颜色，文字=文字颜色
         if is_text:
-            self._line_label.setText("文字颜色")
+            self._line_key = "文字颜色"
         elif is_shape or kind in ("arrow", "pen", "line"):
-            self._line_label.setText("线条颜色")
+            self._line_key = "线条颜色"
         else:
-            self._line_label.setText("颜色")
+            self._line_key = "颜色"
+        self._line_label.setText(t(self._line_key))
 
         # 显隐控件
         for w in self._shape_only:
@@ -1034,7 +1061,9 @@ class OcrPanel(QWidget):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(8)
 
-        self._title = QLabel("正在识别文字…")
+        self._mode = "busy"
+        self._result_tag = ""
+        self._title = QLabel(t("正在识别文字…"))
         root.addWidget(self._title)
 
         self.edit = QPlainTextEdit()
@@ -1046,9 +1075,9 @@ class OcrPanel(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        self._b_sel = QPushButton("复制选中")
-        self._b_all = QPushButton("复制全部")
-        self._b_close = QPushButton("关闭")
+        self._b_sel = QPushButton(t("复制选中"))
+        self._b_all = QPushButton(t("复制全部"))
+        self._b_close = QPushButton(t("关闭"))
         for b in (self._b_sel, self._b_all, self._b_close):
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
@@ -1063,12 +1092,31 @@ class OcrPanel(QWidget):
 
         self._closing = False
         self.set_busy()
+        LANG.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        self._b_sel.setText(t("复制选中"))
+        self._b_all.setText(t("复制全部"))
+        self._b_close.setText(t("关闭"))
+        self._render_title()
+
+    def _render_title(self) -> None:
+        if self._mode == "busy":
+            self._title.setText(t("正在识别文字…"))
+        elif self._mode == "result":
+            self._title.setText(
+                t("识别结果{tag} · 可拖选文字，Ctrl+C 或点下方按钮复制",
+                  tag=self._result_tag)
+            )
+        else:
+            self._title.setText(t("取字"))
 
     # ------------------------------------------------------------ 状态切换
     def set_busy(self) -> None:
         self._closing = False
         self._busy = True
-        self._title.setText("正在识别文字…")
+        self._mode = "busy"
+        self._render_title()
         self.edit.clear()
         self.edit.hide()
         self._b_sel.setEnabled(False)
@@ -1077,8 +1125,9 @@ class OcrPanel(QWidget):
     def set_result(self, text: str, backend: str = "") -> None:
         self._closing = False
         self._busy = False
-        tag = f"（{backend}）" if backend else ""
-        self._title.setText(f"识别结果{tag} · 可拖选文字，Ctrl+C 或点下方按钮复制")
+        self._mode = "result"
+        self._result_tag = f"（{backend}）" if backend else ""
+        self._render_title()
         self.edit.setPlainText(text)
         self.edit.show()
         self._b_sel.setEnabled(True)
@@ -1088,7 +1137,8 @@ class OcrPanel(QWidget):
         """识别失败 / 没识别到文字：仍显示面板，用户可关闭回到编辑态。"""
         self._closing = False
         self._busy = False
-        self._title.setText("取字")
+        self._mode = "message"
+        self._render_title()
         self.edit.setPlainText(msg)
         self.edit.show()
         self._b_sel.setEnabled(False)
@@ -1114,7 +1164,7 @@ class OcrPanel(QWidget):
             return
         QApplication.clipboard().setText(txt)
         self._closing = True
-        self._title.setText("已复制到剪贴板 ✓")
+        self._title.setText(t("已复制到剪贴板 ✓"))
         # 短暂显示反馈后自动收起面板，回到正常截图状态
         QTimer.singleShot(420, self.closed.emit)
 
@@ -1185,27 +1235,42 @@ class OcrBar(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 6, 10, 6)
         lay.setSpacing(8)
-        self._label = QLabel("识别结果")
+        self._status_key = "识别结果"
+        self._status_kwargs: dict = {}
+        self._label = QLabel(t("识别结果"))
         lay.addWidget(self._label, 1)
-        for text, sig in (
+        self._btn_keys: list[tuple[QPushButton, str]] = []
+        for text_key, sig in (
             ("复制选中", self.copied_selection),
             ("复制全部", self.copied_all),
             ("返回", self.closed),
         ):
-            b = QPushButton(text)
+            b = QPushButton(t(text_key))
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(sig.emit)
             lay.addWidget(b)
+            self._btn_keys.append((b, text_key))
+        LANG.changed.connect(self.retranslate_ui)
+
+    def _render_status(self) -> None:
+        self._label.setText(t(self._status_key, **self._status_kwargs))
 
     def set_status(self, n: int, backend: str = "") -> None:
-        tag = f"（{backend}）" if backend else ""
-        self._label.setText(
-            f"识别到 {n} 行{tag} · 拖选文字后 Ctrl+C 复制，复制完自动返回"
-        )
+        self._status_key = "识别到 {n} 行{tag} · 拖选文字后 Ctrl+C 复制，复制完自动返回"
+        self._status_kwargs = {"n": n, "tag": f"（{backend}）" if backend else ""}
+        self._render_status()
 
-    def feedback(self, msg: str) -> None:
-        self._label.setText(msg)
+    def feedback(self, msg_key: str) -> None:
+        """传入简体中文文案 key（而非已翻译文本），语言切换时可重新渲染。"""
+        self._status_key = msg_key
+        self._status_kwargs = {}
+        self._render_status()
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        for b, key in self._btn_keys:
+            b.setText(t(key))
+        self._render_status()
 
 
 # ---------------------------------------------------------------------------
@@ -1451,6 +1516,7 @@ class Toolbar(QWidget):
         self._excluded = excluded
         self._buttons: dict[str, QPushButton] = {}
         self._actions: dict[str, QPushButton] = {}
+        self._tip_keys: dict[str, str] = {}
         self._separators: list[QLabel] = []
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 6)
@@ -1460,7 +1526,7 @@ class Toolbar(QWidget):
             b = QPushButton()
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
-            b.setToolTip(label)
+            b.setToolTip(t(label))
             b.setFocusPolicy(Qt.NoFocus)
             b.setIcon(toolbar_icon(key))
             b.setIconSize(QSize(22, 22))
@@ -1468,11 +1534,12 @@ class Toolbar(QWidget):
             b.clicked.connect(lambda _=False, k=key: self._on_tool(k))
             lay.addWidget(b)
             self._buttons[key] = b
+            self._tip_keys["tool:" + key] = label
 
         def add_action(key: str, tip: str, sig: Signal) -> None:
             b = QPushButton()
             b.setCursor(Qt.PointingHandCursor)
-            b.setToolTip(tip)
+            b.setToolTip(t(tip))
             b.setFocusPolicy(Qt.NoFocus)
             b.setIcon(toolbar_icon(key))
             b.setIconSize(QSize(22, 22))
@@ -1482,6 +1549,7 @@ class Toolbar(QWidget):
             if key in excluded:
                 b.hide()
             self._actions[key] = b
+            self._tip_keys["action:" + key] = tip
 
         add_action("撤销", "撤销上一步标注 (Ctrl+Z)", self.undo_clicked)
         # 工具栏不再放「样式」按钮：选中标注时样式面板会自动弹出，
@@ -1515,6 +1583,15 @@ class Toolbar(QWidget):
             QPushButton:checked { background: #0a84ff; border-color: #0a84ff; color: white; }
             """
         )
+        LANG.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        """图标 key 保持中文不变，只刷新按钮提示文字。"""
+        for key, text_key in self._tip_keys.items():
+            kind, _, name = key.partition(":")
+            btn = self._buttons.get(name) if kind == "tool" else self._actions.get(name)
+            if btn is not None:
+                btn.setToolTip(t(text_key))
 
     def _on_tool(self, key: str) -> None:
         for k, b in self._buttons.items():
@@ -2766,7 +2843,7 @@ class Overlay(QWidget):
             p.drawText(
                 self.rect().adjusted(0, 40, 0, 0),
                 Qt.AlignHCenter | Qt.AlignTop,
-                "窗口截图：移动鼠标到目标窗口，单击确认    右键 / Esc 取消",
+                t("窗口截图：移动鼠标到目标窗口，单击确认    右键 / Esc 取消"),
             )
             self._last_painted_sel = None
             p.end()
@@ -2868,7 +2945,7 @@ class Overlay(QWidget):
             p.drawText(
                 self.rect().adjusted(0, 40, 0, 0),
                 Qt.AlignHCenter | Qt.AlignTop,
-                "按住鼠标左键框选区域    Esc 取消",
+                t("按住鼠标左键框选区域    Esc 取消"),
             )
 
         # 记录本次实际画出的选区，供下一次 _repaint 计算「擦残影」脏区

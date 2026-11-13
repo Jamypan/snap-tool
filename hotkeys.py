@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from i18n import LANG, app_name, t
+
 # ---------------------------------------------------------------------------
 # Win32 常量（RegisterHotKey）
 # ---------------------------------------------------------------------------
@@ -42,6 +44,11 @@ DEFAULT_VK = 0x41  # A
 CAPTURE_MODES = ("rect", "window", "fullscreen")
 MODE_LABELS = {"rect": "框选截图", "window": "窗口截图", "fullscreen": "全屏截图"}
 DEFAULT_MODE = "rect"
+
+
+def mode_label(mode: str) -> str:
+    """随界面语言变化的模式名；MODE_LABELS 保留为简体中文常量（自测/兼容）。"""
+    return t(MODE_LABELS.get(mode, MODE_LABELS[DEFAULT_MODE]))
 
 # 单独的修饰键虚拟码，不允许当作主键
 _MODIFIER_VKS = {0x10, 0x11, 0x12, 0x5B, 0x5C}  # Shift / Ctrl / Alt / LWin / RWin
@@ -95,7 +102,7 @@ def vk_name(vk: int) -> str:
     if 0x70 <= vk <= 0x87:
         return f"F{vk - 0x6F}"
     if 0x60 <= vk <= 0x69:
-        return f"小键盘 {vk - 0x60}"
+        return t("小键盘 {n}", n=vk - 0x60)
     if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
         return chr(vk)
     return f"VK 0x{vk:02X}"
@@ -368,12 +375,14 @@ class HotkeyDialog(QDialog):
         "QComboBox { padding:4px 8px; }"
     )
 
-    def __init__(self, current: Hotkey, parent=None, app_name: str = "截屏助手", error: str = "") -> None:
+    def __init__(self, current: Hotkey, parent=None, app_title: str | None = None,
+                 error: str = "") -> None:
         super().__init__(parent)
         self.hotkey = current if current.is_valid() else Hotkey()
         self._capturing = False
         self._grabbed = False
-        self.setWindowTitle(f"设置截图热键 - {app_name}")
+        self._app_title = app_title or app_name()
+        self.setWindowTitle(t("设置截图热键 - {app}", app=self._app_title))
         self.setMinimumWidth(430)
         self.setStyleSheet(self.STYLE)
 
@@ -381,23 +390,22 @@ class HotkeyDialog(QDialog):
         root.setContentsMargins(20, 18, 20, 16)
         root.setSpacing(10)
 
-        self.current_label = QLabel(f"当前热键：<b>{self.hotkey.label()}</b>")
+        self.current_label = QLabel(t("当前热键：<b>{label}</b>", label=self.hotkey.label()))
         root.addWidget(self.current_label)
 
         self.capture_btn = QPushButton(self.hotkey.label())
         self.capture_btn.setObjectName("capture")
         self.capture_btn.setMinimumHeight(52)
-        self.capture_btn.setToolTip("点这里后直接按下想要的组合键")
+        self.capture_btn.setToolTip(t("点这里后直接按下想要的组合键"))
         self.capture_btn.clicked.connect(self._start_capture)
         root.addWidget(self.capture_btn)
 
-        tip = QLabel(
-            "点上方按钮后，按住 Ctrl / Alt / Shift / Win 中至少一个，再按一个主键"
-            "（如 Ctrl + Shift + S）。按 Esc 可放弃本次录制。"
+        self._tip = QLabel(
+            t("点上方按钮后，按住 Ctrl / Alt / Shift / Win 中至少一个，再按一个主键（如 Ctrl + Shift + S）。按 Esc 可放弃本次录制。")
         )
-        tip.setObjectName("tip")
-        tip.setWordWrap(True)
-        root.addWidget(tip)
+        self._tip.setObjectName("tip")
+        self._tip.setWordWrap(True)
+        root.addWidget(self._tip)
 
         mods_row = QHBoxLayout()
         mods_row.setSpacing(14)
@@ -411,7 +419,8 @@ class HotkeyDialog(QDialog):
         mods_row.addStretch(1)
 
         key_row = QHBoxLayout()
-        key_row.addWidget(QLabel("主键"))
+        self._key_label = QLabel(t("主键"))
+        key_row.addWidget(self._key_label)
         self.key_combo = QComboBox()
         for name, vk in KEY_CHOICES:
             self.key_combo.addItem(name, vk)
@@ -421,10 +430,10 @@ class HotkeyDialog(QDialog):
         root.addLayout(mods_row)
         root.addLayout(key_row)
 
-        manual_tip = QLabel("录制不到某些键（如 Win 组合）时，也可以在这里手动选择。")
-        manual_tip.setObjectName("tip")
-        manual_tip.setWordWrap(True)
-        root.addWidget(manual_tip)
+        self._manual_tip = QLabel(t("录制不到某些键（如 Win 组合）时，也可以在这里手动选择。"))
+        self._manual_tip.setObjectName("tip")
+        self._manual_tip.setWordWrap(True)
+        root.addWidget(self._manual_tip)
 
         self.status = QLabel("")
         self.status.setObjectName("status")
@@ -432,24 +441,39 @@ class HotkeyDialog(QDialog):
         root.addWidget(self.status)
 
         btns = QHBoxLayout()
-        b_default = QPushButton("恢复默认")
-        b_default.clicked.connect(self._restore_default)
-        b_cancel = QPushButton("取消")
-        b_cancel.clicked.connect(self.reject)
-        b_save = QPushButton("保存")
-        b_save.setObjectName("primary")
-        b_save.setDefault(True)
-        b_save.clicked.connect(self.accept)
-        btns.addWidget(b_default)
+        self._b_default = QPushButton(t("恢复默认"))
+        self._b_default.clicked.connect(self._restore_default)
+        self._b_cancel = QPushButton(t("取消"))
+        self._b_cancel.clicked.connect(self.reject)
+        self._b_save = QPushButton(t("保存"))
+        self._b_save.setObjectName("primary")
+        self._b_save.setDefault(True)
+        self._b_save.clicked.connect(self.accept)
+        btns.addWidget(self._b_default)
         btns.addStretch(1)
-        btns.addWidget(b_cancel)
-        btns.addWidget(b_save)
+        btns.addWidget(self._b_cancel)
+        btns.addWidget(self._b_save)
         root.addLayout(btns)
 
         if error:
             self._show_status(error, error=True)
         # show 之后自动进入录制态，用户可以直接按键
         QTimer.singleShot(0, self._start_capture)
+        LANG.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        """语言切换后刷新改键对话框的静态文案（不打断正在录制的按键）。"""
+        self.setWindowTitle(t("设置截图热键 - {app}", app=self._app_title))
+        self.current_label.setText(t("当前热键：<b>{label}</b>", label=self.hotkey.label()))
+        self.capture_btn.setToolTip(t("点这里后直接按下想要的组合键"))
+        self._tip.setText(
+            t("点上方按钮后，按住 Ctrl / Alt / Shift / Win 中至少一个，再按一个主键（如 Ctrl + Shift + S）。按 Esc 可放弃本次录制。")
+        )
+        self._key_label.setText(t("主键"))
+        self._manual_tip.setText(t("录制不到某些键（如 Win 组合）时，也可以在这里手动选择。"))
+        self._b_default.setText(t("恢复默认"))
+        self._b_cancel.setText(t("取消"))
+        self._b_save.setText(t("保存"))
 
     # ------------------------------------------------------------ 状态同步
     def _show_status(self, text: str, error: bool = False) -> None:
@@ -472,7 +496,7 @@ class HotkeyDialog(QDialog):
             cb.setChecked(bool(hk.mods & bit))
             cb.blockSignals(False)
         self._select_combo_vk(hk.vk)
-        self.capture_btn.setText(hk.label() if hk.is_valid() else "未选择修饰键")
+        self.capture_btn.setText(hk.label() if hk.is_valid() else t("未选择修饰键"))
 
     def _on_manual(self) -> None:
         self._stop_capture()
@@ -482,24 +506,24 @@ class HotkeyDialog(QDialog):
                 mods |= bit
         vk = self.key_combo.currentData()
         self.hotkey = Hotkey(mods, int(vk) if vk is not None else DEFAULT_VK)
-        self.capture_btn.setText(self.hotkey.label() if self.hotkey.is_valid() else "未选择修饰键")
+        self.capture_btn.setText(self.hotkey.label() if self.hotkey.is_valid() else t("未选择修饰键"))
         self._show_status("")
 
     def _restore_default(self) -> None:
         self._stop_capture()
         self._set_hotkey(Hotkey())
-        self._show_status(f"已恢复为 {Hotkey().label()}，点「保存」生效。")
+        self._show_status(t("已恢复为 {label}，点「保存」生效。", label=Hotkey().label()))
 
     # ------------------------------------------------------------ 按键录制
     def _start_capture(self) -> None:
         if not self.isVisible():
             return
         self._capturing = True
-        self.capture_btn.setText("请按下组合键…")
+        self.capture_btn.setText(t("请按下组合键…"))
         self.capture_btn.setFocus()
         self.grabKeyboard()
         self._grabbed = True
-        self._show_status("正在录制：按住修饰键再按主键（Esc 放弃录制）")
+        self._show_status(t("正在录制：按住修饰键再按主键（Esc 放弃录制）"))
 
     def _stop_capture(self) -> None:
         self._capturing = False
@@ -520,21 +544,21 @@ class HotkeyDialog(QDialog):
         if k == _qi(Qt.Key_Escape) and qmods == 0:
             self._stop_capture()
             self.capture_btn.setText(self.hotkey.label())
-            self._show_status("已放弃录制，可点上方按钮重试，或直接手动选择。")
+            self._show_status(t("已放弃录制，可点上方按钮重试，或直接手动选择。"))
             return
 
         hk = qt_event_to_hotkey(ev)
         if hk is None:
-            self._show_status("请按住 Ctrl / Alt / Shift / Win 中至少一个，再按一个主键。", error=True)
+            self._show_status(t("请按住 Ctrl / Alt / Shift / Win 中至少一个，再按一个主键。"), error=True)
             return
         self._set_hotkey(hk)
         self._stop_capture()
-        self._show_status(f"已录制：{hk.label()}。点「保存」生效。")
+        self._show_status(t("已录制：{label}。点「保存」生效。", label=hk.label()))
 
     def accept(self) -> None:  # noqa: D102
         if not self.hotkey.is_valid():
             self._stop_capture()
-            self._show_status("请至少选择一个修饰键（Ctrl / Alt / Shift / Win），并指定主键。", error=True)
+            self._show_status(t("请至少选择一个修饰键（Ctrl / Alt / Shift / Win），并指定主键。"), error=True)
             return
         self._stop_capture()
         super().accept()

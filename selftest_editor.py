@@ -136,6 +136,8 @@ import sys
 
 # 离屏渲染：必须在创建 QApplication 之前设置
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# 自测固定用简体中文跑（部分断言按中文菜单名查找），且不会写真实配置
+os.environ.setdefault("SNAPTOOL_LANG", "zh_CN")
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
@@ -1687,6 +1689,182 @@ def test_about_and_app_icon():
     box.hide()
 
 
+def test_i18n():
+    """Stage O  8 种界面语言 + 启动时跟随系统语言 + 即时刷新 + 持久化。"""
+    import ast
+    import json
+    import re
+    import tempfile
+    from pathlib import Path
+
+    import i18n
+    from i18n import LANGS, LANGUAGE_NAMES, ROWS, placeholders
+    from i18n_docs import about_html, cli_help, help_html
+
+    # O1 语言表：恰好 8 种，且每种都有本地名 / 英文名
+    ok_o1 = (len(LANGS) == 8 and set(LANGS) == set(LANGUAGE_NAMES)
+             and all(len(v) == 2 and all(v) for v in LANGUAGE_NAMES.values()))
+    record("O1 提供 8 种语言且名称齐全", ok_o1, f"{len(LANGS)} 种: {'/'.join(LANGS)}")
+
+    # O2 每条文案都有 8 个非空译文
+    bad_rows = [(k, len(v)) for k, v in ROWS.items()
+                if len(v) != len(LANGS) or any(not x for x in v)]
+    record("O2 每条 UI 文案都有 8 种译文", not bad_rows,
+           f"共 {len(ROWS)} 条，异常 {len(bad_rows)} 条")
+
+    # O3 带占位符的句子，8 种语言占位符必须同名（否则 .format 会漏值）
+    bad_ph = [k for k, v in ROWS.items()
+              if len({frozenset(placeholders(x)) for x in v}) != 1]
+    record("O3 占位符在 8 种语言间一致", not bad_ph, f"不一致 {len(bad_ph)} 条")
+
+    # O4 源码里所有 t("中文") 字面量都能查到译文（静态扫描，防止漏翻）
+    used: set[str] = set()
+    for fn in Path(__file__).resolve().parent.glob("*.py"):
+        if fn.name.startswith(("i18n", "selftest")):
+            continue
+        for n in ast.walk(ast.parse(fn.read_text(encoding="utf-8"))):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id in ("t", "_t") and n.args
+                    and isinstance(n.args[0], ast.Constant)
+                    and isinstance(n.args[0].value, str)):
+                used.add(n.args[0].value)
+    missing = sorted(used - set(ROWS))
+    record("O4 源码中每个 tr 键都有译文", not missing,
+           f"字面量键 {len(used)} 个，缺失 {len(missing)} 个")
+
+    # O5 系统语言映射（含繁体地区 / 未支持语言回退英文）
+    cases = {
+        "zh_CN": "zh_CN", "zh-CN": "zh_CN", "zh_TW": "zh_TW",
+        "zh-Hant-TW": "zh_TW", "zh_HK": "zh_TW", "en_US": "en",
+        "ja_JP": "ja", "ko_KR": "ko", "fr_FR": "fr", "de_DE": "de",
+        "es_ES": "es", "ru_RU": "en",
+    }
+    wrong = {k: i18n.normalize(k) for k, v in cases.items() if i18n.normalize(k) != v}
+    record("O5 系统语言正确映射到 8 种语言", not wrong,
+           f"用例 {len(cases)} 个，错误 {wrong}")
+
+    # O6 Windows 显示语言优先于 Qt 区域格式（中文系统 + 英文区域格式）
+    ui = i18n.windows_ui_language()
+    ok_o6 = (not ui) or (i18n.system_language() == i18n.normalize(ui))
+    ok_o6 = ok_o6 and i18n.system_language("ja_JP") == "ja"
+    record("O6 跟随系统显示语言（非区域格式）", ok_o6,
+           f"UI={ui!r} QLocale={__import__('PySide6.QtCore', fromlist=['QLocale']).QLocale.system().name()} -> {i18n.system_language()}")
+
+    # ---- 下面用临时配置目录，避免污染真实 %APPDATA%\SnapTool ----
+    old_home = os.environ.get("SNAPTOOL_HOME")
+    old_force = os.environ.get("SNAPTOOL_LANG")
+    old_locale = os.environ.get("SNAPTOOL_SYSTEM_LOCALE")
+    tmp = tempfile.mkdtemp(prefix="snaptool-i18n-selftest-")
+    os.environ["SNAPTOOL_HOME"] = tmp
+    os.environ.pop("SNAPTOOL_LANG", None)
+    os.environ["SNAPTOOL_SYSTEM_LOCALE"] = "zh_CN"
+    cfg = Path(tmp) / "settings.json"
+    cfg.write_text(json.dumps({
+        "version": 2, "mode": "window", "capture": {"mods": 6, "vk": 65},
+    }, ensure_ascii=False), encoding="utf-8")
+    i18n.LANG.reload()
+    ok_o7a = i18n.LANG.preference == "auto" and i18n.LANG.current == "zh_CN"
+
+    i18n.LANG.set_preference("fr")
+    raw = json.loads(cfg.read_text(encoding="utf-8"))
+    i18n.LANG.reload()
+    ok_o7 = (ok_o7a and raw.get("language") == "fr" and raw.get("mode") == "window"
+             and raw.get("capture") == {"mods": 6, "vk": 65}
+             and i18n.LANG.preference == "fr" and i18n.LANG.current == "fr")
+    record("O7 语言设置写入 settings.json 且不丢其它配置", ok_o7,
+           f"language={raw.get('language')} mode={raw.get('mode')}")
+
+    # O8 auto 模式跟随系统（模拟不同系统语言，重启后仍生效）
+    auto_ok = True
+    for locale, expect in (("ja_JP", "ja"), ("de_DE", "de"),
+                           ("zh-Hant-TW", "zh_TW"), ("ru_RU", "en")):
+        os.environ["SNAPTOOL_SYSTEM_LOCALE"] = locale
+        i18n.LANG.set_preference("auto")
+        i18n.LANG.reload()
+        auto_ok &= (i18n.LANG.preference == "auto" and i18n.LANG.current == expect)
+    record("O8 auto 模式按系统语言启动", auto_ok,
+           f"模拟 ja/de/zh-Hant/ru，当前={i18n.LANG.current}")
+
+    # O9 切换语言发信号，已打开的窗口文本立即刷新
+    from PySide6.QtWidgets import QApplication
+
+    from hotkeys import Hotkey
+    from snapui import AboutDialog, HelpWindow, LanguageDialog, MainWindow, make_icon
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    mw = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp))
+    mw.show()
+    about = AboutDialog(None, make_icon())
+    helpw = HelpWindow("help")
+    ed = EditorWindow(make_image(160, 100), [], None)
+    dlg = LanguageDialog(mw)
+    seen: list[str] = []
+    i18n.LANG.changed.connect(lambda code: seen.append(code))
+    i18n.LANG.set_preference("en")
+    app.processEvents()
+    ok_o9 = ("en" in seen and mw.windowTitle() == "SnapTool"
+             and mw._menus["file"].title() == "File(&F)"
+             and mw._actions["quit"].text() == "Exit"
+             and ed._menus["edit"].title() == "Edit(&E)"
+             and "About SnapTool" in about.windowTitle()
+             and "User Guide" in helpw.windowTitle())
+    record("O9 切换后主窗口/编辑器/关于/帮助即时刷新", ok_o9,
+           f"信号={seen[-1:] if seen else []} 标题={mw.windowTitle()}")
+
+    # O10 英文界面不残留中文 UI 文案（动态文本也一起检查）
+    texts = [mw.windowTitle(), mw._sub.text(), mw._tip.text(),
+             mw._lbl_now.text(), mw._lbl_hotkey.text(), mw._lbl_mode.text()]
+    texts += [m.title() for m in mw._menus.values()]
+    texts += [a.text() for a in mw._actions.values()]
+    texts += [b.text() for b in mw._mode_buttons.values()]
+    texts += [a.text() for a in ed._actions.values()]
+    cjk_left = [x for x in texts if re.search(r"[\u4e00-\u9fff]", x)]
+    record("O10 英文界面无中文残留", not cjk_left, f"残留 {cjk_left[:2]}")
+
+    # O11 8 种语言的长文档（帮助 8 节 / 关于邮箱 / 命令行参数）齐全
+    docs_bad = []
+    for code in LANGS:
+        h, a, c = help_html(code), about_html(code), cli_help(code)
+        if (h.count("<h2>") < 8 or "mailto:283096251@qq.com" not in a
+                or "--shot" not in c or "--selftest" not in c):
+            docs_bad.append(code)
+    record("O11 帮助/关于/命令行 8 语言内容完整", not docs_bad,
+           f"异常语言={docs_bad}")
+
+    # O12 设置对话框 9 项（跟随系统 + 8 种），选中即可生效
+    codes = [dlg.combo.itemData(i) for i in range(dlg.combo.count())]
+    ok_o12 = len(codes) == 9 and set(codes) == {"auto", *LANGS}
+    dlg.combo.setCurrentIndex(dlg.combo.findData("ko"))
+    dlg._apply()
+    ok_o12 = ok_o12 and i18n.LANG.preference == "ko" and i18n.LANG.current == "ko"
+    record("O12 语言对话框含跟随系统 + 8 语言且可切换", ok_o12,
+           f"选项={len(codes)} 当前={i18n.LANG.current}")
+
+    # O13 拉丁语系译文确实与简体中文不同（抽查高频文案）
+    sample = ("打开保存目录", "确定", "端点箭头", "取字", "已复制到剪贴板  {w}×{h}")
+    latin = ("en", "fr", "de", "es")
+    ok_o13 = all(i18n.LANG.translate(k, c) != ROWS[k][0]
+                 for k in sample for c in latin)
+    record("O13 译文非中文占位（抽查 4 语种）", ok_o13, f"抽查 {len(sample) * len(latin)} 组")
+
+    # 恢复环境变量与语言，避免影响后续 / 真实配置
+    if old_force is None:
+        os.environ.pop("SNAPTOOL_LANG", None)
+    else:
+        os.environ["SNAPTOOL_LANG"] = old_force
+    if old_home is None:
+        os.environ.pop("SNAPTOOL_HOME", None)
+    else:
+        os.environ["SNAPTOOL_HOME"] = old_home
+    if old_locale is None:
+        os.environ.pop("SNAPTOOL_SYSTEM_LOCALE", None)
+    else:
+        os.environ["SNAPTOOL_SYSTEM_LOCALE"] = old_locale
+    i18n.LANG.reload()
+    for w in (mw, about, helpw, ed, dlg):
+        w.hide()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1710,6 +1888,7 @@ if __name__ == "__main__":
     test_undo_rotate_icons()
     test_mirror_icons()
     test_about_and_app_icon()
+    test_i18n()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

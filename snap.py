@@ -61,21 +61,22 @@ from PySide6.QtWidgets import (  # noqa: E402
 from hotkeys import (  # noqa: E402
     CAPTURE_MODES,
     HOTKEY_ID,
-    MODE_LABELS,
     Hotkey,
     HotkeyDialog,
     load_hotkey,
     load_mode,
+    mode_label,
     save_hotkey,
     save_mode,
 )
+from i18n import LANG, app_name, t  # noqa: E402
+from i18n_docs import cli_help  # noqa: E402
 from snapeditor import Overlay  # noqa: E402
 from snap_editor import EditorWindow  # noqa: E402
 from snapui import (  # noqa: E402
-    APP_NAME,
     AboutDialog,
-    CLI_HELP,
     HelpWindow,
+    LanguageDialog,
     MainWindow,
     make_icon,
 )
@@ -148,7 +149,7 @@ def save_qimage(img: QImage, path: Path) -> None:
     suffix = path.suffix.lower() or ".png"
     fmt = "JPG" if suffix in (".jpg", ".jpeg") else "PNG"
     if not img.save(str(path), fmt):
-        raise OSError(f"保存失败：{path}")
+        raise OSError(t("保存失败：{path}", path=path))
 
 
 # ---------------------------------------------------------------------------
@@ -221,17 +222,28 @@ class BusyBar(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
-        self.title = QLabel("正在滚动截屏…")
+        self._frames, self._height = 0, 0
+        self.title = QLabel(t("正在滚动截屏…"))
         self.detail = QLabel("")
         self.title.setStyleSheet("color:#fff; font-size:14px; font-weight:bold;")
         self.detail.setStyleSheet("color:#cfcfcf; font-size:12px;")
         lay.addWidget(self.title)
         lay.addWidget(self.detail)
         self.setStyleSheet("background:#1f1f1f; border:1px solid #3a3a3a; border-radius:8px;")
+        LANG.changed.connect(self.retranslate_ui)
 
     def update_text(self, frames: int, height: int) -> None:
-        self.detail.setText(f"已拼 {frames} 帧 · 当前高度 {height}px\n按 Esc 可随时结束")
+        self._frames, self._height = frames, height
+        self._render()
         self.adjustSize()
+
+    def _render(self) -> None:
+        self.detail.setText(t("已拼 {frames} 帧 · 当前高度 {height}px\n按 Esc 可随时结束",
+                              frames=self._frames, height=self._height))
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        self.title.setText(t("正在滚动截屏…"))
+        self._render()
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +254,9 @@ class PreviewWindow(QWidget):
 
     def __init__(self, img: QImage, save_dir: Path) -> None:
         super().__init__(None, Qt.Window)
-        self.setWindowTitle(f"{APP_NAME} - 长截图预览")
+        self._copied = False
+        self._saved_path: str | None = None
+        self.setWindowTitle(t("{app} - 长截图预览", app=app_name()))
         self.img = img
         self.save_dir = save_dir
 
@@ -254,42 +268,61 @@ class PreviewWindow(QWidget):
         area.setWidget(label)
         root.addWidget(area, 1)
 
-        info = QLabel(f"尺寸：{img.width()} × {img.height()} px")
-        info.setStyleSheet("color:#555;")
-        root.addWidget(info)
+        self._info = QLabel(t("尺寸：{w} × {h} px", w=img.width(), h=img.height()))
+        self._info.setStyleSheet("color:#555;")
+        root.addWidget(self._info)
 
         row = QHBoxLayout()
-        b_copy = QPushButton("复制到剪贴板")
-        b_save = QPushButton("保存为文件")
-        b_close = QPushButton("关闭")
-        b_copy.clicked.connect(self._copy)
-        b_save.clicked.connect(self._save)
-        b_close.clicked.connect(self.close)
+        self._b_copy = QPushButton(t("复制到剪贴板"))
+        self._b_save = QPushButton(t("保存为文件"))
+        self._b_close = QPushButton(t("关闭"))
+        self._b_copy.clicked.connect(self._copy)
+        self._b_save.clicked.connect(self._save)
+        self._b_close.clicked.connect(self.close)
         row.addStretch(1)
-        row.addWidget(b_copy)
-        row.addWidget(b_save)
-        row.addWidget(b_close)
+        row.addWidget(self._b_copy)
+        row.addWidget(self._b_save)
+        row.addWidget(self._b_close)
         root.addLayout(row)
 
         self.resize(760, 720)
+        LANG.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        self._b_copy.setText(t("复制到剪贴板"))
+        self._b_save.setText(t("保存为文件"))
+        self._b_close.setText(t("关闭"))
+        self._info.setText(t("尺寸：{w} × {h} px", w=self.img.width(), h=self.img.height()))
+        self._render_title()
+
+    def _render_title(self) -> None:
+        app = app_name()
+        if self._copied:
+            self.setWindowTitle(t("{app} - 已复制到剪贴板", app=app))
+        elif self._saved_path:
+            self.setWindowTitle(t("{app} - 已保存：{path}", app=app, path=self._saved_path))
+        else:
+            self.setWindowTitle(t("{app} - 长截图预览", app=app))
 
     def _copy(self) -> None:
         QApplication.clipboard().setImage(self.img)
-        self.setWindowTitle(f"{APP_NAME} - 已复制到剪贴板")
+        self._copied, self._saved_path = True, None
+        self._render_title()
 
     def _save(self) -> None:
-        default = self.save_dir / f"长截图_{datetime.now():%Y%m%d_%H%M%S}.png"
+        default = self.save_dir / f"{t('长截图_')}{datetime.now():%Y%m%d_%H%M%S}.png"
         path, _ = QFileDialog.getSaveFileName(
-            self, "保存长截图", str(default), "PNG 图片 (*.png);;JPEG 图片 (*.jpg)"
+            self, t("保存长截图"), str(default), t("PNG 图片 (*.png);;JPEG 图片 (*.jpg)")
         )
         if not path:
             return
         try:
             save_qimage(self.img, Path(path))
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, APP_NAME, str(exc))
+            QMessageBox.warning(self, app_name(), str(exc))
             return
-        self.setWindowTitle(f"{APP_NAME} - 已保存：{path}")
+        self._saved_path, self._copied = path, False
+        self._render_title()
 
 
 # 取字结果在截图遮罩内展示（见 snapeditor.py）：逐行盖回原文位置，
@@ -330,42 +363,57 @@ class App:
         self.main_window.open_dir_requested.connect(self._open_save_dir)
         self.main_window.minimize_requested.connect(self._on_minimized)
         self.main_window.quit_requested.connect(self.quit)
+        self.main_window.language_requested.connect(self.open_language_settings)
 
         self.tray = QSystemTrayIcon(icon)
         self.menu = QMenu()
-        act_show = QAction("显示主窗口", self.menu)
+        self._tray_actions: dict[str, QAction] = {}
+        act_show = QAction(t("显示主窗口"), self.menu)
         act_show.triggered.connect(lambda _checked=False: self.show_main_window())
         self.menu.addAction(act_show)
-        self.act_capture = QAction("截图", self.menu)
+        self._tray_actions["show"] = act_show
+        self.act_capture = QAction(t("截图"), self.menu)
         self.act_capture.triggered.connect(lambda: self.start_capture())
         self.menu.addAction(self.act_capture)
+        self._tray_actions["capture"] = self.act_capture
         self.menu.addSeparator()
         for mode in CAPTURE_MODES:
-            act = QAction(MODE_LABELS[mode], self.menu)
+            act = QAction(mode_label(mode), self.menu)
             act.triggered.connect(
                 lambda _checked=False, m=mode: self.start_capture(m)
             )
             self.menu.addAction(act)
+            self._tray_actions[f"mode_{mode}"] = act
         self.menu.addSeparator()
-        act_hotkey = QAction("设置热键…", self.menu)
+        act_hotkey = QAction(t("设置热键…"), self.menu)
         act_hotkey.triggered.connect(lambda _checked=False: self.open_hotkey_settings())
         self.menu.addAction(act_hotkey)
-        act_dir = QAction("打开保存目录", self.menu)
+        self._tray_actions["hotkey"] = act_hotkey
+        act_lang = QAction(t("语言…"), self.menu)
+        act_lang.triggered.connect(lambda _checked=False: self.open_language_settings())
+        self.menu.addAction(act_lang)
+        self._tray_actions["language"] = act_lang
+        act_dir = QAction(t("打开保存目录"), self.menu)
         act_dir.triggered.connect(lambda _checked=False: self._open_save_dir())
         self.menu.addAction(act_dir)
+        self._tray_actions["dir"] = act_dir
         self.menu.addSeparator()
-        act_help = QAction("使用说明…", self.menu)
+        act_help = QAction(t("使用说明…"), self.menu)
         act_help.triggered.connect(lambda: self.show_help("help"))
         self.menu.addAction(act_help)
-        act_about = QAction("关于…", self.menu)
+        self._tray_actions["help"] = act_help
+        act_about = QAction(t("关于…"), self.menu)
         act_about.triggered.connect(lambda _checked=False: self.show_about())
         self.menu.addAction(act_about)
-        act_quit = QAction("退出", self.menu)
+        self._tray_actions["about"] = act_about
+        act_quit = QAction(t("退出"), self.menu)
         act_quit.triggered.connect(lambda _checked=False: self.quit())
         self.menu.addAction(act_quit)
+        self._tray_actions["quit"] = act_quit
         self.tray.setContextMenu(self.menu)
         self.tray.activated.connect(self._on_tray)
         self.tray.show()
+        LANG.changed.connect(self._retranslate_tray)
 
         # 有人重复启动时请求「把主窗口显示出来」，避免用户以为程序没在运行
         # 返回的是 QTimer（轮询唤醒事件），必须挂在 self 上保持引用
@@ -399,9 +447,30 @@ class App:
 
     def _update_hotkey_texts(self) -> None:
         label = self.hotkey.label()
-        self.act_capture.setText(f"截图  {label}")
-        self.tray.setToolTip(f"{APP_NAME}（{label} 截图 · 右键可改热键）")
+        self.act_capture.setText(t("截图  {label}", label=label))
+        self.tray.setToolTip(
+            t("{app}（{label} 截图 · 右键可改热键）", app=app_name(), label=label)
+        )
         self.main_window.set_hotkey(self.hotkey)
+
+    def _retranslate_tray(self, _code: str = "") -> None:
+        """语言切换后重建托盘菜单文案（截图项由 _update_hotkey_texts 带快捷键）。"""
+        for key, text_key in (
+            ("show", "显示主窗口"), ("hotkey", "设置热键…"),
+            ("language", "语言…"), ("dir", "打开保存目录"),
+            ("help", "使用说明…"), ("about", "关于…"), ("quit", "退出"),
+        ):
+            self._tray_actions[key].setText(t(text_key))
+        for mode in CAPTURE_MODES:
+            self._tray_actions[f"mode_{mode}"].setText(mode_label(mode))
+        self._update_hotkey_texts()
+
+    def open_language_settings(self) -> None:
+        """主窗口「设置 → 语言…」与托盘入口：选择 8 种语言或跟随系统。"""
+        if self.overlay is not None:
+            return  # 截图进行中不弹设置窗口
+        dlg = LanguageDialog(self.main_window)
+        dlg.exec()
 
     # ------------------------------------------------------------ 主窗口 / 帮助
     def show_main_window(self) -> None:
@@ -416,7 +485,7 @@ class App:
         self.tray.setVisible(True)
         self.show_main_window()
         self._tray_message(
-            APP_NAME, "程序本来就在运行，已为你显示主窗口。",
+            app_name(), t("程序本来就在运行，已为你显示主窗口。"),
             QSystemTrayIcon.Information, 3000,
         )
 
@@ -433,8 +502,8 @@ class App:
             return
         self._minimize_hint_shown = True
         self._tray_message(
-            APP_NAME,
-            "已最小化到托盘，程序仍在运行。右键托盘可重新打开主窗口或退出。",
+            app_name(),
+            t("已最小化到托盘，程序仍在运行。右键托盘可重新打开主窗口或退出。"),
             QSystemTrayIcon.Information,
             4000,
         )
@@ -463,10 +532,11 @@ class App:
             return
         self.capture_mode = mode
         self.main_window.set_mode(mode)
-        msg = f"默认截图模式已设为「{MODE_LABELS[mode]}」，热键与托盘截图将使用此模式"
+        msg = t("默认截图模式已设为「{mode}」，热键与托盘截图将使用此模式",
+                mode=mode_label(mode))
         if not save_mode(mode):
-            msg += "（配置写入失败，重启后会恢复）"
-        self._tray_message(APP_NAME, msg, QSystemTrayIcon.Information, 3000)
+            msg += t("（配置写入失败，重启后会恢复）")
+        self._tray_message(app_name(), msg, QSystemTrayIcon.Information, 3000)
 
     # ------------------------------------------------------------ 自有窗口显隐
     def _own_top_levels(self) -> list[QWidget]:
@@ -524,7 +594,7 @@ class App:
         self._unregister_hotkey()
         try:
             for _ in range(10):
-                dlg = HotkeyDialog(self.hotkey, None, APP_NAME, self._hk_error)
+                dlg = HotkeyDialog(self.hotkey, None, app_name(), self._hk_error)
                 if dlg.exec() != QDialog.Accepted:
                     break
                 hk = dlg.hotkey
@@ -532,14 +602,15 @@ class App:
                     self.hotkey = hk
                     saved = save_hotkey(hk)
                     self._update_hotkey_texts()
-                    msg = f"截图热键已改为 {hk.label()}"
+                    msg = t("截图热键已改为 {label}", label=hk.label())
                     if not saved:
-                        msg += "（配置未能写入磁盘，重启后会恢复旧设置）"
-                    self._tray_message(APP_NAME, msg, QSystemTrayIcon.Information, 3000)
+                        msg += t("（配置未能写入磁盘，重启后会恢复旧设置）")
+                    self._tray_message(app_name(), msg, QSystemTrayIcon.Information, 3000)
                     break
                 # 被其他程序占用 / 系统保留：让用户换一个，不改动旧设置
-                self._hk_error = (
-                    f"{hk.label()} 无法注册：可能已被其他程序占用，或属于系统保留组合。请换一个。"
+                self._hk_error = t(
+                    "{label} 无法注册：可能已被其他程序占用，或属于系统保留组合。请换一个。",
+                    label=hk.label(),
                 )
         finally:
             self._hk_error = ""
@@ -547,8 +618,9 @@ class App:
                 self._hotkey_ok = self._try_register(self.hotkey)
                 if not self._hotkey_ok:
                     self._tray_message(
-                        APP_NAME,
-                        f"热键 {self.hotkey.label()} 注册失败，请用托盘右键菜单截图，或在「设置热键…」里换一个组合。",
+                        app_name(),
+                        t("热键 {label} 注册失败，请用托盘右键菜单截图，或在「设置热键…」里换一个组合。",
+                          label=self.hotkey.label()),
                         QSystemTrayIcon.Warning,
                         6000,
                     )
@@ -586,7 +658,7 @@ class App:
         except Exception as exc:  # noqa: BLE001
             self.tray.setVisible(True)
             self._restore_own_windows()
-            QMessageBox.warning(None, APP_NAME, f"截屏失败：{exc}")
+            QMessageBox.warning(None, app_name(), t("截屏失败：{error}", error=exc))
             return
 
         self.tray.setVisible(True)
@@ -667,26 +739,26 @@ class App:
         QApplication.clipboard().setImage(img)
         self._close_overlay()
         self._tray_message(
-            APP_NAME,
-            f"已复制到剪贴板  {img.width()}×{img.height()}",
+            app_name(),
+            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
             QSystemTrayIcon.Information,
             1800,
         )
 
     def _save_image(self, img: QImage) -> None:
-        default = self.save_dir / f"截图_{datetime.now():%Y%m%d_%H%M%S}.png"
+        default = self.save_dir / f"{t('截图_')}{datetime.now():%Y%m%d_%H%M%S}.png"
         path, _ = QFileDialog.getSaveFileName(
-            None, "保存截图", str(default), "PNG 图片 (*.png);;JPEG 图片 (*.jpg)"
+            None, t("保存截图"), str(default), t("PNG 图片 (*.png);;JPEG 图片 (*.jpg)")
         )
         if not path:
             return
         try:
             save_qimage(img, Path(path))
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(None, APP_NAME, str(exc))
+            QMessageBox.warning(None, app_name(), str(exc))
             return
         self._close_overlay()
-        self._tray_message(APP_NAME, f"已保存：{path}", QSystemTrayIcon.Information, 2200)
+        self._tray_message(app_name(), t("已保存：{path}", path=path), QSystemTrayIcon.Information, 2200)
 
     # ------------------------------------------------------------ 长截图
     def _on_long_shot(self, logical_rect: QRect) -> None:
@@ -718,15 +790,15 @@ class App:
             self.preview.activateWindow()
             if stats.get("stop_reason") in ("match-failed", "no-overlap"):
                 self._tray_message(
-                    APP_NAME,
-                    "内容未能自动对齐，结果可能不完整（页面可能有固定悬浮元素或动画）",
+                    app_name(),
+                    t("内容未能自动对齐，结果可能不完整（页面可能有固定悬浮元素或动画）"),
                     QSystemTrayIcon.Warning,
                     4000,
                 )
 
         def on_fail(msg: str) -> None:
             self._close_busy()
-            QMessageBox.warning(None, APP_NAME, f"长截图失败：{msg}")
+            QMessageBox.warning(None, app_name(), t("长截图失败：{error}", error=msg))
 
         worker.ok.connect(on_ok)
         worker.failed.connect(on_fail)
@@ -757,15 +829,15 @@ class App:
             if lines:
                 overlay.show_ocr_lines(lines, backend)
             else:
-                overlay.show_ocr_message("没有识别到文字。")
+                overlay.show_ocr_message(t("没有识别到文字。"))
 
         def on_fail(msg: str) -> None:
             if self.overlay is not overlay:
                 return
             self._ocr_busy = False
             overlay.show_ocr_message(
-                "OCR 不可用：\n" + msg
-                + "\n\n请确认已安装 OCR 依赖（rapidocr / onnxruntime）。"
+                t("OCR 不可用：{error}\n\n请确认已安装 OCR 依赖（rapidocr / onnxruntime）。",
+                  error=msg)
             )
 
         worker.ok.connect(on_ok)
@@ -809,8 +881,8 @@ class App:
     def _on_editor_copy(self, img: QImage) -> None:
         QApplication.clipboard().setImage(img)
         self._tray_message(
-            APP_NAME,
-            f"已复制到剪贴板  {img.width()}×{img.height()}",
+            app_name(),
+            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
             QSystemTrayIcon.Information,
             1800,
         )
@@ -818,18 +890,18 @@ class App:
     def _on_editor_save(self, img: QImage) -> None:
         if self.editor is None:
             return
-        default = self.save_dir / f"截图_{datetime.now():%Y%m%d_%H%M%S}.png"
+        default = self.save_dir / f"{t('截图_')}{datetime.now():%Y%m%d_%H%M%S}.png"
         path, _ = QFileDialog.getSaveFileName(
-            None, "保存截图", str(default), "PNG 图片 (*.png);;JPEG 图片 (*.jpg)"
+            None, t("保存截图"), str(default), t("PNG 图片 (*.png);;JPEG 图片 (*.jpg)")
         )
         if not path:
             return
         try:
             save_qimage(img, Path(path))
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(None, APP_NAME, str(exc))
+            QMessageBox.warning(None, app_name(), str(exc))
             return
-        self._tray_message(APP_NAME, f"已保存：{path}", QSystemTrayIcon.Information, 2200)
+        self._tray_message(app_name(), t("已保存：{path}", path=path), QSystemTrayIcon.Information, 2200)
 
     def _on_editor_ocr(self, img: QImage) -> None:
         """窗口化编辑器里取字：结果逐行盖回原文位置（方案 B）。"""
@@ -847,14 +919,14 @@ class App:
                 # 保留每行的 bbox 交给编辑器，按原图位置逐行盖回
                 self.editor.show_ocr_lines(lines, backend)
             else:
-                self.editor.show_ocr_message("没有识别到文字。")
+                self.editor.show_ocr_message(t("没有识别到文字。"))
 
         def on_fail(msg: str) -> None:
             self._ocr_busy = False
             if self.editor is not None:
                 self.editor.show_ocr_message(
-                    "OCR 不可用：\n" + msg
-                    + "\n\n请确认已安装 OCR 依赖（rapidocr / onnxruntime）。"
+                    t("OCR 不可用：{error}\n\n请确认已安装 OCR 依赖（rapidocr / onnxruntime）。",
+                      error=msg)
                 )
 
         worker.ok.connect(on_ok)
@@ -911,7 +983,7 @@ def _run_selftest() -> int:
     import importlib
 
     out: list[str] = [
-        f"{APP_NAME} 自检 {datetime.now():%Y-%m-%d %H:%M:%S}",
+        f"{app_name()}{t(' 自检 ')}{datetime.now():%Y-%m-%d %H:%M:%S}",
         f"python    : {sys.version.split()[0]}",
         f"frozen    : {bool(getattr(sys, 'frozen', False))}",
         f"executable: {sys.executable}",
@@ -927,17 +999,17 @@ def _run_selftest() -> int:
     for mod in ("cv2", "paddleocr", "pytesseract"):
         try:
             importlib.import_module(mod)
-            out.append(f"[ok]   optional {mod} 可用")
+            out.append(f"[ok]   optional {mod}{t(' 可用')}")
         except Exception:  # noqa: BLE001
-            out.append(f"[--]   optional {mod} 未安装（对应功能不可用）")
+            out.append(f"[--]   optional {mod}{t(' 未安装（对应功能不可用）')}")
 
     try:
         base = getattr(sys, "_MEIPASS", None) or str(Path(__file__).resolve().parent)
         png = Path(base) / "ocr_test.png"
-        out.append(f"测试图   : {png} (exists={png.is_file()})")
+        out.append(f"{t('测试图   : ')}{png} (exists={png.is_file()})")
         if not png.is_file():
             ok = False
-            out.append("[FAIL] 找不到 ocr_test.png")
+            out.append(t("[FAIL] 找不到 ocr_test.png"))
         else:
             from PIL import Image
 
@@ -949,7 +1021,7 @@ def _run_selftest() -> int:
                 )
             if not lines:
                 ok = False
-                out.append("[FAIL] OCR 返回 0 行")
+                out.append(t("[FAIL] OCR 返回 0 行"))
     except Exception as exc:  # noqa: BLE001
         ok = False
         out.append(f"[FAIL] OCR: {type(exc).__name__}: {exc}")
@@ -970,7 +1042,7 @@ def _run_selftest() -> int:
     # 发行版一律以日志文件为准；源码模式才额外打印到控制台。
     if getattr(sys, "stdout", None) is not None and not getattr(sys, "frozen", False):
         print(text)
-        print(f"[selftest] 日志：{log}")
+        print(t("[selftest] 日志：{log}", log=log))
     return 0 if ok else 1
 
 
@@ -982,24 +1054,24 @@ def _resolve_existing_instance(st, restart: bool) -> bool:
     """
     rec = st.record or {}
     pid = rec.get("pid", "?")
-    started = rec.get("started", "未知")
+    started = rec.get("started", t("未知"))
     woken = singleinstance.signal_existing()
     singleinstance.log(f"已有实例 pid={pid} 唤醒={woken} restart={restart}")
 
     if not restart:
-        hint = (
+        hint = t(
             "已请它把主窗口显示出来，请看任务栏。\n" if woken
             else "托盘图标可能被收进了通知区折叠栏（点 ^ 展开看看）。\n"
         )
         text = (
-            f"截屏助手已在后台运行（PID {pid}，启动于 {started}）。\n\n"
+            t("{app}已在后台运行（PID {pid}，启动于 {started}）。\n\n",
+              app=app_name(), pid=pid, started=started)
             + hint
-            + "如果确实看不到任何窗口，多半是残留的后台实例。\n\n"
-            "是否结束它并重新启动？（若有未保存的编辑内容会丢失）"
+            + t("如果确实看不到任何窗口，多半是残留的后台实例。\n\n是否结束它并重新启动？（若有未保存的编辑内容会丢失）")
         )
         # MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
         ans = ctypes.windll.user32.MessageBoxW(
-            None, text, APP_NAME, 0x04 | 0x20 | 0x40000
+            None, text, app_name(), 0x04 | 0x20 | 0x40000
         )
         if ans != 6:  # IDYES
             return False
@@ -1009,9 +1081,8 @@ def _resolve_existing_instance(st, restart: bool) -> bool:
     if not killed:
         ctypes.windll.user32.MessageBoxW(
             None,
-            "结束后台实例未成功，但仍会尝试继续启动。\n"
-            "若再次提示已在运行，请在任务管理器里结束残留的 pythonw.exe。",
-            APP_NAME, 0x30 | 0x40000,
+            t("结束后台实例未成功，但仍会尝试继续启动。\n若再次提示已在运行，请在任务管理器里结束残留的 pythonw.exe。"),
+            app_name(), 0x30 | 0x40000,
         )
     time.sleep(0.25)
     again = singleinstance.probe()
@@ -1019,23 +1090,25 @@ def _resolve_existing_instance(st, restart: bool) -> bool:
     if again.state == "running":
         ctypes.windll.user32.MessageBoxW(
             None,
-            "仍有实例占用，启动中止。请在任务管理器中结束所有 pythonw.exe 后重试，"
-            "或双击 restart.bat。",
-            APP_NAME, 0x10 | 0x40000,
+            t("仍有实例占用，启动中止。请在任务管理器中结束所有 pythonw.exe 后重试，或双击 restart.bat。"),
+            app_name(), 0x10 | 0x40000,
         )
         return False
     return True
 
 
 def main() -> int:
+    # 启动时加载语言偏好：auto 会按 Windows 显示语言解析，未支持语言回退英文
+    LANG.reload()
     # --help 不进入 Qt，也不检查单实例；pythonw 无控制台时改用系统弹窗
     if any(a in ("-h", "--help", "/?") for a in sys.argv[1:]):
+        text = cli_help(name=app_name())
         if getattr(sys, "stdout", None) is None:
             ctypes.windll.user32.MessageBoxW(
-                None, CLI_HELP, f"{APP_NAME} - 命令行说明", 0x40
+                None, text, t("{app} - 命令行说明", app=app_name()), 0x40
             )
         else:
-            print(CLI_HELP)
+            print(text)
         return 0
 
     # --selftest 不建 QApplication、不检查单实例，供打包产物做冒烟验证
@@ -1060,11 +1133,11 @@ def main() -> int:
         singleinstance.log("检测到陈旧锁，已自动接管，不再提示「已在运行」")
 
     app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName(app_name())
     app.setQuitOnLastWindowClosed(False)
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(None, APP_NAME, "系统托盘不可用，无法常驻运行。")
+        QMessageBox.critical(None, app_name(), t("系统托盘不可用，无法常驻运行。"))
         return 2
 
     ctrl = App(app)
@@ -1076,9 +1149,9 @@ def main() -> int:
         QTimer.singleShot(120, ctrl.start_capture)
     elif not ctrl._hotkey_ok:
         ctrl.tray.showMessage(
-            APP_NAME,
-            f"全局热键 {ctrl.hotkey.label()} 注册失败（可能被其他程序占用）。"
-            "请在主窗口或托盘菜单「设置热键…」换一个组合，也可直接点主窗口的截图按钮。",
+            app_name(),
+            t("全局热键 {label} 注册失败（可能被其他程序占用）。请在主窗口或托盘菜单「设置热键…」换一个组合，也可直接点主窗口的截图按钮。",
+              label=ctrl.hotkey.label()),
             QSystemTrayIcon.Warning,
             8000,
         )

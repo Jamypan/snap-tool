@@ -35,6 +35,15 @@ VK_ESCAPE = 0x1B
 user32 = ctypes.windll.user32 if sys.platform == "win32" else None
 
 
+def _t(key: str, **kwargs) -> str:
+    """后端异常文案的多语言入口（延迟导入，保持本模块无顶层 Qt 依赖）。"""
+    try:
+        from i18n import t
+        return t(key, **kwargs)
+    except Exception:  # noqa: BLE001
+        return key.format(**kwargs) if kwargs else key
+
+
 # ---------------------------------------------------------------------------
 # DPI 感知
 # ---------------------------------------------------------------------------
@@ -272,7 +281,7 @@ def find_vertical_overlap(
     import cv2
 
     if acc.shape[1] != frame.shape[1]:
-        raise ValueError("拼接帧宽度必须一致")
+        raise ValueError(_t("拼接帧宽度必须一致"))
 
     if acc.shape[0] < template_rows or frame.shape[0] < template_rows:
         return -1, 0.0
@@ -452,7 +461,7 @@ def _ocr_windows_lines(img: Image.Image) -> list[dict]:
         from winrt.windows.media.ocr import OcrEngine
         from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
     except ImportError as exc:  # pragma: no cover
-        raise OcrUnavailable("未安装 winrt 包（Windows OCR 绑定）") from exc
+        raise OcrUnavailable(_t("未安装 winrt 包（Windows OCR 绑定）")) from exc
 
     async def _run() -> list[dict]:
         # 明确优先中文引擎：英文系统上 try_create_from_user_profile_languages()
@@ -465,7 +474,7 @@ def _ocr_windows_lines(img: Image.Image) -> list[dict]:
         if engine is None:
             engine = OcrEngine.try_create_from_user_profile_languages()
         if engine is None:
-            raise OcrUnavailable("系统未安装可用的 OCR 语言包（需 zh-CN OCR 语言包）")
+            raise OcrUnavailable(_t("系统未安装可用的 OCR 语言包（需 zh-CN OCR 语言包）"))
 
         # Windows OCR 对输入图有最大边长限制，4K / 多显示器全屏截图会直接失败；
         # 超限先缩放，识别完再把行框坐标乘回原图尺度（否则「盖回原位」会整体偏移）。
@@ -753,11 +762,11 @@ def ocr_image_lines(img: Image.Image) -> tuple[list[dict], str]:
         except OcrUnavailable as exc:
             errors.append(f"{name}: {exc}")
         except ImportError as exc:
-            errors.append(f"{name}: 缺少依赖 {exc}")
+            errors.append(f"{name}: {_t('缺少依赖 {error}', error=exc)}")
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{name}: {type(exc).__name__}: {exc}")
 
-    raise OcrUnavailable("；".join(errors) or "没有可用的 OCR 后端")
+    raise OcrUnavailable(" | ".join(errors) or _t("没有可用的 OCR 后端"))
 
 
 def ocr_image(img: Image.Image) -> tuple[str, str]:

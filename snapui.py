@@ -26,8 +26,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hotkeys import CAPTURE_MODES, MODE_LABELS, Hotkey
+from hotkeys import CAPTURE_MODES, Hotkey, mode_label
+from i18n import LANG, app_name, language_choices, language_label, t
+from i18n_docs import about_html, cli_help, cli_help_html, help_html
 
+# 常量保留简体中文：配置目录名、exe 名、自检与旧版脚本都依赖它，
+# 界面上显示的程序名统一用随语言变化的 app_name()。
 APP_NAME = "截屏助手"
 CONTACT_EMAIL = "283096251@qq.com"
 
@@ -197,7 +201,7 @@ class AboutDialog(QDialog):
     def __init__(self, parent: QWidget | None = None,
                  icon: QIcon | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"关于 {APP_NAME}")
+        self.setWindowTitle(t("关于 {app}", app=app_name()))
         if icon is not None and not icon.isNull():
             self.setWindowIcon(icon)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
@@ -231,22 +235,30 @@ class AboutDialog(QDialog):
             avatar.setVisible(False)
         body.addWidget(avatar, 0, Qt.AlignTop)
 
-        text = QLabel(ABOUT_HTML)
-        text.setObjectName("aboutText")
-        text.setWordWrap(True)
-        text.setTextFormat(Qt.RichText)
-        text.setOpenExternalLinks(True)   # mailto 交给系统默认邮件客户端
-        text.setAlignment(Qt.AlignTop)
-        body.addWidget(text, 1)
+        self._text = QLabel(about_html(name=app_name()))
+        self._text.setObjectName("aboutText")
+        self._text.setWordWrap(True)
+        self._text.setTextFormat(Qt.RichText)
+        self._text.setOpenExternalLinks(True)   # mailto 交给系统默认邮件客户端
+        self._text.setAlignment(Qt.AlignTop)
+        body.addWidget(self._text, 1)
         root.addLayout(body)
 
         row = QHBoxLayout()
         row.addStretch(1)
-        ok = QPushButton("确定")
-        ok.setObjectName("aboutOk")
-        ok.clicked.connect(self.hide)
-        row.addWidget(ok)
+        self._ok = QPushButton(t("确定"))
+        self._ok.setObjectName("aboutOk")
+        self._ok.clicked.connect(self.hide)
+        row.addWidget(self._ok)
         root.addLayout(row)
+
+        LANG.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        """语言切换后即时刷新标题、正文（含邮箱链接）与按钮。"""
+        self.setWindowTitle(t("关于 {app}", app=app_name()))
+        self._text.setText(about_html(name=app_name()))
+        self._ok.setText(t("确定"))
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +275,7 @@ class MainWindow(QMainWindow):
     open_dir_requested = Signal()
     minimize_requested = Signal()
     quit_requested = Signal()
+    language_requested = Signal()
 
     STYLE = (
         "QMainWindow, QWidget#central { background:#f7f8fa; }"
@@ -282,7 +295,9 @@ class MainWindow(QMainWindow):
         # 程序真正退出时由 App 置 True：closeEvent 直接放行关闭，
         # 不再走「最小化到托盘」并弹出「程序仍在运行」之类的提示。
         self._allow_close = False
-        self.setWindowTitle(APP_NAME)
+        self._save_dir = Path(save_dir)
+        self._actions: dict[str, QAction] = {}
+        self.setWindowTitle(app_name())
         self.setWindowIcon(icon)
         self.setMinimumWidth(540)
         self.resize(620, 470)
@@ -291,46 +306,62 @@ class MainWindow(QMainWindow):
         self._build_body(save_dir)
         self.set_hotkey(hotkey)
         self.set_mode(mode)
+        LANG.changed.connect(self.retranslate_ui)
 
     def _build_menu(self) -> None:
         mb = self.menuBar()
+        self._menus: dict[str, object] = {}
 
-        m_file = mb.addMenu("文件(&F)")
-        a_dir = QAction("打开保存目录", self)
+        m_file = mb.addMenu(t("文件(&F)"))
+        self._menus["file"] = m_file
+        a_dir = QAction(t("打开保存目录"), self)
         a_dir.triggered.connect(lambda _checked=False: self.open_dir_requested.emit())
         m_file.addAction(a_dir)
-        a_min = QAction("最小化到托盘", self)
+        a_min = QAction(t("最小化到托盘"), self)
         a_min.triggered.connect(lambda _checked=False: self._minimize_to_tray())
         m_file.addAction(a_min)
         m_file.addSeparator()
-        a_quit = QAction("退出", self)
+        a_quit = QAction(t("退出"), self)
         a_quit.triggered.connect(lambda _checked=False: self.quit_requested.emit())
         m_file.addAction(a_quit)
+        self._actions.update(dir=a_dir, minimize=a_min, quit=a_quit)
 
-        m_shot = mb.addMenu("截图(&S)")
+        m_shot = mb.addMenu(t("截图(&S)"))
+        self._menus["shot"] = m_shot
         for mode in CAPTURE_MODES:
-            a = QAction(MODE_LABELS[mode], self)
+            a = QAction(mode_label(mode), self)
             a.triggered.connect(
                 lambda _checked=False, m=mode: self.capture_requested.emit(m)
             )
             m_shot.addAction(a)
+            self._actions[f"shot_{mode}"] = a
 
-        m_set = mb.addMenu("设置(&E)")
-        a_hk = QAction("设置热键…", self)
+        m_set = mb.addMenu(t("设置(&E)"))
+        self._menus["settings"] = m_set
+        a_hk = QAction(t("设置热键…"), self)
         a_hk.triggered.connect(lambda _checked=False: self.hotkey_requested.emit())
         m_set.addAction(a_hk)
+        a_lang = QAction(
+            f"{t('语言…')}  [{language_label(LANG.preference)}]", self
+        )
+        a_lang.triggered.connect(lambda _checked=False: self.language_requested.emit())
+        m_set.addAction(a_lang)
+        self._actions.update(hotkey=a_hk, language=a_lang)
 
-        m_help = mb.addMenu("帮助(&H)")
-        for text, topic in (("使用说明…", "help"), ("命令行参数…", "cli")):
-            a = QAction(text, self)
+        m_help = mb.addMenu(t("帮助(&H)"))
+        self._menus["help"] = m_help
+        for text_key, topic in (("使用说明…", "help"), ("命令行参数…", "cli")):
+            a = QAction(t(text_key), self)
             a.triggered.connect(
-                lambda _checked=False, t=topic: self.help_requested.emit(t)
+                lambda _checked=False, v=topic: self.help_requested.emit(v)
             )
             m_help.addAction(a)
+            self._actions[f"help_{topic}"] = a
         m_help.addSeparator()
-        a_about = QAction("关于…", self)
+        a_about = QAction(t("关于…"), self)
         a_about.triggered.connect(lambda _checked=False: self.about_requested.emit())
         m_help.addAction(a_about)
+        self._actions["about"] = a_about
 
     def _build_body(self, save_dir: Path) -> None:
         central = QWidget()
@@ -339,13 +370,13 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(24, 18, 24, 16)
         root.setSpacing(12)
 
-        title = QLabel(APP_NAME)
-        title.setStyleSheet("font-size:22px; font-weight:bold; color:#111827;")
-        root.addWidget(title)
-        sub = QLabel("程序已启动 · 托盘常驻 · 关闭本窗口只会最小化到托盘，不会退出程序")
-        sub.setObjectName("sub")
-        sub.setWordWrap(True)
-        root.addWidget(sub)
+        self._title = QLabel(app_name())
+        self._title.setStyleSheet("font-size:22px; font-weight:bold; color:#111827;")
+        root.addWidget(self._title)
+        self._sub = QLabel(t("程序已启动 · 托盘常驻 · 关闭本窗口只会最小化到托盘，不会退出程序"))
+        self._sub.setObjectName("sub")
+        self._sub.setWordWrap(True)
+        root.addWidget(self._sub)
 
         card = QFrame()
         card.setObjectName("card")
@@ -355,44 +386,48 @@ class MainWindow(QMainWindow):
         grid.setVerticalSpacing(10)
 
         self.hotkey_label = QLabel("")
-        b_change = QPushButton("更改…")
-        b_change.setObjectName("minor")
-        b_change.clicked.connect(lambda _checked=False: self.hotkey_requested.emit())
+        self._b_change = QPushButton(t("更改…"))
+        self._b_change.setObjectName("minor")
+        self._b_change.clicked.connect(lambda _checked=False: self.hotkey_requested.emit())
         self.mode_combo = QComboBox()
         for m in CAPTURE_MODES:
-            self.mode_combo.addItem(MODE_LABELS[m], m)
+            self.mode_combo.addItem(mode_label(m), m)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_combo)
 
-        grid.addWidget(QLabel("截图热键"), 0, 0)
+        self._lbl_hotkey = QLabel(t("截图热键"))
+        grid.addWidget(self._lbl_hotkey, 0, 0)
         grid.addWidget(self.hotkey_label, 0, 1)
-        grid.addWidget(b_change, 0, 2)
-        grid.addWidget(QLabel("默认模式"), 1, 0)
+        grid.addWidget(self._b_change, 0, 2)
+        self._lbl_mode = QLabel(t("默认模式"))
+        grid.addWidget(self._lbl_mode, 1, 0)
         grid.addWidget(self.mode_combo, 1, 1)
-        hint = QLabel("热键与托盘「截图」使用此模式")
-        hint.setObjectName("hint")
-        grid.addWidget(hint, 1, 2)
+        self._hint = QLabel(t("热键与托盘「截图」使用此模式"))
+        self._hint.setObjectName("hint")
+        grid.addWidget(self._hint, 1, 2)
         root.addWidget(card)
 
-        root.addWidget(QLabel("立即截图"))
+        self._lbl_now = QLabel(t("立即截图"))
+        root.addWidget(self._lbl_now)
         row = QHBoxLayout()
         row.setSpacing(10)
+        self._mode_buttons: dict[str, QPushButton] = {}
         for mode in CAPTURE_MODES:
-            b = QPushButton(f"{MODE_LABELS[mode]}\n{MODE_DESC[mode]}")
+            b = QPushButton(f"{mode_label(mode)}\n{t(MODE_DESC[mode])}")
             b.setObjectName("mode")
             b.setMinimumHeight(76)
             b.clicked.connect(
                 lambda _checked=False, m=mode: self.capture_requested.emit(m)
             )
             row.addWidget(b)
+            self._mode_buttons[mode] = b
         root.addLayout(row)
 
-        tip = QLabel(
-            "提示：截图中按 Esc 取消；选区确定后可标注、取字、复制或保存。"
-            " 详细说明见「帮助 → 使用说明」。"
+        self._tip = QLabel(
+            t("提示：截图中按 Esc 取消；选区确定后可标注、取字、复制或保存。 详细说明见「帮助 → 使用说明」。")
         )
-        tip.setObjectName("hint")
-        tip.setWordWrap(True)
-        root.addWidget(tip)
+        self._tip.setObjectName("hint")
+        self._tip.setWordWrap(True)
+        root.addWidget(self._tip)
         root.addStretch(1)
 
         self.setCentralWidget(central)
@@ -403,8 +438,52 @@ class MainWindow(QMainWindow):
         if isinstance(mode, str):
             self.mode_changed.emit(mode)
 
+    # ------------------------------------------------------------ 语言刷新
+    def retranslate_ui(self, _code: str = "") -> None:
+        """LANG.changed 触发：已在界面上的所有文案立即换语言。"""
+        self.setWindowTitle(app_name())
+        for key, text_key in (
+            ("file", "文件(&F)"), ("shot", "截图(&S)"),
+            ("settings", "设置(&E)"), ("help", "帮助(&H)"),
+        ):
+            self._menus[key].setTitle(t(text_key))
+        for key, text_key in (
+            ("dir", "打开保存目录"), ("minimize", "最小化到托盘"),
+            ("quit", "退出"), ("hotkey", "设置热键…"),
+            ("help_help", "使用说明…"), ("help_cli", "命令行参数…"),
+            ("about", "关于…"),
+        ):
+            self._actions[key].setText(t(text_key))
+        for mode in CAPTURE_MODES:
+            self._actions[f"shot_{mode}"].setText(mode_label(mode))
+        self._actions["language"].setText(
+            f"{t('语言…')}  [{language_label(LANG.preference)}]"
+        )
+
+        self._title.setText(app_name())
+        self._sub.setText(t("程序已启动 · 托盘常驻 · 关闭本窗口只会最小化到托盘，不会退出程序"))
+        self._b_change.setText(t("更改…"))
+        self._lbl_hotkey.setText(t("截图热键"))
+        self._lbl_mode.setText(t("默认模式"))
+        self._hint.setText(t("热键与托盘「截图」使用此模式"))
+        self._lbl_now.setText(t("立即截图"))
+        for mode, btn in self._mode_buttons.items():
+            btn.setText(f"{mode_label(mode)}\n{t(MODE_DESC[mode])}")
+        self._tip.setText(
+            t("提示：截图中按 Esc 取消；选区确定后可标注、取字、复制或保存。 详细说明见「帮助 → 使用说明」。")
+        )
+        idx = self.mode_combo.currentIndex()
+        self.mode_combo.blockSignals(True)
+        for i, mode in enumerate(CAPTURE_MODES):
+            self.mode_combo.setItemText(i, mode_label(mode))
+        self.mode_combo.setCurrentIndex(idx)
+        self.mode_combo.blockSignals(False)
+        self.set_save_dir(self._save_dir)
+        self.set_hotkey(self._hotkey)
+
     # ------------------------------------------------------------ 对外更新
     def set_hotkey(self, hk: Hotkey) -> None:
+        self._hotkey = hk
         self.hotkey_label.setText(f"<b>{hk.label()}</b>")
 
     def set_mode(self, mode: str) -> None:
@@ -416,7 +495,8 @@ class MainWindow(QMainWindow):
         self.mode_combo.blockSignals(False)
 
     def set_save_dir(self, path: Path) -> None:
-        self.statusBar().showMessage(f"保存目录：{path}")
+        self._save_dir = Path(path)
+        self.statusBar().showMessage(t("保存目录：{path}", path=self._save_dir))
 
     def _minimize_to_tray(self) -> None:
         self.hide()
@@ -440,7 +520,7 @@ class HelpWindow(QDialog):
 
     def __init__(self, topic: str = "help", parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} - 使用说明")
+        self._topic = "help"
         self.resize(720, 620)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 12, 14, 12)
@@ -448,22 +528,120 @@ class HelpWindow(QDialog):
         self.browser.setOpenExternalLinks(True)
         lay.addWidget(self.browser, 1)
         row = QHBoxLayout()
-        b_close = QPushButton("关闭")
-        b_close.clicked.connect(lambda _checked=False: self.close())
+        self._close_btn = QPushButton(t("关闭"))
+        self._close_btn.clicked.connect(lambda _checked=False: self.close())
         row.addStretch(1)
-        row.addWidget(b_close)
+        row.addWidget(self._close_btn)
         lay.addLayout(row)
         self.show_topic(topic)
+        LANG.changed.connect(self.retranslate_ui)
 
     def show_topic(self, topic: str) -> None:
-        self.browser.setHtml(HELP_HTML if topic != "cli" else CLI_HELP_HTML)
+        self._topic = topic if topic in ("help", "cli") else "help"
+        name = app_name()
+        if self._topic == "cli":
+            self.browser.setHtml(cli_help_html(name=name))
+            self.setWindowTitle(t("{app} - 命令行参数", app=name))
+        else:
+            self.browser.setHtml(help_html())
+            self.setWindowTitle(t("{app} - 使用说明", app=name))
         self.browser.moveCursor(QTextCursor.Start)
-        self.setWindowTitle(
-            f"{APP_NAME} - {'命令行参数' if topic == 'cli' else '使用说明'}"
-        )
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        self._close_btn.setText(t("关闭"))
+        self.show_topic(self._topic)
 
 
 CLI_HELP_HTML = "<html><body style=\"font-family:'Microsoft YaHei';font-size:13px;\">" \
     "<h2>命令行参数</h2><pre style=\"font-family:Consolas,'Microsoft YaHei';font-size:13px;\">" \
     + CLI_HELP.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") \
     + "</pre></body></html>"
+
+
+# ---------------------------------------------------------------------------
+# 语言设置
+# ---------------------------------------------------------------------------
+class LanguageDialog(QDialog):
+    """「跟随系统 + 8 种语言」下拉框；切换后由 LANG.changed 立即刷新所有窗口。"""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(t("语言设置"))
+        self.setMinimumWidth(400)
+        self.setStyleSheet(
+            "QDialog { background:#f7f8fa; }"
+            "QLabel#langHint { color:#6b7280; }"
+            "QPushButton { padding:6px 14px; }"
+            "QPushButton#langOk { background:#0a84ff; color:#fff; border:none;"
+            " border-radius:5px; font-weight:bold; padding:7px 18px; }"
+            "QComboBox { padding:5px 8px; }"
+        )
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 16)
+        root.setSpacing(12)
+
+        self._heading = QLabel(t("界面语言"))
+        self._heading.setStyleSheet("font-size:15px; font-weight:bold;")
+        root.addWidget(self._heading)
+
+        self.combo = QComboBox()
+        self._fill_choices()
+        root.addWidget(self.combo)
+
+        self._hint = QLabel(
+            t("选择程序界面使用的语言。启动时默认跟随系统语言，设置会被记住。")
+            + "\n" + t("切换后已打开的窗口会立即刷新。")
+        )
+        self._hint.setObjectName("langHint")
+        self._hint.setWordWrap(True)
+        root.addWidget(self._hint)
+
+        self._current = QLabel(
+            t("当前语言：{name}", name=language_label(LANG.preference))
+        )
+        root.addWidget(self._current)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self._cancel = QPushButton(t("取消"))
+        self._cancel.clicked.connect(self.reject)
+        self._ok = QPushButton(t("确定"))
+        self._ok.setObjectName("langOk")
+        self._ok.setDefault(True)
+        self._ok.clicked.connect(self._apply)
+        row.addWidget(self._cancel)
+        row.addWidget(self._ok)
+        root.addLayout(row)
+
+        LANG.changed.connect(self.retranslate_ui)
+
+    def _fill_choices(self) -> None:
+        wanted = LANG.preference
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        for code, label in language_choices():
+            self.combo.addItem(label, code)
+        idx = self.combo.findData(wanted)
+        if idx >= 0:
+            self.combo.setCurrentIndex(idx)
+        self.combo.blockSignals(False)
+
+    def _apply(self) -> None:
+        code = self.combo.currentData()
+        if isinstance(code, str):
+            LANG.set_preference(code)
+        self.accept()
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        self.setWindowTitle(t("语言设置"))
+        self._heading.setText(t("界面语言"))
+        self._hint.setText(
+            t("选择程序界面使用的语言。启动时默认跟随系统语言，设置会被记住。")
+            + "\n" + t("切换后已打开的窗口会立即刷新。")
+        )
+        self._current.setText(
+            t("当前语言：{name}", name=language_label(LANG.preference))
+        )
+        self._cancel.setText(t("取消"))
+        self._ok.setText(t("确定"))
+        self._fill_choices()

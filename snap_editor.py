@@ -61,6 +61,7 @@ from snapeditor import (
     _reading_order,
     draw_shape,
 )
+from i18n import LANG, app_name, t
 
 # 连续拖动时的重绘节流（毫秒），与 Overlay 一致
 REPAINT_INTERVAL_MS = 10.0
@@ -1058,8 +1059,10 @@ class EditorWindow(QMainWindow):
 
     def __init__(self, image: QImage, shapes: list[Shape], save_dir, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("截屏助手 - 截图编辑")
+        self.setWindowTitle(t("{app} - 截图编辑", app=app_name()))
         self._save_dir = save_dir
+        self._actions: dict[str, QAction] = {}
+        self._menus: dict[str, object] = {}
 
         self.canvas = Canvas(image, shapes, self)
         self.setCentralWidget(self.canvas)
@@ -1075,54 +1078,81 @@ class EditorWindow(QMainWindow):
         self.canvas.toolbar.show()
         self.canvas.toolbar.raise_()
 
+    # 菜单文案的简体中文 key，retranslate_ui 与构造共用
+    _FILE_TEXTS = ("复制到剪贴板\tCtrl+Enter", "另存为…\tCtrl+S", "关闭编辑器\tEsc")
+    _EDIT_TEXTS = ("撤销\tCtrl+Z", "OCR 取字", "样式面板")
+    _TRANSFORM_TEXTS = ("顺时针旋转 90°", "逆时针旋转 90°", "左右镜像", "上下镜像")
+    _PEN_TEXTS = ("不加箭头", "只加起点", "只加终点", "两端都加")
+
     def _build_menu(self) -> None:
         mb = self.menuBar()
-        m_file = mb.addMenu("文件(&F)")
-        for text, slot in (
-            ("复制到剪贴板\tCtrl+Enter", lambda: self.copy_requested.emit(self.canvas.compose())),
-            ("另存为…\tCtrl+S", lambda: self.save_requested.emit(self.canvas.compose())),
-            ("关闭编辑器\tEsc", self.closed.emit),
-        ):
-            a = QAction(text, self)
+        m_file = mb.addMenu(t("文件(&F)"))
+        self._menus["file"] = m_file
+        for i, (text_key, slot) in enumerate(zip(self._FILE_TEXTS, (
+            lambda: self.copy_requested.emit(self.canvas.compose()),
+            lambda: self.save_requested.emit(self.canvas.compose()),
+            self.closed.emit,
+        ))):
+            a = QAction(t(text_key), self)
             a.triggered.connect(slot)
             m_file.addAction(a)
+            self._actions[f"file{i}"] = a
 
-        m_edit = mb.addMenu("编辑(&E)")
-        for text, slot in (
-            ("撤销\tCtrl+Z", self.canvas.undo),
-            ("OCR 取字", lambda: self.ocr_requested.emit(self.canvas.base.copy())),
-            ("样式面板", self.canvas._toggle_style_panel),
-        ):
-            a = QAction(text, self)
+        m_edit = mb.addMenu(t("编辑(&E)"))
+        self._menus["edit"] = m_edit
+        for i, (text_key, slot) in enumerate(zip(self._EDIT_TEXTS, (
+            self.canvas.undo,
+            lambda: self.ocr_requested.emit(self.canvas.base.copy()),
+            self.canvas._toggle_style_panel,
+        ))):
+            a = QAction(t(text_key), self)
             a.triggered.connect(slot)
             m_edit.addAction(a)
+            self._actions[f"edit{i}"] = a
 
         # 整图变换：底图和标注一起变，可用 Ctrl+Z 撤销
-        m_transform = m_edit.addMenu("图像变换")
-        for text, mode, shortcut in (
-            ("顺时针旋转 90°", "cw", "Ctrl+R"),
-            ("逆时针旋转 90°", "ccw", "Ctrl+Shift+R"),
-            ("左右镜像", "flip_h", "Ctrl+H"),
-            ("上下镜像", "flip_v", "Ctrl+Shift+H"),
-        ):
-            a = QAction(text, self)
+        m_transform = m_edit.addMenu(t("图像变换"))
+        self._menus["transform"] = m_transform
+        for i, (text_key, mode, shortcut) in enumerate(zip(
+            self._TRANSFORM_TEXTS,
+            ("cw", "ccw", "flip_h", "flip_v"),
+            ("Ctrl+R", "Ctrl+Shift+R", "Ctrl+H", "Ctrl+Shift+H"),
+        )):
+            a = QAction(t(text_key), self)
             a.setShortcut(shortcut)
             a.triggered.connect(lambda _=False, m=mode: self.canvas.transform_image(m))
             m_transform.addAction(a)
+            self._actions[f"transform{i}"] = a
 
         # 端点箭头：既是新建画笔/直线的默认，也作用于当前选中的画笔或直线
-        m_pen = m_edit.addMenu("端点箭头")
-        for text, st, en in (
-            ("不加箭头", False, False),
-            ("只加起点", True, False),
-            ("只加终点", False, True),
-            ("两端都加", True, True),
-        ):
-            a = QAction(text, self)
+        m_pen = m_edit.addMenu(t("端点箭头"))
+        self._menus["pen"] = m_pen
+        for i, (text_key, st, en) in enumerate(zip(
+            self._PEN_TEXTS,
+            (False, True, False, True),
+            (False, False, True, True),
+        )):
+            a = QAction(t(text_key), self)
             a.triggered.connect(
                 lambda _=False, s=st, e=en: self.canvas.set_pen_arrows(s, e)
             )
             m_pen.addAction(a)
+            self._actions[f"pen{i}"] = a
+
+        LANG.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        self.setWindowTitle(t("{app} - 截图编辑", app=app_name()))
+        self._menus["file"].setTitle(t("文件(&F)"))
+        self._menus["edit"].setTitle(t("编辑(&E)"))
+        self._menus["transform"].setTitle(t("图像变换"))
+        self._menus["pen"].setTitle(t("端点箭头"))
+        for prefix, keys in (
+            ("file", self._FILE_TEXTS), ("edit", self._EDIT_TEXTS),
+            ("transform", self._TRANSFORM_TEXTS), ("pen", self._PEN_TEXTS),
+        ):
+            for i, text_key in enumerate(keys):
+                self._actions[f"{prefix}{i}"].setText(t(text_key))
 
     def show_ocr_busy(self) -> None:
         self.canvas.show_ocr_busy()
