@@ -72,8 +72,8 @@ from hotkeys import (  # noqa: E402
 from snapeditor import Overlay  # noqa: E402
 from snap_editor import EditorWindow  # noqa: E402
 from snapui import (  # noqa: E402
-    ABOUT_HTML,
     APP_NAME,
+    AboutDialog,
     CLI_HELP,
     HelpWindow,
     MainWindow,
@@ -310,7 +310,7 @@ class App:
         self._ocr_busy = False          # 已有取字任务在跑时忽略重复点击
         self._workers: list[QThread] = []
         self._help_window: HelpWindow | None = None
-        self._about_box: QMessageBox | None = None
+        self._about_box: AboutDialog | None = None
         self._hidden_windows: list[QWidget] = []
         self._minimize_hint_shown = False
         self._quitting = False          # 正在退出：屏蔽一切托盘提示 / 窗口提示
@@ -448,16 +448,12 @@ class App:
         self._help_window.activateWindow()
 
     def show_about(self) -> None:
-        # 用非模态实例而非静态 about()：截图时能被一起隐藏，也不会阻塞事件循环
+        # 非模态单例：截图时能被一起隐藏，也不会阻塞事件循环。
+        # AboutDialog 内含头像与联系邮箱，图标跟主窗口 / 托盘保持一致。
         if self._about_box is None:
-            box = QMessageBox(self.main_window)
-            box.setWindowTitle(f"关于 {APP_NAME}")
-            box.setIcon(QMessageBox.Information)
-            box.setTextFormat(Qt.RichText)
-            box.setText(ABOUT_HTML)
-            box.setStandardButtons(QMessageBox.Ok)
-            box.setWindowModality(Qt.NonModal)
-            self._about_box = box
+            self._about_box = AboutDialog(
+                self.main_window, self.main_window.windowIcon()
+            )
         self._about_box.show()
         self._about_box.raise_()
         self._about_box.activateWindow()

@@ -17,7 +17,11 @@ SnapTool.spec —— 截屏助手 Windows 绿色版构建配置
 from PyInstaller.utils.hooks import collect_all
 
 # ---- 数据 / 二进制 / 隐藏导入 ----------------------------------------------
-datas = [('ocr_test.png', '.')]   # --selftest 用的冒烟测试图
+datas = [
+    ('ocr_test.png', '.'),                  # --selftest 用的冒烟测试图
+    ('app.ico', '.'),                       # 运行时窗口 / 托盘图标（make_icon 读取）
+    ('assets/avatar-pan.webp', 'assets'),  # 「关于」对话框里的头像
+]
 binaries = []
 hiddenimports = []
 

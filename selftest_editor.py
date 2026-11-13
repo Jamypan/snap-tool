@@ -116,6 +116,16 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     M4  与圆环绕方块（旋转）、折线（撤销）形状类别分离
     M5  与旧版「对角两个小箭头」明显不同
 
+  Stage N  关于对话框（头像 / 邮箱）与软件图标
+    N1  头像与 ico 资源文件存在
+    N2  运行时图标来自多尺寸 app.ico（不是代码画的相机）
+    N3  关于文案含邮箱与 mailto 链接
+    N4  关于对话框显示头像且未被裁切
+    N5  关于对话框邮箱可见且可点击
+    N6  打包配置收进头像 / ico，exe 图标指向 app.ico
+    N7  关于窗口为非模态单例且可重复打开
+    N8  截屏前关于窗口会被隐藏并恢复（不会被拍进图里）
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -1592,6 +1602,91 @@ def test_mirror_icons() -> None:
            f"左右差异={dh} 上下差异={dv}")
 
 
+def test_about_and_app_icon():
+    """Stage N  关于对话框（头像 / 联系邮箱）与软件图标资源。"""
+    from pathlib import Path
+
+    from PySide6.QtGui import QPixmap
+    from PySide6.QtWidgets import QLabel, QWidget
+
+    from snapui import (
+        ABOUT_HTML,
+        ABOUT_AVATAR_HEIGHT,
+        APP_ICON_FILE,
+        AVATAR_FILE,
+        CONTACT_EMAIL,
+        AboutDialog,
+        make_icon,
+        resource_path,
+    )
+
+    # N1 资源文件在源码目录就位；打包后由 SnapTool.spec 的 datas 保证
+    p_ico, p_avatar = resource_path(APP_ICON_FILE), resource_path(AVATAR_FILE)
+    record("N1 头像与 ico 资源文件存在",
+           p_ico.is_file() and p_avatar.is_file(),
+           f"ico={p_ico.is_file()} avatar={p_avatar.is_file()}")
+
+    # N2 运行时图标来自新的多尺寸 ico，而不是旧版「代码画的相机」
+    icon = make_icon()
+    sizes = sorted({s.width() for s in icon.availableSizes()})
+    ok_n2 = (not icon.isNull()) and 256 in sizes and not icon.pixmap(48, 48).isNull()
+    record("N2 运行时图标来自 app.ico（多尺寸）", ok_n2, f"尺寸={sizes}")
+
+    # N3 关于文案含邮箱与可点击的 mailto
+    ok_n3 = CONTACT_EMAIL in ABOUT_HTML and f"mailto:{CONTACT_EMAIL}" in ABOUT_HTML
+    record("N3 关于文案含邮箱与 mailto 链接", ok_n3, CONTACT_EMAIL)
+
+    # N4 / N5 对话框真的把头像画出来、邮箱可点击
+    dlg = AboutDialog(None, icon)
+    avatar = dlg.findChild(QLabel, "aboutAvatar")
+    text = dlg.findChild(QLabel, "aboutText")
+    pm = avatar.pixmap() if avatar is not None else QPixmap()
+    ok_n4 = (avatar is not None and not avatar.isHidden() and not pm.isNull()
+             and pm.height() == ABOUT_AVATAR_HEIGHT and pm.width() > 100)
+    record("N4 关于对话框显示头像且未被裁切", ok_n4,
+           f"头像={pm.width()}x{pm.height()} 目标高={ABOUT_AVATAR_HEIGHT}")
+    ok_n5 = (text is not None and CONTACT_EMAIL in text.text()
+             and text.openExternalLinks())
+    record("N5 关于对话框邮箱可见且可点击", ok_n5,
+           f"可点击={text.openExternalLinks() if text else False}")
+
+    # N6 打包配置把两个资源都收进发行版，exe 图标指向 app.ico
+    spec = (Path(__file__).resolve().parent / "SnapTool.spec").read_text(
+        encoding="utf-8"
+    )
+    ok_n6 = all(k in spec for k in (
+        "('app.ico', '.')", "avatar-pan.webp", "icon=['app.ico']",
+    ))
+    record("N6 打包配置收进头像/ico 且 exe 图标指向 app.ico", ok_n6, "")
+
+    # N7 show_about 用非模态单例，重复打开复用同一窗口
+    import snap as snapmod
+
+    holder = snapmod.App.__new__(snapmod.App)
+    holder.main_window = QWidget()
+    holder._about_box = None
+    snapmod.App.show_about(holder)
+    box = holder._about_box
+    ok_show = isinstance(box, AboutDialog) and box.isVisible()
+    snapmod.App.show_about(holder)
+    ok_n7 = ok_show and holder._about_box is box
+    record("N7 关于窗口为非模态单例且可重复打开", ok_n7,
+           f"可见={ok_show} 复用={holder._about_box is box}")
+
+    # N8 截屏前隐藏逻辑能捕获关于窗口，否则它会被拍进截图里
+    holder.preview = holder.editor = None
+    holder._help_window = None
+    holder.busy = None
+    holder._hidden_windows = []
+    holder._hide_own_windows()
+    hidden = not box.isVisible()
+    holder._restore_own_windows()
+    ok_n8 = hidden and box.isVisible()
+    record("N8 截屏前关于窗口会被隐藏并恢复", ok_n8,
+           f"隐藏={hidden} 恢复={box.isVisible()}")
+    box.hide()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1614,6 +1709,7 @@ if __name__ == "__main__":
     test_capture_hygiene_and_curve_arrows()
     test_undo_rotate_icons()
     test_mirror_icons()
+    test_about_and_app_icon()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

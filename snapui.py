@@ -7,6 +7,7 @@ snapui.py —— 程序主窗口、帮助说明、关于对话框、托盘图标
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -28,6 +29,13 @@ from PySide6.QtWidgets import (
 from hotkeys import CAPTURE_MODES, MODE_LABELS, Hotkey
 
 APP_NAME = "截屏助手"
+CONTACT_EMAIL = "283096251@qq.com"
+
+# 随程序分发的资源：源码运行时在 snapui.py 同目录，PyInstaller 打包后在 _MEIPASS。
+# SnapTool.spec 的 datas 里必须同步列出这两个文件，否则绿色版会缺图标 / 头像。
+APP_ICON_FILE = "app.ico"
+AVATAR_FILE = "assets/avatar-pan.webp"
+ABOUT_AVATAR_HEIGHT = 260
 
 MODE_DESC = {
     "rect": "拖动鼠标框选任意区域",
@@ -36,8 +44,22 @@ MODE_DESC = {
 }
 
 
+def resource_path(name: str) -> Path:
+    """返回随程序分发的资源路径（源码目录 / PyInstaller 的 _MEIPASS）。"""
+    base = getattr(sys, "_MEIPASS", None) or str(Path(__file__).resolve().parent)
+    return Path(base) / name
+
+
 def make_icon() -> QIcon:
-    """代码画一个相机图标，避免依赖外部 ico 文件（便于绿色版分发）。"""
+    """优先用随程序分发的 app.ico（多尺寸，窗口 / 托盘 / exe 一致）。
+
+    资源缺失时退回代码画的相机图标，保证源码单独拷走某个 .py 也能跑起来。
+    """
+    ico = resource_path(APP_ICON_FILE)
+    if ico.is_file():
+        icon = QIcon(str(ico))
+        if not icon.isNull():
+            return icon
     pm = QPixmap(64, 64)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
@@ -154,12 +176,77 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
 """
 
 ABOUT_HTML = f"""
-<p style="font-size:16px;"><b>{APP_NAME}</b></p>
+<div style="font-family:'Microsoft YaHei',sans-serif; font-size:13px; color:#1f2937; line-height:1.6;">
+<p style="font-size:19px; font-weight:bold; margin:0 0 8px 0;">{APP_NAME}</p>
 <p>一个模仿微信截屏体验的 Windows 桌面截图工具。<b>纯原创实现，与微信无关</b>，不涉及任何逆向。</p>
 <p>功能：三种截图模式、对象化标注编辑、整图旋转 / 镜像、画笔端点箭头、滚动长截图、中文 OCR 逐行盖回取字、全局热键自定义。</p>
-<p class="hint">技术栈：Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime)。<br>
+<p style="font-size:13px;">联系邮箱：<a href="mailto:{CONTACT_EMAIL}" style="color:#0a6ed1;">{CONTACT_EMAIL}</a></p>
+<p style="font-size:12px; color:#6b7280;">技术栈：Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime)。<br>
 第三方组件许可：PySide6 (LGPL)、RapidOCR / PaddleOCR / OpenCV (Apache-2.0)、ONNX Runtime (MIT)。</p>
+</div>
 """
+
+
+class AboutDialog(QDialog):
+    """「关于」：左侧头像，右侧软件说明与联系邮箱。
+
+    非模态单例（由 App.show_about 复用）：关闭只是隐藏，不销毁；
+    作为顶层窗口，截图时会被 _own_top_levels 一并隐藏，不会被拍进图里。
+    """
+
+    def __init__(self, parent: QWidget | None = None,
+                 icon: QIcon | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"关于 {APP_NAME}")
+        if icon is not None and not icon.isNull():
+            self.setWindowIcon(icon)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+        self.setWindowModality(Qt.NonModal)
+        self.setMinimumWidth(580)
+        self.setStyleSheet(
+            "QDialog { background:#ffffff; }"
+            "QLabel#aboutAvatar { background:#f7f8fa; border:1px solid #e5e7eb;"
+            " border-radius:10px; }"
+            "QPushButton#aboutOk { background:#0a84ff; color:#fff; border:none;"
+            " border-radius:6px; padding:6px 18px; }"
+            "QPushButton#aboutOk:hover { background:#0969cc; }"
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 20, 22, 16)
+        root.setSpacing(16)
+
+        body = QHBoxLayout()
+        body.setSpacing(20)
+        avatar = QLabel()
+        avatar.setObjectName("aboutAvatar")
+        avatar.setAlignment(Qt.AlignCenter)
+        pm = QPixmap(str(resource_path(AVATAR_FILE)))
+        if not pm.isNull():
+            pm = pm.scaledToHeight(ABOUT_AVATAR_HEIGHT, Qt.SmoothTransformation)
+            avatar.setPixmap(pm)
+            # 四周留白，让透明背景的头像落在浅灰圆角卡片里
+            avatar.setFixedSize(pm.width() + 18, pm.height() + 18)
+        else:
+            avatar.setVisible(False)
+        body.addWidget(avatar, 0, Qt.AlignTop)
+
+        text = QLabel(ABOUT_HTML)
+        text.setObjectName("aboutText")
+        text.setWordWrap(True)
+        text.setTextFormat(Qt.RichText)
+        text.setOpenExternalLinks(True)   # mailto 交给系统默认邮件客户端
+        text.setAlignment(Qt.AlignTop)
+        body.addWidget(text, 1)
+        root.addLayout(body)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        ok = QPushButton("确定")
+        ok.setObjectName("aboutOk")
+        ok.clicked.connect(self.hide)
+        row.addWidget(ok)
+        root.addLayout(row)
 
 
 # ---------------------------------------------------------------------------
