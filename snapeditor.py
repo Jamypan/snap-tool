@@ -163,11 +163,14 @@ def _draw_icon(name: str, p: QPainter) -> None:
         p.drawLine(5, 4, S - 5, 4)
     # ---- 动作 ----
     elif name == "撤销":
-        # 折线回退箭头（↩）：与旋转的「圆环绕方块」在形状类别上彻底分开，
-        # 22px 小尺寸下也不会再和逆时针旋转混淆
-        p.drawLine(20, 6, 20, 16)
-        p.drawLine(20, 16, 9, 16)
-        _arrow_at(p, 8, 16, -1, 0, size=6.5)
+        # 折返路径：左下起笔 → 往右 → 往上 → 往左 → 终点加箭头。
+        # 用一整条 path 画，三个拐角才是圆角连接；形状与旋转的「圆环绕方块」不同。
+        path = QPainterPath(QPointF(5, 20))
+        path.lineTo(20, 20)      # 从左下往右
+        path.lineTo(20, 8)       # 再往上
+        path.lineTo(8, 8)        # 再往左
+        p.drawPath(path)
+        _arrow_at(p, 6, 8, -1, 0, size=6.5)
     elif name == "样式":
         p.drawEllipse(QRectF(5, 7, 15, 15))
         p.setPen(Qt.NoPen)

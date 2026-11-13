@@ -106,6 +106,7 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     L1  撤销与逆旋图标像素差异足够大
     L2  顺旋与逆旋严格水平镜像（风格成对）
     L3  旋转图标含中心图片方块、撤销为中心留空
+    L4  撤销折返路径为「左下 → 右 → 上 → 左」且中间留空
 
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
@@ -1444,6 +1445,12 @@ def test_undo_rotate_icons() -> None:
     record("L3 旋转含中心方块、撤销为中心留空",
            solid and not ink(undo, 13, 10),
            f"旋转方块={solid} 撤销中心墨={ink(undo, 13, 10)}")
+
+    # L4 撤销折返路径：左下起笔 → 右 → 上 → 左，中间与左侧留空
+    corners = all(ink(undo, x, y) for x, y in ((5, 20), (20, 20), (20, 8), (14, 8)))
+    hollow = (not ink(undo, 13, 13)) and (not ink(undo, 5, 13))
+    record("L4 撤销折返路径方向正确", corners and hollow,
+           f"四角有墨={corners} 中间留空={hollow}")
 
 
 if __name__ == "__main__":
