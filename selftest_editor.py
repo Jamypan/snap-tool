@@ -102,6 +102,11 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     K5  末段抖动/平滑两条曲线渲染出的箭头一致
     K6  截屏前隐藏全部自有窗口（含编辑器/浮动面板）且可恢复
 
+  Stage L  撤销 / 顺旋 / 逆旋 图标可区分性
+    L1  撤销与逆旋图标像素差异足够大
+    L2  顺旋与逆旋严格水平镜像（风格成对）
+    L3  旋转图标含中心图片方块、撤销为中心留空
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -1396,6 +1401,51 @@ def test_capture_hygiene_and_curve_arrows() -> None:
         w.close()
 
 
+# ---------------------------------------------------------------------------
+# Stage L — 撤销 / 顺旋 / 逆旋 图标可区分性
+# ---------------------------------------------------------------------------
+def test_undo_rotate_icons() -> None:
+    """撤销与逆时针旋转要一眼分开；顺/逆旋必须严格成对（水平镜像）。"""
+    from PySide6.QtGui import QPixmap, QPainter
+    from snapeditor import _draw_icon, _ICON_SIZE
+
+    S = _ICON_SIZE
+
+    def icon(name):
+        pm = QPixmap(S, S)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        _draw_icon(name, p)
+        p.end()
+        return pm.toImage()
+
+    undo, cw, ccw = icon("撤销"), icon("顺旋"), icon("逆旋")
+
+    def ink(im, x, y):
+        return im.pixelColor(x, y).alpha() > 100
+
+    # L1 撤销与逆旋像素差异足够大（旧版同为圆弧箭头，实测仅 154）
+    diff = sum(1 for y in range(S) for x in range(S)
+               if undo.pixelColor(x, y).rgba() != ccw.pixelColor(x, y).rgba())
+    # 形状类别分离：圆环顶部中线有墨、撤销的折线在那里是空的
+    shape_ok = (not ink(undo, 13, 5)) and ink(cw, 13, 5) and ink(ccw, 13, 5)
+    record("L1 撤销与逆旋图标明显不同", diff > 185 and shape_ok,
+           f"差异像素={diff}(旧版154) 形状分离={shape_ok}")
+
+    # L2 顺旋 / 逆旋严格水平镜像
+    mismatch = sum(1 for y in range(S) for x in range(S)
+                   if ink(cw, x, y) != ink(ccw, S - 1 - x, y))
+    record("L2 顺旋与逆旋严格水平镜像", mismatch < 30, f"不匹配像素={mismatch}")
+
+    # L3 旋转图标有中心「图片方块」，撤销是纯线稿、中心留空
+    solid = (100 < cw.pixelColor(13, 10).alpha() < 230
+             and 100 < ccw.pixelColor(13, 10).alpha() < 230)
+    record("L3 旋转含中心方块、撤销为中心留空",
+           solid and not ink(undo, 13, 10),
+           f"旋转方块={solid} 撤销中心墨={ink(undo, 13, 10)}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1416,6 +1466,7 @@ if __name__ == "__main__":
     test_toolbar_transform()
     test_line_and_icons()
     test_capture_hygiene_and_curve_arrows()
+    test_undo_rotate_icons()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

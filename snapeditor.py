@@ -163,7 +163,11 @@ def _draw_icon(name: str, p: QPainter) -> None:
         p.drawLine(5, 4, S - 5, 4)
     # ---- 动作 ----
     elif name == "撤销":
-        _arc_arrow(p, S / 2, S / 2, 7, 50, -200)
+        # 折线回退箭头（↩）：与旋转的「圆环绕方块」在形状类别上彻底分开，
+        # 22px 小尺寸下也不会再和逆时针旋转混淆
+        p.drawLine(20, 6, 20, 16)
+        p.drawLine(20, 16, 9, 16)
+        _arrow_at(p, 8, 16, -1, 0, size=6.5)
     elif name == "样式":
         p.drawEllipse(QRectF(5, 7, 15, 15))
         p.setPen(Qt.NoPen)
@@ -171,11 +175,14 @@ def _draw_icon(name: str, p: QPainter) -> None:
         for dx, dy in ((9, 11), (15, 11), (12, 16.5)):
             p.drawEllipse(QRectF(dx - 1.6, dy - 1.6, 3.2, 3.2))
     elif name in ("顺旋", "逆旋"):
+        # 「圆环绕着图片方块」＝整图旋转 90°；中心淡白实心块是视觉主体，
+        # 与「撤销」的纯线稿折线拉开差距。顺/逆起点互为 180°-θ，严格水平镜像。
         cw = name == "顺旋"
-        _arc_arrow(p, S / 2, S / 2, 7, 40, 290 if cw else -290)
-        p.setPen(_icon_pen(1.5))
-        p.setBrush(Qt.NoBrush)
-        p.drawRect(10, 10, 6, 6)
+        _arc_arrow(p, S / 2, S / 2, 8,
+                   40 if cw else 140, 290 if cw else -290)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(245, 247, 250, 170)))
+        p.drawRect(QRectF(9, 9, 8, 8))
     elif name == "左右":
         p.setPen(_icon_pen(1.5))
         p.drawLine(S / 2, 4, S / 2, S - 4)
