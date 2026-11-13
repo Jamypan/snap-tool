@@ -107,6 +107,7 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     L2  顺旋与逆旋严格水平镜像（风格成对）
     L3  旋转图标含中心图片方块、撤销为中心留空
     L4  撤销折返路径为「左下 → 右 → 上 → 左」且中间留空
+    L5  顺/逆旋箭头尖锐（半张角、三角形墨量、圆弧平头截断）
 
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
@@ -1451,6 +1452,60 @@ def test_undo_rotate_icons() -> None:
     hollow = (not ink(undo, 13, 13)) and (not ink(undo, 5, 13))
     record("L4 撤销折返路径方向正确", corners and hollow,
            f"四角有墨={corners} 中间留空={hollow}")
+
+    # L5 旋转箭头尖锐度：三角形半张角必须更小、墨量更少，且实现确实换了
+    # （旧版圆弧是圆头，末端半圆会盖住箭头尖；新版在根部平头截断）
+    import math
+    from PySide6.QtGui import QBrush
+    from snapeditor import (_icon_pen, _arrow_at,
+                            _ROT_ARROW_SIZE, _ROT_ARROW_WING)
+
+    def arrow_area(size, wing, k=4):
+        """4 倍放大单独渲染箭头，量化三角形墨量（几何面积 = size² × wing）。"""
+        pm = QPixmap(S * k, S * k)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.scale(k, k)
+        p.setPen(_icon_pen(2))
+        p.setBrush(Qt.NoBrush)
+        a = math.radians(330)
+        _arrow_at(p, 13 + 8 * math.cos(a), 13 + 8 * math.sin(a),
+                  -math.sin(a), math.cos(a), size=size, wing_ratio=wing)
+        p.end()
+        im = pm.toImage()
+        return sum(1 for y in range(S * k) for x in range(S * k)
+                   if im.pixelColor(x, y).alpha() > 100)
+
+    old_area = arrow_area(6.0, 0.62)                     # 旧版半张角 31.8°
+    new_area = arrow_area(_ROT_ARROW_SIZE, _ROT_ARROW_WING)
+    geom_ok = (_ROT_ARROW_WING <= 0.38 and _ROT_ARROW_SIZE >= 7.0)
+
+    def draw_old_cw(p):
+        p.setBrush(Qt.NoBrush)
+        p.setPen(_icon_pen(2))
+        a = math.radians(330)
+        p.drawArc(5, 5, 16, 16, int(40 * 16), int(290 * 16))
+        _arrow_at(p, 13 + 8 * math.cos(a), 13 + 8 * math.sin(a),
+                  -math.sin(a), math.cos(a), size=6.0, wing_ratio=0.62)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(245, 247, 250, 170)))
+        p.drawRect(9, 9, 8, 8)
+
+    pm_o = QPixmap(S, S)
+    pm_o.fill(QColor(0, 0, 0, 0))
+    po = QPainter(pm_o)
+    po.setRenderHint(QPainter.Antialiasing, True)
+    draw_old_cw(po)
+    po.end()
+    old_cw = pm_o.toImage()
+    changed = sum(1 for y in range(S) for x in range(S)
+                  if old_cw.pixelColor(x, y).rgba() != cw.pixelColor(x, y).rgba())
+
+    record("L5 顺/逆旋箭头更尖（半张角/墨量/平头截断）",
+           geom_ok and new_area < old_area * 0.88 and changed > 30,
+           f"半张角={math.degrees(math.atan(_ROT_ARROW_WING)):.1f}° "
+           f"墨量 {old_area}→{new_area} 与旧版差异={changed}")
 
 
 if __name__ == "__main__":

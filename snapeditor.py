@@ -83,15 +83,20 @@ def _icon_pen(lw: int = 2) -> QPen:
     return pen
 
 
-def _arrow_at(p: QPainter, x: float, y: float, tx: float, ty: float, size: float = 6.0) -> None:
-    """在 (x,y) 处画一个指向 (tx,ty) 方向（不必归一化）的实心小箭头。"""
+def _arrow_at(p: QPainter, x: float, y: float, tx: float, ty: float,
+              size: float = 6.0, wing_ratio: float = 0.62) -> None:
+    """在 (x,y) 处画一个指向 (tx,ty) 方向（不必归一化）的实心小箭头。
+
+    wing_ratio = 半宽/长度，即半张角的正切值：越小箭头越尖。
+    默认 0.62（半张角约 32°）用于普通图标；旋转图标用更小的值。
+    """
     import math
 
     n = math.hypot(tx, ty) or 1.0
     tx, ty = tx / n, ty / n
     nx, ny = -ty, tx
     bx, by = x - tx * size, y - ty * size
-    w = size * 0.62
+    w = size * wing_ratio
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(QColor(245, 247, 250)))
     p.drawPolygon(
@@ -105,20 +110,39 @@ def _arrow_at(p: QPainter, x: float, y: float, tx: float, ty: float, size: float
     )
 
 
+# 旋转图标的箭头：长而窄（半张角 atan(0.34)≈19°，旧版约 32°）
+_ROT_ARROW_SIZE = 7.0
+_ROT_ARROW_WING = 0.34
+
+
 def _arc_arrow(p: QPainter, cx: float, cy: float, r: float,
                start_deg: float, sweep_deg: float) -> None:
-    """画一段圆弧（带末端箭头），sweep_deg>0 顺时针、<0 逆时针（屏幕坐标）。"""
+    """画一段圆弧（带末端尖箭头），sweep_deg>0 顺时针、<0 逆时针（屏幕坐标）。
+
+    圆弧末端沿弧长回退到箭头根部并改用「平头」收尾：旧版用圆头时，
+    末端那个 1px 半圆会比箭头尖还突出，把尖盖成圆的。箭头本身是长窄
+    三角形，底边半宽仍大于线宽，所以粗线下尖端也不会被糊掉。
+    """
     import math
 
-    p.drawArc(int(cx - r), int(cy - r), int(2 * r), int(2 * r),
-              int(start_deg * 16), int(sweep_deg * 16))
+    sign = 1.0 if sweep_deg > 0 else -1.0
     a = math.radians(start_deg + sweep_deg)
     ex, ey = cx + r * math.cos(a), cy + r * math.sin(a)
-    if sweep_deg > 0:
-        tx, ty = -math.sin(a), math.cos(a)
-    else:
-        tx, ty = math.sin(a), -math.cos(a)
-    _arrow_at(p, ex, ey, tx, ty, size=6.0)
+    tx, ty = -math.sin(a) * sign, math.cos(a) * sign
+
+    # 回退约半个箭头长的弧，让平头端面落在三角形内部（而非露在尖端外）
+    back_deg = math.degrees((_ROT_ARROW_SIZE * 0.5) / r) if r > 0 else 0.0
+    eff_sweep = sweep_deg - sign * back_deg
+    pen = QPen(p.pen())
+    pen.setCapStyle(Qt.FlatCap)
+    p.setPen(pen)
+    p.drawArc(int(cx - r), int(cy - r), int(2 * r), int(2 * r),
+              int(start_deg * 16), int(eff_sweep * 16))
+
+    # 尖端略前伸，保证它是整枚图标最靠前的像素，不被任何线头盖住
+    tipx, tipy = ex + tx * 0.6, ey + ty * 0.6
+    _arrow_at(p, tipx, tipy, tx, ty,
+              size=_ROT_ARROW_SIZE, wing_ratio=_ROT_ARROW_WING)
 
 
 def _draw_icon(name: str, p: QPainter) -> None:
