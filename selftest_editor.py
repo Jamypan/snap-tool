@@ -109,6 +109,13 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     L4  撤销折返路径为「左下 → 右 → 上 → 左」且中间留空
     L5  顺/逆旋箭头尖锐（半张角、三角形墨量、圆弧平头截断）
 
+  Stage M  左右 / 上下 镜像图标重设计
+    M1  上下是左右严格 90° 旋转（风格成对）
+    M2  中间是虚线镜像轴，左右竖轴 / 上下横轴
+    M3  两侧是实心三角，一纯白（原图）一淡白（镜像）
+    M4  与圆环绕方块（旋转）、折线（撤销）形状类别分离
+    M5  与旧版「对角两个小箭头」明显不同
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -1508,6 +1515,83 @@ def test_undo_rotate_icons() -> None:
            f"墨量 {old_area}→{new_area} 与旧版差异={changed}")
 
 
+# Stage M — 左右 / 上下 镜像图标重设计
+# ---------------------------------------------------------------------------
+def test_mirror_icons() -> None:
+    """镜像图标＝虚线轴 + 两侧互为镜像的实心三角；上下是左右的 90° 旋转。"""
+    from PySide6.QtGui import QPixmap, QPainter
+    from snapeditor import _draw_icon, _icon_pen, _arrow_at, _ICON_SIZE
+
+    S = _ICON_SIZE
+
+    def render(fn):
+        pm = QPixmap(S, S)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        fn(p)
+        p.end()
+        return pm.toImage()
+
+    def icon(name):
+        return render(lambda p: _draw_icon(name, p))
+
+    def old(name):
+        def draw(p):
+            p.setBrush(Qt.NoBrush)
+            p.setPen(_icon_pen(1.5))
+            if name == "左右":
+                p.drawLine(S / 2, 4, S / 2, S - 4)
+                _arrow_at(p, 9, 9, -1, 0)
+                _arrow_at(p, S - 9, S - 9, 1, 0)
+            else:
+                p.drawLine(4, S / 2, S - 4, S / 2)
+                _arrow_at(p, 9, 9, 0, -1)
+                _arrow_at(p, S - 9, S - 9, 0, 1)
+        return render(draw)
+
+    def ink(im, x, y):
+        return im.pixelColor(x, y).alpha() > 100
+
+    def diff(a, b):
+        return sum(1 for y in range(S) for x in range(S)
+                   if a.pixelColor(x, y).rgba() != b.pixelColor(x, y).rgba())
+
+    h, v = icon("左右"), icon("上下")
+
+    # M1 上下是左右绕画布中心旋转 90°，严格成对
+    mismatch = sum(1 for y in range(S) for x in range(S)
+                   if ink(h, x, y) != ink(v, S - 1 - y, x))
+    record("M1 上下与左右严格 90° 旋转成对", mismatch == 0,
+           f"不匹配像素={mismatch}")
+
+    # M2 中间是虚线镜像轴：三段有墨、两处断开；左右竖轴、上下横轴
+    dash_h = (ink(h, 13, 5) and not ink(h, 13, 9) and ink(h, 13, 13)
+              and not ink(h, 13, 16) and ink(h, 13, 20))
+    dash_v = (ink(v, 5, 13) and not ink(v, 9, 13) and ink(v, 13, 13)
+              and not ink(v, 16, 13) and ink(v, 20, 13))
+    record("M2 镜像轴为虚线且方向正确", dash_h and dash_v,
+           f"左右竖轴={dash_h} 上下横轴={dash_v}")
+
+    # M3 两侧是实心三角块，一纯白（原图）一淡白（镜像），不再是细线箭头
+    solid_h = (h.pixelColor(7, 13).alpha() > 240
+               and 140 < h.pixelColor(19, 13).alpha() < 220)
+    solid_v = (v.pixelColor(13, 7).alpha() > 240
+               and 140 < v.pixelColor(13, 19).alpha() < 220)
+    record("M3 两侧为实心三角且原件/镜像分层", solid_h and solid_v,
+           f"左右={solid_h} 上下={solid_v}")
+
+    # M4 与圆环绕方块（旋转）、折线（撤销）形状类别分离
+    sep = min(diff(h, icon(n)) for n in ("顺旋", "逆旋", "撤销"))
+    record("M4 镜像图标与旋转/撤销明显不同", sep > 150,
+           f"最小差异像素={sep}")
+
+    # M5 与旧版（对角两个小箭头）相比确实换了设计
+    dh, dv = diff(h, old("左右")), diff(v, old("上下"))
+    record("M5 与旧版对角箭头图标明显不同", dh > 100 and dv > 100,
+           f"左右差异={dh} 上下差异={dv}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1529,6 +1613,7 @@ if __name__ == "__main__":
     test_line_and_icons()
     test_capture_hygiene_and_curve_arrows()
     test_undo_rotate_icons()
+    test_mirror_icons()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

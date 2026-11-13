@@ -145,6 +145,31 @@ def _arc_arrow(p: QPainter, cx: float, cy: float, r: float,
               size=_ROT_ARROW_SIZE, wing_ratio=_ROT_ARROW_WING)
 
 
+def _draw_mirror_icon(p: QPainter) -> None:
+    """画「左右镜像」基准图标：竖直虚线镜像轴 + 两侧互为镜像的实心三角。
+
+    左三角纯白＝原图，右三角淡白＝翻过去的镜像；三角尖朝外侧、底边贴近
+    轴但留 2px 缝，避免和轴线糊成一片。上下镜像直接把这张图旋转 90°，
+    两者天然严格成对。
+    """
+    p.setPen(_icon_pen(1.5))
+    p.setBrush(Qt.NoBrush)
+    for a, b in ((3.0, 8.0), (11.0, 15.0), (18.0, 23.0)):
+        p.drawLine(QPointF(13, a), QPointF(13, b))
+    p.setPen(Qt.NoPen)
+    for tip, base, alpha in ((4.0, 11.0, 255), (22.0, 15.0, 170)):
+        p.setBrush(QBrush(QColor(245, 247, 250, alpha)))
+        p.drawPolygon(
+            QPolygonF(
+                [
+                    QPointF(tip, 13),
+                    QPointF(base, 8),
+                    QPointF(base, 18),
+                ]
+            )
+        )
+
+
 def _draw_icon(name: str, p: QPainter) -> None:
     p.setBrush(Qt.NoBrush)
     p.setPen(_icon_pen(2))
@@ -210,16 +235,17 @@ def _draw_icon(name: str, p: QPainter) -> None:
         p.setPen(Qt.NoPen)
         p.setBrush(QBrush(QColor(245, 247, 250, 170)))
         p.drawRect(QRectF(9, 9, 8, 8))
-    elif name == "左右":
-        p.setPen(_icon_pen(1.5))
-        p.drawLine(S / 2, 4, S / 2, S - 4)
-        _arrow_at(p, 9, 9, -1, 0)
-        _arrow_at(p, S - 9, S - 9, 1, 0)
-    elif name == "上下":
-        p.setPen(_icon_pen(1.5))
-        p.drawLine(4, S / 2, S - 4, S / 2)
-        _arrow_at(p, 9, 9, 0, -1)
-        _arrow_at(p, S - 9, S - 9, 0, 1)
+    elif name in ("左右", "上下"):
+        # 镜像 = 沿轴翻过去：虚线轴 + 两侧一大一小同形三角（纯白原件 /
+        # 淡白镜像）。上下直接把左右整张图绕画布中心转 90°，严格成对。
+        p.save()
+        if name == "上下":
+            c = _ICON_SIZE / 2
+            p.translate(c, c)
+            p.rotate(90)
+            p.translate(-c, -c)
+        _draw_mirror_icon(p)
+        p.restore()
     elif name == "长截图":
         p.drawRoundedRect(8, 3, 10, 17, 2, 2)
         p.drawLine(10, 9, 16, 9)
