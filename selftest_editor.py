@@ -141,6 +141,25 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     P12 帮助 8 语言均为 9 节且不再描述旧的工具条入口
     P13 _begin_capture(long_mode=True) 真的给 Overlay 开了长截图模式
 
+  Stage Q  选窗口式滚动长截图（v17 新交互）
+    Q1  左键按下沿切换暂停 / 继续，按住不放不重复触发
+    Q2  右键按下沿结束，stop_reason = user-right-click
+    Q3  点「确定」结束且 request_stop 幂等
+    Q4  点在控制条上不触发暂停 / 结束，移出后正常生效
+    Q5  选窗口时仍按住的左键作为基线忽略
+    Q6  wait_while_paused 未暂停 / 已结束时立即返回
+    Q7  stitch_scroll 暂停期间绝不抓帧，右键结束后不再滚轮
+    Q8  stitch_scroll 滚到底自动结束，抓帧隐藏钩子成对调用
+    Q9  place_bar_outside 避开窗口、全屏无解、负原点多显示器可用
+    Q10 bar_screen_rect 按 DPR 换算成屏幕物理矩形
+    Q11 Overlay 长截图 picking：单击窗口直接发 long_shot、不进编辑态
+    Q12 Overlay 长截图 Enter 直接启动、右键取消
+    Q13 _pick_window(client=True) 用客户区而非完整边框
+    Q14 BusyBar 有「确定 ✓」、暂停状态、8 语言即时刷新
+    Q15 8 语言帮助第 9 节描述新流程且无旧「框选 → 确定」
+    Q16 StitchWorker 默认带 ScrollControl，控制条信号 / 钩子已接线
+    Q17 主窗口按钮副标题改为「点击窗口后自动滚动」
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -2015,7 +2034,7 @@ def test_long_capture() -> None:
     record("P7 坐标换算含虚拟屏原点与 DPR", ok_p7,
            f"r1={(r1.x, r1.y, r1.w, r1.h)} r2={(r2.x, r2.y, r2.w, r2.h)}")
 
-    # P8 start_long_capture 走 rect + long_mode；busy / overlay 时不再启动
+    # P8 start_long_capture 走 window + long_mode；busy / overlay 时不再启动
     holder = snapmod.App.__new__(snapmod.App)
     holder.overlay = None
     holder.busy = None
@@ -2027,8 +2046,8 @@ def test_long_capture() -> None:
     holder.overlay = None
     holder.busy = object()
     holder.start_long_capture()
-    ok_p8 = calls == [("rect", True)]
-    record("P8 start_long_capture 走 rect+长截图且忙时不重入", ok_p8,
+    ok_p8 = calls == [("window", True)]
+    record("P8 start_long_capture 走 window+长截图且忙时不重入", ok_p8,
            f"calls={calls}")
 
     # P9 拼接期间不恢复自有窗口，结束后恢复
@@ -2120,17 +2139,19 @@ def test_long_capture() -> None:
     snapmod.snapback.grab_all_screens = lambda: Image.new("RGB", (200, 100), (30, 60, 90))
     snapmod.snapback.virtual_screen = lambda: snapmod.snapback.ScreenRect(-100, -20, 200, 100)
     try:
-        holder3._begin_capture("rect", True)
+        holder3._begin_capture("window", True)
         ov_p13 = holder3.overlay
         ok_p13 = (
             ov_p13 is not None and ov_p13.long_mode
-            and ov_p13.capture_mode == "rect"
-            and ov_p13._window_picker is None
+            and ov_p13.capture_mode == "window"
+            and ov_p13._window_picker is not None
+            and ov_p13._mode == "picking"
             and ov_p13.toolbar._tip_keys.get("action:确定") == "开始滚动拼接 (Enter)"
             and holder3._capture_origin is not None
         )
-        record("P13 _begin_capture 长截图模式端到端生效", ok_p13,
+        record("P13 _begin_capture 长截图模式端到端生效（窗口探测）", ok_p13,
                f"overlay={ov_p13 is not None} long_mode={getattr(ov_p13, 'long_mode', None)} "
+               f"mode={getattr(ov_p13, 'capture_mode', None)} "
                f"origin={getattr(holder3, '_capture_origin', None)}")
     finally:
         snapmod.snapback.grab_all_screens = orig_grab
@@ -2141,6 +2162,360 @@ def test_long_capture() -> None:
 
     # 恢复语言偏好，避免影响后续 / 真实配置
     i18n.LANG.set_preference("zh_CN", persist=False)
+    app.processEvents()
+
+
+def test_long_capture_v17() -> None:
+    """Stage Q  选窗口式滚动长截图：左键暂停/继续、右键或打勾结束、到底自动结束。"""
+    import time
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    import i18n
+    import snap as snapmod
+    import numpy as np
+    from PIL import Image
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QKeyEvent, QMouseEvent
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from hotkeys import Hotkey
+    from i18n_docs import help_html
+    from snapui import HELP_HTML, MainWindow, make_icon
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    sb = snapmod.snapback
+
+    def press(widget, button, x=50, y=50) -> None:
+        ev = QMouseEvent(
+            QEvent.MouseButtonPress, QPointF(x, y), QPointF(x, y),
+            button, button, Qt.NoModifier,
+        )
+        widget.mousePressEvent(ev)
+
+    # ---------------- Q1~Q6  ScrollControl 按键边沿与暂停语义 ----------------
+    orig_key, orig_pos = sb.is_key_pressed, sb.get_cursor_pos
+    state = {"l": False, "r": False, "pos": (9999, 9999)}
+    sb.is_key_pressed = lambda vk: state["l"] if vk == sb.VK_LBUTTON else state["r"]
+    sb.get_cursor_pos = lambda: state["pos"]
+    try:
+        c = sb.ScrollControl()
+        c.poll()                      # 建立基线
+        state["l"] = True; c.poll()  # 上升沿 → 暂停
+        paused1 = c.paused
+        c.poll()                      # 按住不放，不重复切换
+        paused2 = c.paused
+        state["l"] = False; c.poll()
+        state["l"] = True; c.poll()  # 再按 → 继续
+        paused3 = c.paused
+        record("Q1 左键按下沿切换暂停/继续且按住不重复触发",
+               paused1 and paused2 and not paused3,
+               f"pause={paused1} hold={paused2} resume={not paused3}")
+
+        c2 = sb.ScrollControl()
+        c2.poll()
+        state["r"] = True; c2.poll()
+        record("Q2 右键按下沿结束且原因正确",
+               c2.should_stop() and c2.stop_reason == "user-right-click",
+               f"reason={c2.stop_reason}")
+        state["r"] = False
+
+        c3 = sb.ScrollControl()
+        c3.request_stop("user-confirm")
+        c3.request_stop("other")
+        record("Q3 点确定结束且幂等",
+               c3.should_stop() and c3.stop_reason == "user-confirm",
+               f"reason={c3.stop_reason}")
+
+        c4 = sb.ScrollControl(exclude_rect=sb.ScreenRect(0, 0, 100, 100))
+        state["pos"], state["l"], state["r"] = (50, 50), False, False
+        c4.poll()
+        state["l"] = True; c4.poll(); state["l"] = False; c4.poll()
+        state["r"] = True; c4.poll(); state["r"] = False
+        filtered = (not c4.paused) and (not c4.should_stop())
+        state["pos"] = (300, 300)
+        state["l"] = True; c4.poll(); state["l"] = False
+        record("Q4 点在控制条上不触发暂停/结束，移出后正常生效",
+               filtered and c4.paused, f"filtered={filtered} after={c4.paused}")
+
+        state["l"], state["r"], state["pos"] = True, False, (9999, 9999)
+        c5 = sb.ScrollControl()
+        c5.poll()                     # baseline = 左键仍按住
+        ignored = not c5.paused
+        state["l"] = False; c5.poll()
+        state["l"] = True; c5.poll()
+        record("Q5 选窗口时仍按住的左键被忽略，下一次点击才暂停",
+               ignored and c5.paused, f"baseline_ignored={ignored} next={c5.paused}")
+        state["l"] = False
+
+        c6 = sb.ScrollControl()
+        t0 = time.monotonic(); c6.wait_while_paused(); quick = time.monotonic() - t0 < 0.1
+        c6._paused = True
+        c6.request_stop("user-confirm")
+        t0 = time.monotonic(); c6.wait_while_paused(); quick2 = time.monotonic() - t0 < 0.1
+        record("Q6 wait_while_paused 未暂停 / 已结束时立即返回", quick and quick2,
+               f"quick={quick} stopped={quick2}")
+    finally:
+        sb.is_key_pressed, sb.get_cursor_pos = orig_key, orig_pos
+
+    # ---------------- Q7~Q8  stitch_scroll 集成（假抓屏 / 假滚轮） ----------------
+    names = ("grab_region", "find_vertical_overlap", "_send_mouse_wheel",
+             "get_cursor_pos", "set_cursor_pos")
+    orig = {n: getattr(sb, n) for n in names}
+    frame = np.full((40, 60, 3), 180, dtype=np.uint8)
+    holder = {"grabs": 0, "wheels": 0, "before": 0, "after": 0, "paused_grabs": []}
+    ctrl = sb.ScrollControl()
+    changes: list = []
+    ctrl.set_on_change(lambda: changes.append(ctrl.snapshot()))
+    ticks = {"n": 0}
+    # 每次 poll 读两次按键（左、右）；首轮还额外读两次建立基线
+    seq = [
+        (False, False),  # baseline
+        (True, False),   # 左键按下 → 暂停
+        (True, False),   # 按住
+        (False, False),  # 松开
+        (True, False),   # 再按 → 继续
+        (False, False),
+        (False, True),   # 右键 → 结束
+    ]
+
+    def scripted_key(vk: int) -> bool:
+        ticks["n"] += 1
+        idx = min((ticks["n"] - 1) // 2, len(seq) - 1)
+        return seq[idx][0] if vk == sb.VK_LBUTTON else seq[idx][1]
+
+    def fake_grab(_rect):
+        holder["grabs"] += 1
+        holder["paused_grabs"].append(ctrl.paused)
+        return Image.fromarray(frame)
+
+    def bump_before(): holder["before"] += 1
+    def bump_after(): holder["after"] += 1
+
+    try:
+        sb.grab_region = fake_grab
+        sb.find_vertical_overlap = lambda a, b: (0, 0.99)
+        sb._send_mouse_wheel = lambda n: holder.__setitem__("wheels", holder["wheels"] + 1)
+        sb.get_cursor_pos = lambda: (0, 0)
+        sb.set_cursor_pos = lambda x, y: None
+        sb.is_key_pressed = scripted_key
+        img, stats = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 60, 40),
+            settle_seconds=0,
+            control=ctrl,
+            on_before_grab=bump_before,
+            on_after_grab=bump_after,
+        )
+        had_pause = any(s[0] and not s[1] for s in changes)   # 真正进入过暂停
+        had_resume = any(not s[0] and not s[1] for s in changes)
+        ok_q7 = (
+            not any(holder["paused_grabs"])       # 抓帧时绝不处于暂停
+            and had_pause and had_resume           # 左键暂停 / 再点继续
+            and ctrl.should_stop()
+            and stats["stop_reason"] == "user-right-click"
+            and stats["frames"] == holder["grabs"] >= 1   # 结束后没有多抓一帧
+            and holder["wheels"] <= holder["grabs"]
+            and holder["before"] == holder["after"] == holder["grabs"]
+            and img.height >= 40
+        )
+        record("Q7 暂停期间不抓帧、左键继续、右键结束且隐藏钩子成对调用", ok_q7,
+               f"grabs={holder['grabs']} wheels={holder['wheels']} "
+               f"before={holder['before']} after={holder['after']} "
+               f"pause={had_pause} resume={had_resume} "
+               f"reason={stats['stop_reason']} paused_grabs={holder['paused_grabs']}")
+
+        # Q8 滚到底：overlap 只剩 10 行新增 → reached-bottom 自动结束
+        holder.update(grabs=0, wheels=0, before=0, after=0)
+        sb.find_vertical_overlap = lambda a, b: (max(0, a.shape[0] - 10), 0.99)
+        img2, stats2 = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 60, 40),
+            settle_seconds=0,
+            on_before_grab=bump_before,
+            on_after_grab=bump_after,
+        )
+        ok_q8 = (
+            stats2["stop_reason"] == "reached-bottom"
+            and holder["grabs"] == 2
+            and holder["before"] == holder["after"] == 2
+            and img2.height == 40
+        )
+        record("Q8 滚到底自动结束且抓帧钩子成对调用", ok_q8,
+               f"reason={stats2['stop_reason']} grabs={holder['grabs']} "
+               f"hooks={holder['before']}/{holder['after']}")
+    finally:
+        for n, fn in orig.items():
+            setattr(sb, n, fn)
+        sb.is_key_pressed = orig_key
+
+    # ---------------- Q9~Q10  控制条几何 ----------------
+    screen = QRect(0, 0, 1920, 1080)
+    sel = QRect(300, 200, 800, 600)
+    pos = snapmod.place_bar_outside(sel, screen, 510, 72)
+    ok_place = (
+        pos is not None and screen.contains(pos) and not pos.intersects(sel)
+    )
+    full = snapmod.place_bar_outside(QRect(0, 0, 1920, 1080), screen, 510, 72) is None
+    neg_screen = QRect(-1920, 0, 3840, 1080)
+    neg_sel = QRect(-1800, 100, 1600, 800)
+    pos2 = snapmod.place_bar_outside(neg_sel, neg_screen, 510, 72)
+    ok_neg = pos2 is not None and neg_screen.contains(pos2) and not pos2.intersects(neg_sel)
+    record("Q9 控制条避开窗口、全屏返回 None、负原点多显示器可用",
+           ok_place and full and ok_neg,
+           f"normal={ok_place} fullscreen_no_place={full} negative_origin={ok_neg}")
+
+    bar_q = snapmod.BusyBar()
+    bar_q.move(100, 50)
+    br = snapmod.bar_screen_rect(bar_q, 2.0)
+    ok_q10 = (br.x, br.y, br.w, br.h) == (200, 100, 1020, 144)
+    record("Q10 bar_screen_rect 按 DPR 换算物理矩形", ok_q10,
+           f"{(br.x, br.y, br.w, br.h)}")
+
+    # ---------------- Q11~Q12  Overlay 选窗口即启动 ----------------
+    base = make_image(400, 200)
+    picker = lambda p: (QRect(20, 20, 120, 80), "测试窗口")
+    ov_q = Overlay(base, dpr=1.0)
+    ov_q.resize(400, 200)
+    ov_q.set_long_mode(True, picker)
+    mode_ok = (
+        ov_q.long_mode and ov_q.capture_mode == "window"
+        and ov_q._mode == "picking" and ov_q._window_picker is not None
+    )
+    got_q, got_editor_q = [], []
+    ov_q.long_shot.connect(lambda r: got_q.append(QRect(r)))
+    ov_q.to_editor.connect(lambda b, sh: got_editor_q.append(1))
+    press(ov_q, Qt.LeftButton, 50, 50)
+    ok_q11 = (
+        mode_ok and len(got_q) == 1 and got_q[0] == QRect(20, 20, 120, 80)
+        and not got_editor_q and ov_q.sel is None and ov_q._mode == "picking"
+    )
+    record("Q11 单击窗口直接发 long_shot 且不进编辑态", ok_q11,
+           f"mode={ov_q.capture_mode} long={len(got_q)} "
+           f"rect={got_q[0] if got_q else None} editor={len(got_editor_q)}")
+
+    ov_q2 = Overlay(base, dpr=1.0)
+    ov_q2.resize(400, 200)
+    ov_q2.set_long_mode(True, picker)
+    ov_q2._hover_rect = QRect(30, 30, 100, 70)
+    enter_got, cancelled = [], []
+    ov_q2.long_shot.connect(lambda r: enter_got.append(QRect(r)))
+    ov_q2.cancelled.connect(lambda: cancelled.append(1))
+    ov_q2.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    ov_q3 = Overlay(base, dpr=1.0)
+    ov_q3.resize(400, 200)
+    ov_q3.set_long_mode(True, picker)
+    cancelled3 = []
+    ov_q3.cancelled.connect(lambda: cancelled3.append(1))
+    press(ov_q3, Qt.RightButton)
+    record("Q12 Enter 直接启动、右键取消",
+           len(enter_got) == 1 and len(cancelled) == 0 and len(cancelled3) == 1,
+           f"enter={len(enter_got)} right_cancel={len(cancelled3)}")
+
+    # ---------------- Q13  客户区取窗口 ----------------
+    holder_app = snapmod.App.__new__(snapmod.App)
+    ov_pick = Overlay(base, dpr=1.0)
+    ov_pick.resize(400, 200)
+    ov_pick.move(-100, -20)
+    holder_app.overlay = ov_pick
+    orig_win = sb.window_rect_at
+    sb.window_rect_at = lambda x, y: sb.WindowInfo(
+        sb.ScreenRect(0, 0, 400, 300), "T", 1,
+        sb.ScreenRect(10, 30, 380, 260),
+    )
+    try:
+        full_q = holder_app._pick_window(QPoint(50, 50))
+        client_q = holder_app._pick_window(QPoint(50, 50), client=True)
+    finally:
+        sb.window_rect_at = orig_win
+    ok_q13 = (
+        full_q is not None and client_q is not None
+        and client_q[0] != full_q[0]
+        and client_q[0].x() > full_q[0].x()
+        and client_q[0].width() < full_q[0].width()
+    )
+    record("Q13 _pick_window(client=True) 用客户区而非完整边框", ok_q13,
+           f"full={full_q[0] if full_q else None} client={client_q[0] if client_q else None}")
+
+    # ---------------- Q14  BusyBar 控制条 ----------------
+    fired = []
+    bar_q.finish_clicked.connect(lambda: fired.append(1))
+    bar_q.finish_btn.click()
+    btn_ok = bool(fired) and ("确定" in bar_q.finish_btn.text() or "✓" in bar_q.finish_btn.text())
+    bar_q.set_paused(True)
+    paused_text = "暂停" in bar_q.title.text()
+    bar_q.set_paused(False)
+    running_text = "正在" in bar_q.title.text()
+    bar_q.update_text(3, 2400)
+    detail_ok = "3" in bar_q.detail.text() and "2400" in bar_q.detail.text()
+    bad_lang_q = []
+    for code in i18n.LANGS:
+        i18n.LANG.set_preference(code, persist=False)
+        app.processEvents()
+        if not (bar_q.finish_btn.text() and bar_q.hint.text() and bar_q.title.text()):
+            bad_lang_q.append(code)
+    i18n.LANG.set_preference("zh_CN", persist=False)
+    app.processEvents()
+    record("Q14 控制条有确定✓、暂停状态、帧数、8 语言即时刷新",
+           btn_ok and paused_text and running_text and detail_ok and not bad_lang_q,
+           f"btn={btn_ok} paused={paused_text} running={running_text} "
+           f"detail={detail_ok} bad_lang={bad_lang_q}")
+
+    # ---------------- Q15  8 语言帮助 / 词条 ----------------
+    keywords = ("左键", "左鍵", "left-click", "左クリック", "왼쪽 클릭",
+                "clic gauche", "Linksklick", "clic izquierdo")
+    stale = ("工具条「长截图」", "Drag to select", "按住鼠标左键框选",
+             "按住滑鼠左鍵框選", "Faites glisser pour choisir",
+             "Mit Ziehen den scrollenden", "Arrastre para elegir")
+    bad_help_q = []
+    for code in i18n.LANGS:
+        h = help_html(code) if code != "zh_CN" else HELP_HTML
+        if (h.count("<h2>") != 9
+                or not any(k in h for k in keywords)
+                or any(s in h for s in stale)):
+            bad_help_q.append(code)
+    new_keys = (
+        "点击窗口后自动滚动拼接成长图",
+        "单击选择要截长屏的窗口，自动向下滚屏    右键 / Esc 取消",
+        "已暂停 · 左键继续", "已拼 {frames} 帧 · {height}px", "确定 ✓",
+        "左键暂停 / 继续 · 右键结束 · 点「确定」结束    Esc 结束",
+        "已滚动到底，长截图自动结束",
+    )
+    keys_ok = all(len(i18n.ROWS.get(k, ())) == 8 for k in new_keys)
+    record("Q15 8 语言帮助描述新流程、无旧入口且新词条齐全",
+           not bad_help_q and keys_ok,
+           f"bad_help={bad_help_q} keys_ok={keys_ok}")
+
+    # ---------------- Q16  Worker 接线 ----------------
+    import inspect
+    w = snapmod.StitchWorker(sb.ScreenRect(0, 0, 10, 10))
+    src_long = inspect.getsource(snapmod.App._on_long_shot)
+    ok_q16 = (
+        isinstance(w.control, sb.ScrollControl)
+        and hasattr(w, "state_changed") and w.before_grab is None
+        and "finish_clicked.connect" in src_long
+        and "set_exclude_rect" in src_long
+        and "make_bar_hook" in src_long
+        and "place_bar_outside" in src_long
+    )
+    record("Q16 Worker 带控制器且控制条信号/隐藏钩子已接线", ok_q16,
+           f"control={type(w.control).__name__} hooks={w.before_grab is None}")
+
+    # ---------------- Q17  主窗口副标题 ----------------
+    with TemporaryDirectory(prefix="snaptool-q-") as tmp:
+        mw_q = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp))
+        b_long_q = mw_q.findChild(QPushButton, "long")
+        zh_ok = b_long_q is not None and "点击窗口后自动滚动" in b_long_q.text()
+        i18n.LANG.set_preference("en", persist=False)
+        app.processEvents()
+        en_ok = b_long_q is not None and "Click a window" in b_long_q.text()
+        i18n.LANG.set_preference("zh_CN", persist=False)
+        app.processEvents()
+        mw_q.close()
+    record("Q17 主窗口按钮副标题改为点击窗口后自动滚动", zh_ok and en_ok,
+           f"zh={zh_ok} en={en_ok}")
+
+    for wgt in (ov_q, ov_q2, ov_q3, ov_pick, bar_q):
+        wgt.close()
+        wgt.deleteLater()
     app.processEvents()
 
 
@@ -2169,6 +2544,7 @@ if __name__ == "__main__":
     test_about_and_app_icon()
     test_i18n()
     test_long_capture()
+    test_long_capture_v17()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

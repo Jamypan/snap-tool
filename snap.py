@@ -9,7 +9,7 @@ snap.py —— 截图工具主程序。
   · 矩形/椭圆/箭头/画笔/马赛克/文字标注（画笔首尾可加箭头）
   · 程序窗口里整图旋转 90° / 左右上下镜像（可撤销）
   · 复制到剪贴板 / 另存为
-  · 滚动长截图（自动拼接）
+  · 滚动长截图：单击目标窗口即自动下滚，左键暂停 / 继续、右键或「确定 ✓」结束
   · OCR 取字：逐行盖回原文位置，可就地拖选 / 复制
 
 用法：python snap.py            正常启动（主窗口 + 托盘常驻）
@@ -36,6 +36,7 @@ import singleinstance  # noqa: E402
 import snapback  # noqa: E402
 from PySide6.QtCore import (  # noqa: E402
     QAbstractNativeEventFilter,
+    QMetaObject,
     QPoint,
     QRect,
     Qt,
@@ -162,6 +163,60 @@ def overlay_rect_to_screen(
     )
 
 
+def place_bar_outside(
+    sel: QRect, screen: QRect, bw: int, bh: int, margin: int = 8
+) -> QRect | None:
+    """为控制条找一个不与窗口选区相交、且完全在虚拟屏内的位置。
+
+    优先窗口上方 → 下方 → 左 → 右，最后退回屏幕四角；全部无解（窗口
+    占满整个虚拟屏）时返回 None，由调用方启用「抓帧瞬间隐藏」兜底。
+    """
+    cx = sel.left() + sel.width() // 2 - bw // 2
+    cy = sel.top() + sel.height() // 2 - bh // 2
+    candidates = [
+        (cx, sel.top() - bh - margin),
+        (cx, sel.bottom() + margin),
+        (sel.left() - bw - margin, cy),
+        (sel.right() + margin, cy),
+        (screen.left() + margin, screen.top() + margin),
+        (screen.right() - bw - margin, screen.top() + margin),
+        (screen.left() + margin, screen.bottom() - bh - margin),
+        (screen.right() - bw - margin, screen.bottom() - bh - margin),
+    ]
+    for x, y in candidates:
+        x = max(screen.left(), min(x, screen.right() - bw))
+        y = max(screen.top(), min(y, screen.bottom() - bh))
+        r = QRect(x, y, bw, bh)
+        if screen.contains(r) and not r.intersects(sel):
+            return r
+    return None
+
+
+def bar_screen_rect(bar: QWidget, dpr: float) -> "snapback.ScreenRect":
+    """控制条全局逻辑矩形 → 屏幕物理矩形（供 ScrollControl 过滤点击）。"""
+    g = bar.geometry()
+    return snapback.ScreenRect(
+        int(round(g.x() * dpr)),
+        int(round(g.y() * dpr)),
+        int(round(g.width() * dpr)),
+        int(round(g.height() * dpr)),
+    )
+
+
+def make_bar_hook(bar: QWidget, method: str):
+    """生成在子线程里同步调用主线程 hide/show 的回调。
+
+    BlockingQueuedConnection 会等主线程执行完再返回，保证抓帧那一刻
+    控制条确实不可见；Qt 只在主线程事件循环运行时允许这种调用。
+    """
+    def hook() -> None:
+        try:
+            QMetaObject.invokeMethod(bar, method, Qt.BlockingQueuedConnection)
+        except Exception:  # noqa: BLE001  控制条已销毁时不能打断拼接
+            pass
+    return hook
+
+
 def save_qimage(img: QImage, path: Path) -> None:
     suffix = path.suffix.lower() or ".png"
     fmt = "JPG" if suffix in (".jpg", ".jpeg") else "PNG"
@@ -173,22 +228,40 @@ def save_qimage(img: QImage, path: Path) -> None:
 # 后台工作线程
 # ---------------------------------------------------------------------------
 class StitchWorker(QThread):
-    """滚动长截图（阻塞式，跑在子线程）。"""
+    """滚动长截图（阻塞式，跑在子线程）。
+
+    control 负责把左键 / 右键 / 「确定」翻译成暂停与结束状态；
+    Qt 信号可以跨线程 emit，所以控制条的状态刷新走 state_changed。
+    """
 
     progress = Signal(int, int)
+    state_changed = Signal(bool, str)
     ok = Signal(object, dict)
     failed = Signal(str)
 
-    def __init__(self, rect: snapback.ScreenRect) -> None:
+    def __init__(
+        self, rect: snapback.ScreenRect, control: "snapback.ScrollControl | None" = None
+    ) -> None:
         super().__init__()
         self.rect = rect
+        self.control = control or snapback.ScrollControl()
+        # 控制条与选区重叠时，抓帧瞬间临时隐藏 / 恢复（由 App 注入）
+        self.before_grab = None
+        self.after_grab = None
 
     def run(self) -> None:  # noqa: D102
+        ctrl = self.control
+        ctrl.set_on_change(
+            lambda: self.state_changed.emit(ctrl.paused, ctrl.stop_reason)
+        )
         try:
             img, stats = snapback.stitch_scroll(
                 self.rect,
                 on_progress=lambda f, h, c: self.progress.emit(f, h),
                 should_stop=snapback.is_escape_pressed,
+                control=ctrl,
+                on_before_grab=self.before_grab,
+                on_after_grab=self.after_grab,
             )
             self.ok.emit(img, stats)
         except Exception as exc:  # noqa: BLE001
@@ -234,33 +307,84 @@ class OcrWorker(QThread):
 # 长截图进行中的提示条
 # ---------------------------------------------------------------------------
 class BusyBar(QWidget):
+    """滚动长截图进行中的悬浮控制条。
+
+    页面内**左键**：暂停 / 再点继续；**右键**：结束；点「确定 ✓」：结束；
+    滚到底也会自动结束。控制条尽量放在窗口之外，避免被拍进长图。
+    """
+
+    finish_clicked = Signal()
+
     def __init__(self) -> None:
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
         self._frames, self._height = 0, 0
-        self.title = QLabel(t("正在滚动截屏…"))
-        self.detail = QLabel("")
+        self._paused = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 8)
+        root.setSpacing(5)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.title = QLabel()
+        self.detail = QLabel()
         self.title.setStyleSheet("color:#fff; font-size:14px; font-weight:bold;")
         self.detail.setStyleSheet("color:#cfcfcf; font-size:12px;")
-        lay.addWidget(self.title)
-        lay.addWidget(self.detail)
-        self.setStyleSheet("background:#1f1f1f; border:1px solid #3a3a3a; border-radius:8px;")
+        self.finish_btn = QPushButton()
+        self.finish_btn.setObjectName("longFinish")
+        self.finish_btn.setCursor(Qt.PointingHandCursor)
+        self.finish_btn.setFocusPolicy(Qt.NoFocus)
+        self.finish_btn.setFixedHeight(30)
+        self.finish_btn.clicked.connect(lambda _checked=False: self.finish_clicked.emit())
+        row.addWidget(self.title)
+        row.addWidget(self.detail)
+        row.addStretch(1)
+        row.addWidget(self.finish_btn)
+        root.addLayout(row)
+
+        self.hint = QLabel()
+        self.hint.setStyleSheet("color:#9ca3af; font-size:11px;")
+        root.addWidget(self.hint)
+
+        self.setStyleSheet(
+            """
+            QWidget { background:#1f1f1f; border:1px solid #3a3a3a; border-radius:8px; }
+            QPushButton#longFinish {
+                background:#16a34a; color:#fff; border:1px solid #22c55e;
+                border-radius:6px; padding:2px 12px; font-size:13px; font-weight:bold;
+            }
+            QPushButton#longFinish:hover { background:#22c55e; }
+            """
+        )
+        # 固定尺寸：拼接过程中数字/语言变化都不会让控制条改变几何，
+        # 否则 exclude_rect 与实际位置会不一致。
+        self.setFixedSize(510, 72)
+        self.retranslate_ui()
         LANG.changed.connect(self.retranslate_ui)
 
     def update_text(self, frames: int, height: int) -> None:
         self._frames, self._height = frames, height
-        self._render()
-        self.adjustSize()
+        self._render_detail()
 
-    def _render(self) -> None:
-        self.detail.setText(t("已拼 {frames} 帧 · 当前高度 {height}px\n按 Esc 可随时结束",
-                              frames=self._frames, height=self._height))
+    def set_paused(self, paused: bool, _reason: str = "") -> None:
+        self._paused = bool(paused)
+        self._render_state()
+
+    def _render_state(self) -> None:
+        self.title.setText(
+            t("已暂停 · 左键继续") if self._paused else t("正在滚动截屏…")
+        )
+
+    def _render_detail(self) -> None:
+        self.detail.setText(
+            t("已拼 {frames} 帧 · {height}px", frames=self._frames, height=self._height)
+        )
 
     def retranslate_ui(self, _code: str = "") -> None:
-        self.title.setText(t("正在滚动截屏…"))
-        self._render()
+        self._render_state()
+        self._render_detail()
+        self.finish_btn.setText(t("确定 ✓"))
+        self.hint.setText(t("左键暂停 / 继续 · 右键结束 · 点「确定」结束    Esc 结束"))
 
 
 # ---------------------------------------------------------------------------
@@ -659,21 +783,24 @@ class App:
     # ------------------------------------------------------------ 截图
     def start_capture(self, mode=None) -> None:
         """开始截图。mode 为 None 或非字符串时用默认模式（QAction.triggered 会传 bool）。"""
-        if self.overlay is not None:
+        # 滚动长截图拼接期间 busy 是控制条（overlay 已关），此时热键 / 托盘
+        # 再触发普通截图会把控制条一起隐藏并打断拼接，必须一并挡住。
+        if self.overlay is not None or self.busy is not None:
             return
         if not isinstance(mode, str) or mode not in CAPTURE_MODES:
             mode = self.capture_mode
         self._begin_capture(mode, long_mode=False)
 
     def start_long_capture(self) -> None:
-        """独立命令「滚动长截图」：框选滚动区域 → 确定 → 直接滚动拼接。
+        """独立命令「滚动长截图」：悬停选窗口 → 单击即自动向下滚屏拼接。
 
-        与普通截图共用隐藏窗口 / 抓屏 / 遮罩，但不进入编辑器；确定后
-        由 Overlay.long_shot 交给 _on_long_shot 启动 StitchWorker。
+        与普通截图共用隐藏窗口 / 抓屏 / 遮罩，但走窗口探测模式；单击
+        窗口后 Overlay.long_shot 直接把客户区交给 _on_long_shot 启动
+        StitchWorker，不进编辑器、也不再点「确定」。
         """
         if self.overlay is not None or self.busy is not None:
             return
-        self._begin_capture("rect", long_mode=True)
+        self._begin_capture("window", long_mode=True)
 
     def _begin_capture(self, mode: str, long_mode: bool) -> None:
         """隐藏自有窗口 → 抓一帧底图 → 显示遮罩（普通截图 / 长截图共用）。"""
@@ -724,10 +851,14 @@ class App:
                 max(1, int(round(phys.h / dpr))),
             )
         )
-        # 三种模式：框选 / 窗口（悬停高亮单击）/ 全屏（自动选中整个虚拟屏幕）
-        self.overlay.set_capture_mode(mode, self._pick_window)
+        # 普通截图：框选 / 窗口（悬停高亮单击）/ 全屏（自动选中整个虚拟屏幕）
+        # 滚动长截图：固定走窗口探测，用客户区作为滚动区域（不含标题栏/边框）
         if long_mode:
-            self.overlay.set_long_mode(True)
+            self.overlay.set_long_mode(
+                True, lambda p: self._pick_window(p, client=True)
+            )
+        else:
+            self.overlay.set_capture_mode(mode, self._pick_window)
         self.overlay.done.connect(self._on_done)
         self.overlay.cancelled.connect(self._on_cancel)
         self.overlay.long_shot.connect(self._on_long_shot)
@@ -742,8 +873,13 @@ class App:
         self.overlay.activateWindow()
         self.overlay.setFocus()
 
-    def _pick_window(self, pos: QPoint):
-        """窗口模式：Overlay 局部逻辑坐标 → 物理坐标 → Win32 窗口枚举 → 逻辑矩形。"""
+    def _pick_window(self, pos: QPoint, client: bool = False):
+        """Overlay 局部逻辑坐标 → 物理坐标 → Win32 窗口枚举 → 逻辑矩形。
+
+        client=True 时改用窗口客户区（去掉标题栏 / 边框），滚动拼接时
+        固定的标题栏不会混进每一帧，模板匹配更准；取不到客户区就退回
+        可见边框。普通窗口截图仍用完整边框。
+        """
         ov = self.overlay
         if ov is None:
             return None
@@ -755,7 +891,15 @@ class App:
         )
         if info is None:
             return None
-        r = info.rect
+        frame = info.rect
+        r = frame
+        if client and info.client is not None:
+            c = info.client
+            x0, y0 = max(frame.x, c.x), max(frame.y, c.y)
+            x1 = min(frame.x + frame.w, c.x + c.w)
+            y1 = min(frame.y + frame.h, c.y + c.h)
+            if x1 - x0 >= 60 and y1 - y0 >= 40:
+                r = snapback.ScreenRect(x0, y0, x1 - x0, y1 - y0)
         q = QRect(
             int(round(r.x / dpr)) - origin.x(),
             int(round(r.y / dpr)) - origin.y(),
@@ -808,38 +952,66 @@ class App:
 
     # ------------------------------------------------------------ 长截图
     def _on_long_shot(self, logical_rect: QRect) -> None:
-        """Overlay 交来的选区（局部逻辑坐标）→ 屏幕物理矩形 → 滚动拼接。"""
-        if logical_rect.isNull() or logical_rect.width() < 8:
+        """Overlay 交来的窗口客户区（局部逻辑）→ 屏幕物理矩形 → 自动滚屏拼接。
+
+        控制条必须先摆好再启动线程：左键过滤区、抓帧隐藏钩子都依赖它的几何。
+        """
+        if (
+            logical_rect.isNull()
+            or logical_rect.width() < 8
+            or logical_rect.height() < 8
+        ):
             self._close_overlay()
             return
         ov = self.overlay
         dpr = ov.dpr if ov else 1.0
         origin = getattr(self, "_capture_origin", QPoint(0, 0))
         # 虚拟屏幕原点在多显示器下可能是负数，叠加 Overlay 全局原点再乘 dpr，
-        # 否则副屏上的选区会整体偏移，滚到错误的位置。
+        # 否则副屏上的窗口会整体偏移，滚到错误的位置。
         rect = overlay_rect_to_screen(logical_rect, origin, dpr)
         # 拼接是逐帧抓屏：主窗口 / 帮助 / 关于等自有窗口若在拼接期间恢复，
         # 会被一帧一帧拍进长图。这里只关闭遮罩，等拼接结束再统一恢复。
         self._close_overlay(restore=False)
 
         self.busy = BusyBar()
-        screen_geo = self.app.primaryScreen().availableGeometry()
-        self.busy.adjustSize()
         bw, bh = self.busy.width(), self.busy.height()
-        bx = max(
-            screen_geo.left() + 8,
-            min(screen_geo.center().x() - bw // 2, screen_geo.right() - bw - 8),
+        sel = QRect(
+            logical_rect.x() + origin.x(),
+            logical_rect.y() + origin.y(),
+            logical_rect.width(),
+            logical_rect.height(),
         )
-        # 进度条同样会被抓进长图：尽量放到选区之外（顶部优先，选区贴顶则改底部）
-        sel_top_logical = logical_rect.y() + origin.y()
-        by = screen_geo.top() + 8
-        if sel_top_logical < bh + 24:
-            by = screen_geo.bottom() - bh - 8
-        self.busy.move(bx, by)
+        vs = snapback.virtual_screen()
+        screen = QRect(
+            int(round(vs.x / dpr)),
+            int(round(vs.y / dpr)),
+            int(round(vs.w / dpr)),
+            int(round(vs.h / dpr)),
+        )
+        pos = place_bar_outside(sel, screen, bw, bh)
+        outside = pos is not None
+        if not outside:
+            # 窗口占满整个虚拟屏：控制条只能放在角落，改由抓帧瞬间隐藏兜底
+            pos = QRect(screen.left() + 8, screen.top() + 8, bw, bh)
+        self.busy.move(pos.topLeft())
         self.busy.show()
 
-        worker = StitchWorker(rect)
+        control = snapback.ScrollControl()
+        r = bar_screen_rect(self.busy, dpr)
+        m = int(round(10 * dpr))   # 放宽一圈，点边框附近也不算「页面内点击」
+        control.set_exclude_rect(
+            snapback.ScreenRect(r.x - m, r.y - m, r.w + 2 * m, r.h + 2 * m)
+        )
+
+        worker = StitchWorker(rect, control)
+        if not outside:
+            worker.before_grab = make_bar_hook(self.busy, "hide")
+            worker.after_grab = make_bar_hook(self.busy, "show")
         worker.progress.connect(self.busy.update_text)
+        worker.state_changed.connect(self.busy.set_paused)
+        self.busy.finish_clicked.connect(
+            lambda: control.request_stop("user-confirm")
+        )
 
         def on_ok(pil_img, stats) -> None:
             self._close_busy()
@@ -849,12 +1021,18 @@ class App:
             self.preview.show()
             self.preview.raise_()
             self.preview.activateWindow()
-            if stats.get("stop_reason") in ("match-failed", "no-overlap"):
+            reason = stats.get("stop_reason")
+            if reason in ("match-failed", "no-overlap"):
                 self._tray_message(
                     app_name(),
                     t("内容未能自动对齐，结果可能不完整（页面可能有固定悬浮元素或动画）"),
                     QSystemTrayIcon.Warning,
                     4000,
+                )
+            elif reason == "reached-bottom":
+                self._tray_message(
+                    app_name(), t("已滚动到底，长截图自动结束"),
+                    QSystemTrayIcon.Information, 2200,
                 )
 
         def on_fail(msg: str) -> None:

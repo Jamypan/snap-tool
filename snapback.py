@@ -30,6 +30,8 @@ MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 WHEEL_DELTA = 120
 
+VK_LBUTTON = 0x01
+VK_RBUTTON = 0x02
 VK_ESCAPE = 0x1B
 
 user32 = ctypes.windll.user32 if sys.platform == "win32" else None
@@ -114,6 +116,26 @@ class WindowInfo:
     rect: ScreenRect
     title: str
     hwnd: int
+    client: ScreenRect | None = None   # 客户区（去掉标题栏/边框），滚动拼接用它更准
+
+
+def _client_rect(hwnd: int) -> ScreenRect | None:
+    """取窗口客户区的屏幕物理矩形（不含标题栏、边框、阴影）。"""
+    if user32 is None:
+        return None
+    try:
+        r = _RECT()
+        if not user32.GetClientRect(wintypes.HWND(hwnd), ctypes.byref(r)):
+            return None
+        pt = wintypes.POINT(0, 0)
+        if not user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(pt)):
+            return None
+        w, h = r.right - r.left, r.bottom - r.top
+        if w < 60 or h < 40:
+            return None
+        return ScreenRect(int(pt.x), int(pt.y), int(w), int(h))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _visible_frame(hwnd: int) -> ScreenRect | None:
@@ -182,7 +204,7 @@ def window_rect_at(x: int, y: int, exclude_pid: int | None = None) -> WindowInfo
             n = user32.GetWindowTextLengthW(wintypes.HWND(h))
             buf = ctypes.create_unicode_buffer(max(1, n + 1))
             user32.GetWindowTextW(wintypes.HWND(h), buf, len(buf))
-            found.append(WindowInfo(r, buf.value, h))
+            found.append(WindowInfo(r, buf.value, h, _client_rect(h)))
         except Exception:  # noqa: BLE001
             pass
         return True
@@ -256,11 +278,146 @@ def set_cursor_pos(x: int, y: int) -> None:
     user32.SetCursorPos(int(x), int(y))
 
 
-def is_escape_pressed() -> bool:
-    """用于长截图过程中随时中断。"""
+def is_key_pressed(vk: int) -> bool:
+    """查询异步按键状态（最高位为 1 表示当前按下）。"""
     if user32 is None:
         return False
-    return bool(user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+    return bool(user32.GetAsyncKeyState(vk) & 0x8000)
+
+
+def is_escape_pressed() -> bool:
+    """用于长截图过程中随时中断。"""
+    return is_key_pressed(VK_ESCAPE)
+
+
+# ---------------------------------------------------------------------------
+# 滚动长截图的交互控制（不依赖 Qt，可单独测试）
+# ---------------------------------------------------------------------------
+class ScrollControl:
+    """把「左键暂停/继续、右键结束、点确定结束」翻译成拼接线程能读的状态。
+
+    · 拼接线程：poll() / wait() / wait_while_paused() / should_stop() / paused
+    · 主线程  ：request_stop() / set_exclude_rect()
+    · 左键只认「按下沿」，按住不放不会反复切换；右键同上。
+    · exclude_rect 是控制条的屏幕物理矩形：点在控制条上（尤其是「确定」）
+      不算页面内的左/右键操作，否则点一下确定会同时触发暂停。
+    """
+
+    POLL_INTERVAL = 0.02
+
+    def __init__(self, on_change=None, exclude_rect: ScreenRect | None = None) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self._paused = False
+        self._stopped = False
+        self._stop_reason = ""
+        self._prev_left = False
+        self._prev_right = False
+        self._baseline_done = False
+        self._on_change = on_change
+        self.exclude_rect = exclude_rect
+
+    # ------------------------------------------------------------ 只读状态
+    @property
+    def paused(self) -> bool:
+        with self._lock:
+            return self._paused
+
+    @property
+    def stop_reason(self) -> str:
+        with self._lock:
+            return self._stop_reason
+
+    def should_stop(self) -> bool:
+        with self._lock:
+            return self._stopped
+
+    def snapshot(self) -> tuple[bool, bool, str]:
+        with self._lock:
+            return self._paused, self._stopped, self._stop_reason
+
+    # ------------------------------------------------------------ 主线程入口
+    def request_stop(self, reason: str = "user-confirm") -> None:
+        """控制条的「确定 ✓」/ 程序退出等调用：结束拼接。"""
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            self._stop_reason = reason
+        self._notify()
+
+    def set_exclude_rect(self, rect: ScreenRect | None) -> None:
+        with self._lock:
+            self.exclude_rect = rect
+
+    def set_on_change(self, fn) -> None:
+        with self._lock:
+            self._on_change = fn
+
+    # ------------------------------------------------------------ 拼接线程
+    def _notify(self) -> None:
+        fn = self._on_change
+        if fn is not None:
+            try:
+                fn()
+            except Exception:  # noqa: BLE001  状态通知失败不能打断拼接
+                pass
+
+    def _cursor_in_exclude(self) -> bool:
+        rect = self.exclude_rect
+        if rect is None:
+            return False
+        try:
+            x, y = get_cursor_pos()
+        except Exception:  # noqa: BLE001
+            return False
+        return rect.x <= x < rect.x + rect.w and rect.y <= y < rect.y + rect.h
+
+    def _sync_baseline(self) -> None:
+        """把当前已按住的键记成基线。
+
+        选窗口时的那次左键点击可能还没松开，若不忽略会被算成「暂停」。
+        """
+        self._prev_left = is_key_pressed(VK_LBUTTON)
+        self._prev_right = is_key_pressed(VK_RBUTTON)
+        self._baseline_done = True
+
+    def poll(self) -> None:
+        """轮询一次鼠标按键边沿。由拼接线程在等待期间高频调用。"""
+        if not self._baseline_done:
+            self._sync_baseline()
+        left = is_key_pressed(VK_LBUTTON)
+        right = is_key_pressed(VK_RBUTTON)
+        # 光标在控制条上：只刷新基线，不触发暂停/结束
+        if self._cursor_in_exclude():
+            self._prev_left, self._prev_right = left, right
+            return
+        if right and not self._prev_right:
+            self.request_stop("user-right-click")
+        elif left and not self._prev_left:
+            with self._lock:
+                self._paused = not self._paused
+            self._notify()
+        self._prev_left, self._prev_right = left, right
+
+    def wait(self, seconds: float) -> None:
+        """滚轮后的稳定等待期：细粒度轮询，短促点击也不会丢。"""
+        end = time.monotonic() + max(0.0, seconds)
+        while True:
+            self.poll()
+            if self.should_stop():
+                return
+            remain = end - time.monotonic()
+            if remain <= 0:
+                return
+            time.sleep(min(self.POLL_INTERVAL, remain))
+
+    def wait_while_paused(self) -> None:
+        """暂停期间不抓帧、不滚轮，但持续监听「再点左键继续」。"""
+        while self.paused and not self.should_stop():
+            self.poll()
+            time.sleep(self.POLL_INTERVAL)
 
 
 # ---------------------------------------------------------------------------
@@ -309,18 +466,26 @@ def stitch_scroll(
     max_frames: int = 120,
     on_progress=None,
     should_stop=None,
+    control: ScrollControl | None = None,
+    on_before_grab=None,
+    on_after_grab=None,
 ) -> tuple[Image.Image, dict]:
     """
-    自动滚动并拼接长截图。
+    自动滚动并拼接长截图（选中的窗口客户区即 rect）。
 
     做法：把光标移到选区中心 → 抓帧 → 滚轮向下 → 再抓帧 →
     用模板匹配算出两帧的重叠量 → 只保留新增的部分拼到画布上。
 
+    control 提供新的交互语义：左键暂停 / 再按继续、右键结束、点「确定」结束；
+    拼接线程在等待期间高频 poll()，暂停时不抓帧也不滚轮。
+    on_before_grab / on_after_grab 用于「控制条与选区重叠」时，在抓帧瞬间
+    临时隐藏 / 恢复控制条，避免它自己被拍进长图。
+
     停止条件（任一命中）：
-      - 连续两帧几乎没有新增内容（到底了）
+      - 连续两帧几乎没有新增内容（滚到底，自动结束）
       - 匹配得分低于阈值（无法对齐，通常是内容重复或页面在动）
       - 高度超过 max_height / 帧数超过 max_frames
-      - 外部通过 should_stop() 要求中断（例如用户按了 ESC）
+      - 用户右键 / 点确定 / 按 Esc（后两者由 should_stop 提供）
 
     返回 (拼接结果图, 统计信息 dict)。
     """
@@ -340,13 +505,32 @@ def stitch_scroll(
         "cursor_restored": False,
     }
 
+    def _stop_requested() -> bool:
+        return (control is not None and control.should_stop()) or (
+            should_stop is not None and should_stop()
+        )
+
+    def _stop_reason() -> str:
+        if control is not None and control.should_stop():
+            return control.stop_reason or "user-confirm"
+        return "user-interrupt"
+
     try:
         for i in range(max_frames):
-            if should_stop is not None and should_stop():
-                stats["stop_reason"] = "user-interrupt"
+            # 暂停：不抓帧、不滚轮，但继续监听鼠标（再点左键即继续）
+            if control is not None:
+                control.wait_while_paused()
+            if _stop_requested():
+                stats["stop_reason"] = _stop_reason()
                 break
 
-            img = grab_region(rect)
+            if on_before_grab is not None:
+                on_before_grab()
+            try:
+                img = grab_region(rect)
+            finally:
+                if on_after_grab is not None:
+                    on_after_grab()
             frame = np.array(img)
             frames.append(frame)
             stats["frames"] = i + 1
@@ -394,8 +578,18 @@ def stitch_scroll(
                 stats["stop_reason"] = "max-height"
                 break
 
+            # 滚之前再看一眼控制状态：用户在等待期内点了右键 / 确定就别再滚了
+            if control is not None:
+                control.poll()
+            if _stop_requested():
+                stats["stop_reason"] = _stop_reason()
+                break
+
             _send_mouse_wheel(scroll_notches)
-            time.sleep(settle_seconds)
+            if control is not None:
+                control.wait(settle_seconds)
+            else:
+                time.sleep(settle_seconds)
         else:
             stats["stop_reason"] = "max-frames"
 

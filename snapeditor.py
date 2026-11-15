@@ -1773,20 +1773,35 @@ class Overlay(QWidget):
         )
 
     # ------------------------------------------------------------ 截图模式
-    def set_long_mode(self, on: bool = True) -> None:
-        """切换为独立「滚动长截图」流程。
+    def set_long_mode(self, on: bool = True, window_picker=None) -> None:
+        """切换为独立「滚动长截图」流程：悬停高亮窗口 → 单击即自动滚屏拼接。
 
-        与普通截图共用同一套框选 / 调整 / 确认交互，但点「确定」后
-        不进入编辑器，而是把选区交给宿主直接做滚动拼接。
-        长截图只允许 rect 框选（窗口 / 全屏没有「滚动区域」的概念）。
+        与旧版不同，这里**不框选、不点「确定」**：单击目标窗口后立刻把
+        它的客户区矩形交给宿主启动拼接，滚动过程中的左键 / 右键 / 打勾
+        才控制暂停与结束。
+
+        window_picker 为 None 时（例如某些自测场景没有 Win32 窗口枚举）
+        退回框选 + 确定的兼容路径，避免卡在 picking 状态无法操作。
         """
         self.long_mode = on
-        self.capture_mode = "rect"
-        self._window_picker = None
-        self._mode = "idle"
+        self.sel = None
+        self.shapes.clear()
+        self._selected = None
+        self._hover_rect = None
+        self._hover_title = ""
+        self._last_pick_time = 0.0
+        self._last_pick_pos = QPoint(-9999, -9999)
         self.toolbar.set_confirm_tip(
             "开始滚动拼接 (Enter)" if on else "确认选区，进入程序窗口继续编辑 (Enter)"
         )
+        if on and window_picker is not None:
+            self.capture_mode = "window"
+            self._window_picker = window_picker
+            self._mode = "picking"
+        else:
+            self.capture_mode = "rect"
+            self._window_picker = None
+            self._mode = "idle"
         self.update()
 
     def set_capture_mode(self, mode: str, window_picker=None) -> None:
@@ -2311,7 +2326,14 @@ class Overlay(QWidget):
                 # 点击时强制重新探测，避免节流期间鼠标刚移进窗口却选中上一个
                 self._update_hover(pos, force=True)
                 if self._hover_rect:
-                    self._apply_selection(self._hover_rect, near=pos)
+                    if self.long_mode:
+                        # 滚动长截图：单击窗口即开始自动滚屏，不再进入确认阶段。
+                        # 发 Overlay 局部逻辑坐标，宿主会加虚拟屏原点并乘 dpr。
+                        r = QRect(self._hover_rect)
+                        self._teardown()
+                        self.long_shot.emit(r)
+                    else:
+                        self._apply_selection(self._hover_rect, near=pos)
                 else:
                     # 该位置没有可用窗口 → 退回手动框选
                     self.capture_mode = "rect"
@@ -2730,7 +2752,12 @@ class Overlay(QWidget):
             if k == Qt.Key_Escape:
                 self.cancel()
             elif k in (Qt.Key_Return, Qt.Key_Enter) and self._hover_rect:
-                self._apply_selection(self._hover_rect, near=self._last_pick_pos)
+                if self.long_mode:
+                    r = QRect(self._hover_rect)
+                    self._teardown()
+                    self.long_shot.emit(r)
+                else:
+                    self._apply_selection(self._hover_rect, near=self._last_pick_pos)
             return
         if k == Qt.Key_Escape:
             self.cancel()
@@ -2883,10 +2910,15 @@ class Overlay(QWidget):
 
             p.setFont(QFont("", 13))
             p.setPen(QColor(255, 255, 255, 220))
+            hint = (
+                t("单击选择要截长屏的窗口，自动向下滚屏    右键 / Esc 取消")
+                if self.long_mode
+                else t("窗口截图：移动鼠标到目标窗口，单击确认    右键 / Esc 取消")
+            )
             p.drawText(
                 self.rect().adjusted(0, 40, 0, 0),
                 Qt.AlignHCenter | Qt.AlignTop,
-                t("窗口截图：移动鼠标到目标窗口，单击确认    右键 / Esc 取消"),
+                hint,
             )
             self._last_painted_sel = None
             p.end()
