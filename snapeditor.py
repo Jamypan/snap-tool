@@ -56,6 +56,90 @@ FONT_SIZE = 18
 # 末尾用单次定时器补画最终状态，保证松手时画面是准确的。
 REPAINT_INTERVAL_MS = 10.0
 
+# 选中矩形 / 椭圆后的四角控制柄（Overlay 与窗口编辑器共用）
+SHAPE_HANDLE_R = 5           # 绘制半径（屏幕像素，不随画布放缩变化）
+SHAPE_HANDLE_HIT = 11        # 命中半径（屏幕像素；Canvas 会按 view_scale 反算）
+SHAPE_MIN_SIZE = 8           # 拖角缩放时允许的最小宽 / 高
+SHAPE_CORNERS = ("nw", "ne", "se", "sw")
+
+
+def shape_corner_points(r: QRect) -> list[tuple[str, QPoint]]:
+    """矩形四个角的 (角名, 坐标)：nw → ne → se → sw。"""
+    return [
+        ("nw", QPoint(r.left(), r.top())),
+        ("ne", QPoint(r.right(), r.top())),
+        ("se", QPoint(r.right(), r.bottom())),
+        ("sw", QPoint(r.left(), r.bottom())),
+    ]
+
+
+def shape_hit_corner(r: QRect, pos: QPoint, hit: int = SHAPE_HANDLE_HIT) -> str:
+    """命中四个角之一返回角名，否则返回空串。距离以传入坐标系为准。"""
+    if not r or r.isNull():
+        return ""
+    best, best_d2 = "", hit * hit
+    for name, pt in shape_corner_points(r):
+        d = pos - pt
+        d2 = d.x() * d.x() + d.y() * d.y()
+        if d2 <= best_d2:
+            best, best_d2 = name, d2
+    return best
+
+
+def shape_resize_rect(base: QRect, corner: str, pos: QPoint,
+                      min_size: int = SHAPE_MIN_SIZE) -> QRect:
+    """拖动 corner 角缩放矩形：对角固定、该角跟随 pos。
+
+    允许拖过对角（自动 normalized，等于水平 / 垂直翻转）；宽高不小于
+    min_size，避免图形被拖成一条线后无法再选中。base 始终是拖动开始时的
+    快照，所以连续移动不会累积误差。
+    """
+    if corner not in SHAPE_CORNERS:
+        return QRect(base)
+    anchor = {
+        "nw": QPoint(base.right(), base.bottom()),
+        "ne": QPoint(base.left(), base.bottom()),
+        "se": QPoint(base.left(), base.top()),
+        "sw": QPoint(base.right(), base.top()),
+    }[corner]
+    x, y = pos.x(), pos.y()
+    if abs(x - anchor.x()) < min_size:
+        x = anchor.x() + (min_size if x >= anchor.x() else -min_size)
+    if abs(y - anchor.y()) < min_size:
+        y = anchor.y() + (min_size if y >= anchor.y() else -min_size)
+    # 显式取 min/max，不用 QRect.normalized()：后者对负宽高会整体偏 1px，
+    # 拖过对角翻转时固定角会悄悄移动。
+    return QRect(
+        QPoint(min(anchor.x(), x), min(anchor.y(), y)),
+        QPoint(max(anchor.x(), x), max(anchor.y(), y)),
+    )
+
+
+def shape_corner_cursor(corner: str):
+    """四角对应的斜向缩放光标；无效角返回 None。"""
+    return {
+        "nw": Qt.SizeFDiagCursor,
+        "se": Qt.SizeFDiagCursor,
+        "ne": Qt.SizeBDiagCursor,
+        "sw": Qt.SizeBDiagCursor,
+    }.get(corner)
+
+
+def paint_shape_corner_handles(p: QPainter, pts: list[QPoint],
+                               radius: int = SHAPE_HANDLE_R) -> None:
+    """在画布（屏幕）坐标处画四角控制柄：白描边 + 蓝底圆点。"""
+    if not pts:
+        return
+    p.save()
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(QPen(QColor(255, 255, 255), 2))
+    p.setBrush(QBrush(BORDER_COLOR))
+    for pt in pts:
+        p.drawEllipse(QRectF(pt.x() - radius, pt.y() - radius,
+                             2 * radius, 2 * radius))
+    p.restore()
+
+
 TOOLS = [
     ("rect", "矩形"),
     ("ellipse", "椭圆"),
@@ -1766,6 +1850,10 @@ class Overlay(QWidget):
         self._drag_shape_snapshot: dict | None = None  # 标注几何初始快照
         self._reshape_arrow: Shape | None = None     # 正在拉伸端点的箭头
         self._reshape_which = ""                     # "start" / "end"
+        # 选中矩形 / 椭圆后拖四角缩放
+        self._resize_shape: Shape | None = None
+        self._resize_shape_corner = ""               # nw / ne / se / sw
+        self._resize_shape_base: QRect | None = None  # 拖动开始时的 rect 快照
 
         # --- 重绘节流 / 脏区跟踪 ---
         self._last_repaint = 0.0                  # time.monotonic() 秒
@@ -2352,6 +2440,20 @@ class Overlay(QWidget):
         self._teardown()
         self.to_editor.emit(cropped, [])
 
+    # ------------------------------------------------------------ 形状四角
+    def _shape_corner_points(self) -> list[QPoint]:
+        """当前选中的矩形 / 椭圆的四个角（逻辑坐标）；其它标注返回空。"""
+        s = self._selected
+        if s is None or s.kind not in ("rect", "ellipse") or not s.rect:
+            return []
+        return [pt for _, pt in shape_corner_points(s.rect.normalized())]
+
+    def _hit_shape_corner(self, pos: QPoint) -> str:
+        s = self._selected
+        if s is None or s.kind not in ("rect", "ellipse") or not s.rect:
+            return ""
+        return shape_hit_corner(s.rect.normalized(), pos)
+
     # ------------------------------------------------------------ 箭头端点
     def _hit_arrow_endpoint(self, pos: QPoint, selected_only: bool = False):
         """命中箭头的起点/终点 → (shape, "start"/"end")，否则 None。"""
@@ -2436,6 +2538,20 @@ class Overlay(QWidget):
             )
             if hit:
                 self._begin_arrow_reshape(hit)
+                return
+
+            # 1.5) 选中矩形 / 椭圆的四角控制柄：优先于选区八点，
+            #      形状角恰好压在选区角上时按「调形状」处理。
+            corner = self._hit_shape_corner(pos) if self.sel.contains(pos) else ""
+            if corner:
+                self._mode = "resizing_shape"
+                self._resize_shape = self._selected
+                self._resize_shape_corner = corner
+                self._resize_shape_base = QRect(self._selected.rect)
+                cur = shape_corner_cursor(corner)
+                if cur is not None and cur != self._cursor_cache:
+                    self.setCursor(cur)
+                    self._cursor_cache = cur
                 return
 
             edge = self._hit_handle(pos)
@@ -2603,6 +2719,22 @@ class Overlay(QWidget):
             self._repaint()
             return
 
+        if (
+            self._mode == "resizing_shape"
+            and self._resize_shape and self._resize_shape_base
+        ):
+            # 角点限制在选区内（标注只在选区内渲染），其余角保持固定
+            r = self.sel.normalized().adjusted(1, 1, -1, -1)
+            pt = QPoint(
+                max(r.left(), min(pos.x(), r.right())),
+                max(r.top(), min(pos.y(), r.bottom())),
+            )
+            self._resize_shape.rect = shape_resize_rect(
+                self._resize_shape_base, self._resize_shape_corner, pt
+            )
+            self._repaint()
+            return
+
         if self._mode == "resizing" and self._sel_at_drag_start:
             self.sel = self._resize_rect(self._sel_at_drag_start, self._resize_edge, pos)
             self._place_toolbar()
@@ -2622,8 +2754,11 @@ class Overlay(QWidget):
 
         # 悬停反馈（仅当光标真的变化时才 setCursor，避免每次 move 都触发系统光标切换）
         if self._mode == "editing" and self.sel:
+            corner = self._hit_shape_corner(pos) if self.sel.contains(pos) else ""
             if self.sel.contains(pos) and self._hit_arrow_endpoint(pos):
                 cur = Qt.SizeAllCursor          # 箭头端点：提示可拉伸
+            elif corner:
+                cur = shape_corner_cursor(corner)   # 形状四角：斜向缩放
             else:
                 edge = self._hit_handle(pos)
                 cur = self._handle_cursor(edge)
@@ -2696,6 +2831,15 @@ class Overlay(QWidget):
             self._mode = "editing"
             self._reshape_arrow = None
             self._reshape_which = ""
+            self._place_style_panel()
+            self.update()
+
+        if self._mode == "resizing_shape":
+            # 结束拖角缩放：保持选中，回到编辑态
+            self._mode = "editing"
+            self._resize_shape = None
+            self._resize_shape_corner = ""
+            self._resize_shape_base = None
             self._place_style_panel()
             self.update()
 
@@ -3054,6 +3198,10 @@ class Overlay(QWidget):
                     p.drawEllipse(QRectF(pt.x() - r, pt.y() - r, 2 * r, 2 * r))
                 p.restore()
 
+            # 选中矩形 / 椭圆的四角控制柄：同样画在裁剪之外，贴着选区
+            # 边缘时也能完整看到并拖动。拖动任一角即可改宽高与形状。
+            paint_shape_corner_handles(p, self._shape_corner_points())
+
             # 4) 边框
             pen = QPen(BORDER_COLOR)
             pen.setWidth(1)
@@ -3063,7 +3211,7 @@ class Overlay(QWidget):
 
             if self._mode in (
                 "selecting", "editing", "moving", "resizing", "drawing",
-                "dragging_shape", "reshaping_arrow",
+                "dragging_shape", "reshaping_arrow", "resizing_shape",
             ):
                 # 5) 八个控制点
                 p.setPen(Qt.NoPen)

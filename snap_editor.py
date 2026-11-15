@@ -55,12 +55,18 @@ from snapeditor import (
     OcrLayer,
     OcrPanel,
     PEN_WIDTH,
+    SHAPE_HANDLE_HIT,
     Shape,
     StylePanel,
     Toolbar,
     _reading_order,
     _text_edit_color,
     draw_shape,
+    paint_shape_corner_handles,
+    shape_corner_cursor,
+    shape_corner_points,
+    shape_hit_corner,
+    shape_resize_rect,
 )
 from i18n import LANG, app_name, t
 
@@ -110,6 +116,10 @@ class Canvas(QWidget):
         self._drag_shape_snapshot: dict | None = None
         self._reshape_arrow: Shape | None = None
         self._reshape_which = ""
+        # 选中矩形 / 椭圆后拖四角缩放
+        self._resize_shape: Shape | None = None
+        self._resize_shape_corner = ""               # nw / ne / se / sw
+        self._resize_shape_base: QRect | None = None
 
         # 视图变换：把物理图像坐标映射到画布像素
         self.view_scale = 1.0
@@ -491,6 +501,29 @@ class Canvas(QWidget):
                     return (s, which)
         return None
 
+    # ------------------------------------------------------------ 形状四角
+    def _selected_corner_rect(self) -> QRect | None:
+        """仅当选中矩形 / 椭圆时返回它的外接矩形，其它标注返回 None。"""
+        s = self._selected
+        if s is None or s.kind not in ("rect", "ellipse") or not s.rect:
+            return None
+        return s.rect.normalized()
+
+    def _hit_shape_corner(self, pos: QPoint) -> str:
+        """pos 是图像坐标；命中半径按显示比例反算，放缩后手感一致。"""
+        r = self._selected_corner_rect()
+        if r is None:
+            return ""
+        hit = max(1, int(SHAPE_HANDLE_HIT / max(self.view_scale, 1e-3)))
+        return shape_hit_corner(r, pos, hit)
+
+    def _shape_corner_points(self) -> list[QPoint]:
+        """四角控制柄的屏幕坐标（绘制用，半径固定为屏幕像素）。"""
+        r = self._selected_corner_rect()
+        if r is None:
+            return []
+        return [self._to_screen(pt) for _, pt in shape_corner_points(r)]
+
     # ------------------------------------------------------------ 几何辅助
     @staticmethod
     def _shape_geometry(s: Shape) -> dict:
@@ -655,6 +688,16 @@ class Canvas(QWidget):
             self._begin_arrow_reshape(hit)
             return
 
+        # 选中矩形 / 椭圆后，四角控制柄优先于「点选 / 拖动 / 画新图形」
+        corner = self._hit_shape_corner(pos)
+        if corner:
+            self._mode = "resizing_shape"
+            self._resize_shape = self._selected
+            self._resize_shape_corner = corner
+            self._resize_shape_base = QRect(self._selected.rect)
+            self.setCursor(shape_corner_cursor(corner))
+            return
+
         if self._tool == "select":
             if self._select_shape_at(pos):
                 # 选中标注 → 进入拖动
@@ -702,6 +745,22 @@ class Canvas(QWidget):
             return
         pos = self._to_image(ev.position().toPoint())
 
+        if (
+            self._mode == "resizing_shape"
+            and self._resize_shape and self._resize_shape_base
+        ):
+            # 角点限制在图像内，对角保持固定；用起始快照重算避免累积误差
+            r = QRect(0, 0, self.base.width(), self.base.height())
+            pt = QPoint(
+                max(r.left(), min(pos.x(), r.right())),
+                max(r.top(), min(pos.y(), r.bottom())),
+            )
+            self._resize_shape.rect = shape_resize_rect(
+                self._resize_shape_base, self._resize_shape_corner, pt
+            )
+            self._repaint()
+            return
+
         if self._mode == "dragging_shape" and self._drag_shape and self._drag_shape_origin:
             self._restore_shape_geometry(self._drag_shape, self._drag_shape_snapshot)
             delta = pos - self._drag_shape_origin
@@ -740,8 +799,11 @@ class Canvas(QWidget):
 
         # 悬停光标提示
         if self._tool == "select":
+            corner = self._hit_shape_corner(pos)
             if self._hit_arrow_endpoint(pos):
                 self.setCursor(Qt.SizeAllCursor)
+            elif corner:
+                self.setCursor(shape_corner_cursor(corner))
             elif self._select_shape_at_hint(pos):
                 self.setCursor(Qt.SizeAllCursor)
             else:
@@ -814,6 +876,15 @@ class Canvas(QWidget):
             self._mode = "idle"
             self._reshape_arrow = None
             self._reshape_which = ""
+            self._place_style_panel()
+            self.update()
+            return
+
+        if self._mode == "resizing_shape":
+            self._mode = "idle"
+            self._resize_shape = None
+            self._resize_shape_corner = ""
+            self._resize_shape_base = None
             self._place_style_panel()
             self.update()
             return
@@ -911,6 +982,9 @@ class Canvas(QWidget):
                     p.setPen(QPen(QColor(255, 255, 255), 2))
                     p.setBrush(QBrush(QColor(10, 132, 255)))
                     p.drawEllipse(QRectF(sp.x() - r, sp.y() - r, 2 * r, 2 * r))
+
+            # 选中矩形 / 椭圆的四角控制柄（屏幕像素固定大小，不随放缩变粗）
+            paint_shape_corner_handles(p, self._shape_corner_points())
 
     def resizeEvent(self, ev) -> None:  # noqa: N802
         self._fit()

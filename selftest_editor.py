@@ -197,6 +197,23 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     T10 README 已记录 v20 画质修复
     T11 滚到底后补抓完整画面，长图不缺尾
 
+  Stage U  v21：矩形 / 椭圆四角拖柄缩放
+    U1  四角点坐标与顺序（nw/ne/se/sw）
+    U2  四角命中、中心 / 半径外 / 空矩形不误命中
+    U3  拖任一角时对角精确固定，翻转不偏 1px
+    U4  最小尺寸、拖过对角翻转、非法角原样返回
+    U5  四角斜向缩放光标
+    U6  Canvas 画完自动选中并显示 4 个角柄
+    U7  Canvas 拖 se 角放大、状态复位、导出全分辨率
+    U8  Canvas 椭圆拖 nw 角同样可缩放
+    U9  Canvas 翻转后仍保持最小可编辑形状
+    U10 画布放大 2 倍后命中仍准确
+    U11 马赛克 / 箭头无四角柄，箭头端点拉伸未回归
+    U12 Overlay 拖角只改图形，不改选区
+    U13 Overlay 角点限制在选区内、马赛克无四角柄
+    U14 两个编辑器绘制控制柄不抛异常
+    U15 README / 中文帮助 / 7 语言帮助同步
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -3062,6 +3079,263 @@ def test_v20_long_capture_quality() -> None:
            f"v20={'v20' in readme} ime={'输入法' in readme}")
 
 
+def test_v21_shape_corner_resize() -> None:
+    """Stage U：矩形 / 椭圆四角拖柄（Overlay + 窗口编辑器 + 放缩）。"""
+    from pathlib import Path
+
+    from PySide6.QtGui import QPixmap
+
+    from i18n_docs import help_html
+    from snapui import HELP_HTML
+    from snapeditor import (
+        SHAPE_MIN_SIZE,
+        shape_corner_cursor,
+        shape_corner_points,
+        shape_hit_corner,
+        shape_resize_rect,
+    )
+
+    P, M, R = (
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseMove,
+        QEvent.Type.MouseButtonRelease,
+    )
+
+    def overlay_event(typ, p: QPoint) -> QMouseEvent:
+        return QMouseEvent(typ, QPoint(p), QPoint(p), Qt.LeftButton,
+                           Qt.LeftButton, Qt.NoModifier)
+
+    r = QRect(10, 20, 100, 60)
+    pts = dict(shape_corner_points(r))
+
+    # ---------------- U1~U5  纯几何函数 ----------------
+    ok_u1 = (
+        pts["nw"] == QPoint(10, 20) and pts["ne"] == QPoint(109, 20)
+        and pts["se"] == QPoint(109, 79) and pts["sw"] == QPoint(10, 79)
+        and len(shape_corner_points(r)) == 4
+    )
+    record("U1 四角点坐标与顺序正确（nw/ne/se/sw）", ok_u1,
+           f"pts={[(k, v.x(), v.y()) for k, v in pts.items()]}")
+
+    ok_u2 = (
+        all(shape_hit_corner(r, p) == k for k, p in pts.items())
+        and shape_hit_corner(r, QPoint(60, 50)) == ""
+        and shape_hit_corner(r, QPoint(109 + 20, 79)) == ""
+        and shape_hit_corner(QRect(), QPoint(10, 20)) == ""
+    )
+    record("U2 四角命中、中心与半径外不命中、空矩形不命中", ok_u2)
+
+    a = shape_resize_rect(r, "se", QPoint(200, 150))
+    b = shape_resize_rect(r, "nw", QPoint(0, 0))
+    c = shape_resize_rect(r, "ne", QPoint(200, 0))
+    d = shape_resize_rect(r, "sw", QPoint(0, 150))
+    ok_u3 = (
+        (a.left(), a.top(), a.right(), a.bottom()) == (10, 20, 200, 150)
+        and (b.left(), b.top(), b.right(), b.bottom()) == (0, 0, 109, 79)
+        and (c.left(), c.top(), c.right(), c.bottom()) == (10, 0, 200, 79)
+        and (d.left(), d.top(), d.right(), d.bottom()) == (0, 20, 109, 150)
+    )
+    record("U3 拖任一角时对角精确固定，翻转不偏移 1px", ok_u3,
+           f"se={a} nw={b} ne={c} sw={d}")
+
+    tiny = shape_resize_rect(r, "se", QPoint(11, 21))
+    flip = shape_resize_rect(r, "se", QPoint(0, 0))
+    ok_u4 = (
+        tiny.width() >= SHAPE_MIN_SIZE and tiny.height() >= SHAPE_MIN_SIZE
+        and flip.left() == 0 and flip.top() == 0
+        and flip.right() == 10 and flip.bottom() == 20   # se 的固定对角是 nw
+        and shape_resize_rect(r, "xx", QPoint(500, 500)) == r
+    )
+    record("U4 最小尺寸 / 拖过对角翻转 / 非法角原样返回", ok_u4,
+           f"tiny={tiny} flip={flip}")
+
+    ok_u5 = (
+        shape_corner_cursor("nw") == Qt.SizeFDiagCursor
+        and shape_corner_cursor("se") == Qt.SizeFDiagCursor
+        and shape_corner_cursor("ne") == Qt.SizeBDiagCursor
+        and shape_corner_cursor("sw") == Qt.SizeBDiagCursor
+        and shape_corner_cursor("") is None
+    )
+    record("U5 四角斜向缩放光标映射正确", ok_u5)
+
+    # ---------------- U6~U11  窗口编辑器 Canvas ----------------
+    cv = Canvas(make_image(1600, 900), [], None)
+    cv.resize(1000, 680)
+    cv._fit()
+
+    def draw(kind: str, p1: QPoint, p2: QPoint):
+        cv._set_tool(kind)
+        cv.toolbar._on_tool(kind)
+        cv.mousePressEvent(mouse_event(P, cv, p1))
+        cv.mouseMoveEvent(mouse_event(M, cv, p2))
+        cv.mouseReleaseEvent(mouse_event(R, cv, p2))
+        return cv.shapes[-1]
+
+    rect_s = draw("rect", QPoint(200, 150), QPoint(400, 300))
+    r0 = QRect(rect_s.rect)
+    rp = dict(shape_corner_points(rect_s.rect.normalized()))
+    ok_u6 = (
+        cv._selected is rect_s
+        and len(cv._shape_corner_points()) == 4
+        and cv._hit_shape_corner(rp["se"]) == "se"
+        and cv._hit_shape_corner(rp["nw"]) == "nw"
+    )
+    record("U6 画完矩形自动选中并显示 4 个可命中的角柄", ok_u6,
+           f"rect={rect_s.rect} handles={len(cv._shape_corner_points())}")
+
+    cv.mousePressEvent(mouse_event(P, cv, rp["se"]))
+    mode_press = cv._mode
+    cv.mouseMoveEvent(mouse_event(M, cv, QPoint(520, 380)))
+    cv.mouseReleaseEvent(mouse_event(R, cv, QPoint(520, 380)))
+    rr = rect_s.rect.normalized()
+    ok_u7 = (
+        mode_press == "resizing_shape" and cv._mode == "idle"
+        and cv._selected is rect_s
+        and abs(rr.left() - r0.left()) <= 2 and abs(rr.top() - r0.top()) <= 2
+        and abs(rr.right() - 520) <= 3 and abs(rr.bottom() - 380) <= 3
+        and cv.compose().width() == 1600 and cv.compose().height() == 900
+    )
+    record("U7 拖 se 角放大矩形：左上固定、状态复位、导出仍全分辨率", ok_u7,
+           f"mode={mode_press}->{cv._mode} rect={rr}")
+
+    ell = draw("ellipse", QPoint(600, 200), QPoint(760, 320))
+    e0 = QRect(ell.rect)
+    ep = dict(shape_corner_points(ell.rect.normalized()))
+    cv.mousePressEvent(mouse_event(P, cv, ep["nw"]))
+    cv.mouseMoveEvent(mouse_event(M, cv, QPoint(560, 160)))
+    cv.mouseReleaseEvent(mouse_event(R, cv, QPoint(560, 160)))
+    er = ell.rect.normalized()
+    ok_u8 = (
+        cv._selected is ell
+        and abs(er.right() - e0.right()) <= 2
+        and abs(er.bottom() - e0.bottom()) <= 2
+        and abs(er.left() - 560) <= 3 and abs(er.top() - 160) <= 3
+    )
+    record("U8 椭圆拖 nw 角同样可缩放，对角固定", ok_u8, f"ellipse={er}")
+
+    ep2 = dict(shape_corner_points(ell.rect.normalized()))
+    before_flip = QRect(ell.rect)
+    cv.mousePressEvent(mouse_event(P, cv, ep2["se"]))
+    cv.mouseMoveEvent(mouse_event(M, cv, QPoint(400, 100)))
+    cv.mouseReleaseEvent(mouse_event(R, cv, QPoint(400, 100)))
+    fr = ell.rect.normalized()
+    ok_u9 = (
+        abs(fr.left() - 400) <= 3 and abs(fr.top() - 100) <= 3
+        and abs(fr.right() - before_flip.left()) <= 2
+        and abs(fr.bottom() - before_flip.top()) <= 2
+        and fr.width() >= SHAPE_MIN_SIZE and fr.height() >= SHAPE_MIN_SIZE
+    )
+    record("U9 拖过对角翻转后仍保持可编辑的最小形状", ok_u9, f"flipped={fr}")
+
+    cv._set_view_scale(cv.view_scale * 2.0, QPoint(cv.width() // 2, cv.height() // 2))
+    zc = dict(shape_corner_points(ell.rect.normalized()))["nw"]
+    cv.mousePressEvent(mouse_event(P, cv, zc))
+    ok_u10 = cv._mode == "resizing_shape" and len(cv._shape_corner_points()) == 4
+    cv.mouseReleaseEvent(mouse_event(R, cv, zc))
+    record("U10 画布放大 2 倍后四角命中范围仍准确", ok_u10,
+           f"scale={cv.view_scale:.3f} mode={cv._mode}")
+
+    mos = Shape(kind="mosaic")
+    mos.rect = QRect(100, 100, 80, 60)
+    cv.shapes.append(mos)
+    cv._selected = mos
+    no_handles = (
+        cv._shape_corner_points() == []
+        and cv._hit_shape_corner(dict(shape_corner_points(mos.rect))["se"]) == ""
+    )
+    arr = Shape(kind="arrow")
+    arr.start, arr.end = QPoint(10, 10), QPoint(90, 90)
+    arrow_hit = None
+    cv._selected = arr
+    no_handles_arrow = cv._shape_corner_points() == []
+    arrow_hit = cv._hit_arrow_endpoint(QPoint(90, 90), selected_only=True)
+    ok_u11 = (
+        no_handles and no_handles_arrow
+        and arrow_hit is not None and arrow_hit[0] is arr
+    )
+    record("U11 马赛克/箭头不出现四角柄，箭头端点拉伸未回归", ok_u11)
+
+    # ---------------- U12~U14  截图遮罩 Overlay ----------------
+    ov = Overlay(make_image(400, 200), dpr=1.0)
+    ov.resize(400, 200)
+    ov.sel = QRect(10, 10, 360, 170)
+    sel0 = QRect(ov.sel)
+    ov._mode = "editing"
+    sh = Shape(kind="ellipse")
+    sh.rect = QRect(50, 50, 100, 60)
+    sh.color = QColor(255, 0, 0)
+    ov.shapes = [sh]
+    ov._selected = sh
+    op = dict(shape_corner_points(sh.rect.normalized()))
+    hit_ok = ov._hit_shape_corner(op["se"]) == "se" and len(ov._shape_corner_points()) == 4
+    ov.mousePressEvent(overlay_event(P, op["se"]))
+    ov_mode = ov._mode
+    ov.mouseMoveEvent(overlay_event(M, QPoint(220, 150)))
+    ov.mouseReleaseEvent(overlay_event(R, QPoint(220, 150)))
+    nr = sh.rect.normalized()
+    ok_u12 = (
+        hit_ok and ov_mode == "resizing_shape" and ov._mode == "editing"
+        and ov.sel == sel0
+        and (nr.left(), nr.top()) == (50, 50)
+        and (nr.right(), nr.bottom()) == (220, 150)
+    )
+    record("U12 Overlay 拖角只改图形，不改选区、不误触选区八点", ok_u12,
+           f"shape={nr} sel={ov.sel} mode={ov_mode}->{ov._mode}")
+
+    op2 = dict(shape_corner_points(sh.rect.normalized()))
+    ov.mousePressEvent(overlay_event(P, op2["se"]))
+    ov.mouseMoveEvent(overlay_event(M, QPoint(390, 195)))
+    ov.mouseReleaseEvent(overlay_event(R, QPoint(390, 195)))
+    nr2 = sh.rect.normalized()
+    mos2 = Shape(kind="mosaic")
+    mos2.rect = QRect(60, 60, 80, 50)
+    ov._selected = mos2
+    ok_u13 = (
+        (nr2.right(), nr2.bottom()) == (368, 178)
+        and ov.sel == sel0
+        and ov._shape_corner_points() == []
+        and ov._hit_shape_corner(QPoint(139, 109)) == ""
+    )
+    record("U13 角点被限制在选区内；Overlay 马赛克无四角柄", ok_u13,
+           f"clamped=({nr2.right()},{nr2.bottom()}) sel_bound=(368,178)")
+
+    ov._selected = sh
+    cv._selected = rect_s
+    render_ok, err = True, ""
+    try:
+        pm = QPixmap(cv.size())
+        cv.render(pm)
+        pm2 = QPixmap(ov.size())
+        ov.render(pm2)
+    except Exception as exc:  # noqa: BLE001
+        render_ok, err = False, str(exc)
+    record("U14 两个编辑器绘制四角控制柄不抛异常", render_ok, err)
+
+    # ---------------- U15  文档与 8 语言帮助 ----------------
+    readme = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
+    markers = {
+        "en": "corner handles",
+        "ja": "四隅のハンドル",
+        "ko": "모서리 핸들",
+        "fr": "poignées d'angle",
+        "de": "Eckgriffe",
+        "es": "tiradores de esquina",
+        "zh_TW": "四角控制點",
+    }
+    missing = [code for code, mark in markers.items() if mark not in help_html(code)]
+    ok_u15 = (
+        "v21" in readme and "四角" in readme
+        and "四角" in HELP_HTML and not missing
+    )
+    record("U15 README / 中文帮助 / 7 语言帮助已同步四角缩放说明", ok_u15,
+           f"missing={missing}")
+
+    cv.close()
+    ov.close()
+    cv.deleteLater()
+    ov.deleteLater()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -3091,6 +3365,7 @@ if __name__ == "__main__":
     test_mosaic_style_panel()
     test_v19_features()
     test_v20_long_capture_quality()
+    test_v21_shape_corner_resize()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
