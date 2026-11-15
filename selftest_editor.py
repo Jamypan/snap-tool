@@ -197,6 +197,25 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     T10 README 已记录 v20 画质修复
     T11 滚到底后补抓完整画面，长图不缺尾
 
+  Stage V  v22：矩形 / 椭圆 / 文字旋转
+    V1  角度归一化与旋转变换往返
+    V2  文字包围盒 / 旋转外接框 / 旋转中心
+    V3  旋转后四角点、命中与外接框
+    V4  旋转柄位置与命中（不可旋转标注排除）
+    V5  拖动转角、跨 ±180 不跳变、Shift 吸附 15°
+    V6  draw_shape 真的按角度绘制不同像素
+    V6b 旋转文字像素中心贴合包围盒中心（字形路径绘制）
+    V7  Canvas 拖旋转柄改角度、状态复位
+    V8  Canvas Shift 吸附
+    V9  菜单 90° 步进 + 样式面板角度回填
+    V10 Canvas 文字可旋转、角度控件可见
+    V11 Overlay 拖旋转柄，选区不变
+    V12 旋转后四角缩放用局部坐标，不漂移
+    V13 整图旋转时文字 ±90°、矩形角度不变、镜像取负、撤销恢复
+    V14 画布放缩后旋转柄命中范围按显示比例反算
+    V15 马赛克不出现旋转柄 / 不受角度影响
+    V16 README / 中文帮助 / 7 语言帮助 / 8 语言词条同步
+
   Stage U  v21：矩形 / 椭圆四角拖柄缩放
     U1  四角点坐标与顺序（nw/ne/se/sw）
     U2  四角命中、中心 / 半径外 / 空矩形不误命中
@@ -755,9 +774,14 @@ def test_line_ocr() -> None:
 # ---------------------------------------------------------------------------
 def test_image_transform() -> None:
     print("\n--- Stage F: 整图旋转 / 镜像 ---")
-    from PySide6.QtCore import QSize
+    from PySide6.QtCore import QRectF, QSize
+    from snapeditor import shape_text_box
 
     W, H = 160, 90
+    # 文字标注现在按「包围盒中心」映射（v22），旧断言里的基线起点不再适用
+    text_center0 = QRectF(
+        shape_text_box(Shape(kind="text", text="测试", pos=QPoint(20, 40)))
+    ).center()
 
     def fresh() -> Canvas:
         b = make_image(W, H)
@@ -798,13 +822,18 @@ def test_image_transform() -> None:
         r.rect == QRect(40, 10, 30, 40)
         and ar.start == QPoint(84, 5) and ar.end == QPoint(84, 50)
         and pn.points[0] == QPoint(88, 1)
-        and tx.pos == QPoint(49, 20)
         and mo.rect == QRect(40, 70, 20, 20)
+        # 文字：中心按 cw 公式映射，字形跟着转 90°（不再保持水平）
+        and abs(tx.angle - 90.0) < 0.01
+        and abs(QRectF(shape_text_box(tx)).center().x()
+                - (H - 1 - text_center0.y())) <= 1.0
+        and abs(QRectF(shape_text_box(tx)).center().y() - text_center0.x()) <= 1.0
     )
     record(
-        "F2 标注坐标随整图变换",
+        "F2 标注坐标随整图变换（文字中心映射 + 字形旋转 90°）",
         ok_f2,
-        f"rect={r.rect} arrow=({ar.start},{ar.end}) pen={pn.points[0]} text={tx.pos}",
+        f"rect={r.rect} arrow=({ar.start},{ar.end}) pen={pn.points[0]} "
+        f"text=({tx.pos.x()},{tx.pos.y()}) angle={tx.angle}",
     )
 
     # F3 逆时针 / 左右镜像 / 上下镜像的像素方向
@@ -828,10 +857,16 @@ def test_image_transform() -> None:
         c3.shapes[0].rect == QRect(110, 20, 40, 30)
         and c3.shapes[1].start == QPoint(154, 5)
         and c4.shapes[0].rect == QRect(10, 40, 40, 30)
-        and c4.shapes[3].pos == QPoint(20, 49)
+        # 文字中心按镜像公式映射；镜像不产生反字，角度只取负
+        and abs(c3.shapes[3].angle) < 0.01
+        and abs(c4.shapes[3].angle) < 0.01
+        and abs(QRectF(shape_text_box(c3.shapes[3])).center().x()
+                - (W - 1 - text_center0.x())) <= 1.0
+        and abs(QRectF(shape_text_box(c4.shapes[3])).center().y()
+                - (H - 1 - text_center0.y())) <= 1.0
     )
     record(
-        "F4 镜像后标注坐标",
+        "F4 镜像后标注坐标（文字中心映射，字形保持可读）",
         ok_f4,
         f"flip_h rect={c3.shapes[0].rect} flip_v rect={c4.shapes[0].rect}",
     )
@@ -3336,6 +3371,374 @@ def test_v21_shape_corner_resize() -> None:
     ov.deleteLater()
 
 
+def test_v22_shape_rotation() -> None:
+    """Stage V：矩形 / 椭圆 / 文字旋转 + 整图旋转时文字联动。"""
+    from pathlib import Path
+
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QPixmap
+
+    from i18n_docs import help_html
+    from snapui import HELP_HTML
+    from snapeditor import (
+        ROTATABLE_KINDS,
+        Overlay,
+        Shape,
+        draw_shape,
+        normalize_angle,
+        paint_shape_rotate_handle,
+        rotate_angle_from_drag,
+        rotate_point_about,
+        shape_angle,
+        shape_hit_rotate_handle,
+        shape_hit_rotated_corner,
+        shape_rotate_center,
+        shape_rotate_handle_point,
+        shape_rotate_point,
+        shape_rotate_rect,
+        shape_rotated_bbox,
+        shape_rotated_corners,
+        shape_text_box,
+        shape_unrotate_point,
+        shape_corner_points,
+        shape_resize_rect,
+        unrotate_point_about,
+    )
+    from snap_editor import Canvas
+
+    P, M, R = (
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseMove,
+        QEvent.Type.MouseButtonRelease,
+    )
+
+    def ov_ev(typ, p: QPoint) -> QMouseEvent:
+        return QMouseEvent(typ, QPoint(p), QPoint(p), Qt.LeftButton,
+                           Qt.LeftButton, Qt.NoModifier)
+
+    # ---------------- V1 角度归一化 / 变换往返 ----------------
+    vals = [normalize_angle(x) for x in (0, 90, 180, 270, -190, 370)]
+    sh = Shape(kind="rect")
+    sh.rect = QRect(10, 20, 100, 60)
+    sh.angle = 30.0
+    back = shape_unrotate_point(sh, shape_rotate_point(sh, QPoint(10, 20)))
+    ok_v1 = (
+        vals == [0.0, 90.0, 180.0, -90.0, 170.0, 10.0]
+        and abs(back.x() - 10) < 0.5 and abs(back.y() - 20) < 0.5
+        and shape_angle(Shape(kind="mosaic")) == 0.0
+    )
+    record("V1 角度归一化与旋转变换往返", ok_v1, f"vals={vals} back={back}")
+
+    # ---------------- V2 文字包围盒 / 外接框 / 中心 ----------------
+    tx = Shape(kind="text", text="Hello", pos=QPoint(30, 80))
+    tb = shape_text_box(tx)
+    ok_v2 = (
+        tb.width() >= 40 and tb.height() > 10
+        and shape_rotate_rect(tx) == tb
+        and abs(QRectF(tb).center().x() - shape_rotate_center(tx).x()) < 0.01
+        and shape_rotate_rect(Shape(kind="pen")).isNull()
+    )
+    record("V2 文字包围盒 / 旋转外接框 / 旋转中心", ok_v2,
+           f"textbox={tb} center={shape_rotate_center(tx)}")
+
+    # ---------------- V3 旋转后四角 ----------------
+    sh.angle = 90.0
+    pts = shape_rotated_corners(sh)
+    ok_v3 = (
+        len(pts) == 4
+        and pts[0] != dict(shape_corner_points(sh.rect))["nw"]
+        and shape_hit_rotated_corner(sh, pts[2]) == "se"
+        and shape_hit_rotated_corner(sh, QPoint(900, 900)) == ""
+        and shape_rotated_bbox(sh).isValid()
+        and shape_hit_rotated_corner(Shape(kind="text"), pts[0]) == ""
+    )
+    record("V3 旋转后四角点、命中与外接框", ok_v3,
+           f"pts={[(p.x(), p.y()) for p in pts]}")
+
+    # ---------------- V4 旋转柄 ----------------
+    sh.angle = 30.0
+    h = shape_rotate_handle_point(sh)
+    ok_v4 = (
+        shape_hit_rotate_handle(sh, h)
+        and not shape_hit_rotate_handle(sh, h + QPoint(40, 40))
+        and not shape_hit_rotate_handle(Shape(kind="mosaic"), h)
+        and shape_hit_rotate_handle(tx, shape_rotate_handle_point(tx))
+    )
+    record("V4 旋转柄位置与命中，马赛克排除", ok_v4, f"handle={h}")
+
+    # ---------------- V5 拖动转角 / 跨 ±180 / 吸附 ----------------
+    c = QRect(10, 20, 100, 60).center()
+    cf = QPointF(c)
+    a90 = rotate_angle_from_drag(0, cf, QPoint(c.x(), c.y() - 50),
+                                 QPoint(c.x() + 50, c.y()))
+    across = rotate_angle_from_drag(170, cf, QPoint(c.x() - 50, c.y()),
+                                    QPoint(c.x() + 50, c.y()))
+    snap = rotate_angle_from_drag(0, cf, QPoint(c.x(), c.y() - 50),
+                                  QPoint(c.x() + 36, c.y() - 35), True)
+    ok_v5 = (
+        abs(a90 - 90.0) < 0.01 and abs(across + 10.0) < 0.01
+        and abs(snap - 45.0) < 0.01
+        and abs(snap / 15 - round(snap / 15)) < 0.01
+    )
+    record("V5 拖动转角、跨 ±180 不跳变、Shift 吸附 15°", ok_v5,
+           f"a90={a90} across={across} snap={snap}")
+
+    # ---------------- V6 draw_shape 真的按角度绘制 ----------------
+    base = make_image(300, 200, (255, 255, 255))
+
+    def render_one(angle: float) -> QImage:
+        im = QImage(300, 200, QImage.Format_ARGB32_Premultiplied)
+        im.fill(QColor(255, 255, 255))
+        p = QPainter(im)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        s = Shape(kind="rect", color=QColor(255, 0, 0))
+        s.rect = QRect(40, 40, 160, 60)
+        s.width = 4
+        s.angle = angle
+        draw_shape(p, s, base, 1.0)
+        p.end()
+        return im
+
+    a0, a90img = render_one(0.0), render_one(90.0)
+    diff = sum(
+        1 for y in range(0, 200, 2) for x in range(0, 300, 2)
+        if a0.pixelColor(x, y).rgb() != a90img.pixelColor(x, y).rgb()
+    )
+    ok_v6 = diff > 200
+    record("V6 draw_shape 按角度绘制不同像素", ok_v6, f"diff_pixels={diff}")
+
+    # ---------------- V6b 旋转文字像素中心不偏移 ----------------
+    # Qt6 的 drawText(QPoint, str) 在旋转 world transform 下会把文字基线
+    # 额外平移（实测约 2×ascent ≈ 63px），导致旋转文字整体错位；v22 改用
+    # QPainterPath 字形路径绘制，像素中心必须贴合 shape_text_box() 中心。
+    from PySide6.QtCore import QRectF
+    from snapeditor import shape_text_box
+
+    def text_pixel_center(angle: float):
+        im = QImage(400, 400, QImage.Format_ARGB32_Premultiplied)
+        im.fill(QColor(255, 255, 255))
+        pp = QPainter(im)
+        pp.setRenderHint(QPainter.Antialiasing, True)
+        ts = Shape(kind="text", text="ROTATE", pos=QPoint(100, 200),
+                   color=QColor(220, 0, 0))
+        ts.font_size = 34
+        ts.angle = angle
+        draw_shape(pp, ts, im, 1.0)
+        pp.end()
+        xs: list[int] = []
+        ys: list[int] = []
+        for yy in range(400):
+            for xx in range(400):
+                c = im.pixelColor(xx, yy)
+                if c.red() > 150 and c.green() < 90 and c.blue() < 90:
+                    xs.append(xx)
+                    ys.append(yy)
+        if not xs:
+            return None
+        return ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
+
+    tbox = Shape(kind="text", text="ROTATE", pos=QPoint(100, 200))
+    tbox.font_size = 34
+    want = QRectF(shape_text_box(tbox)).center()
+    centers = {a: text_pixel_center(a) for a in (0.0, 90.0, -90.0, 45.0)}
+    ok_v6b = all(
+        c is not None
+        and abs(c[0] - want.x()) <= 6
+        and abs(c[1] - want.y()) <= 6
+        for c in centers.values()
+    )
+    record("V6b 旋转文字像素中心贴合包围盒中心（字形路径绘制）", ok_v6b,
+           f"want=({want.x():.1f},{want.y():.1f}) " +
+           " ".join(f"{a}°={c}" for a, c in centers.items()))
+
+    # ---------------- V7~V10 Canvas 交互 ----------------
+    cv = Canvas(make_image(1200, 800), [], None)
+    cv.resize(1000, 680)
+    cv._fit()
+    cv._set_tool("rect")
+    cv.mousePressEvent(mouse_event(P, cv, QPoint(200, 150)))
+    cv.mouseMoveEvent(mouse_event(M, cv, QPoint(400, 300)))
+    cv.mouseReleaseEvent(mouse_event(R, cv, QPoint(400, 300)))
+    sh2 = cv.shapes[0]
+    hp = cv._rotate_handle_pos()
+    cv.mousePressEvent(mouse_event(P, cv, hp))
+    mode_start = cv._mode
+    cc = sh2.rect.center()
+    cv.mouseMoveEvent(mouse_event(M, cv, QPoint(cc.x() + 70, cc.y() - 30)))
+    cv.mouseReleaseEvent(mouse_event(R, cv, QPoint(cc.x() + 70, cc.y() - 30)))
+    ok_v7 = (
+        cv._hit_rotate_handle(cv._rotate_handle_pos())
+        and mode_start == "rotating_shape"
+        and abs(sh2.angle) > 5
+        and cv._mode == "idle"
+        and cv.compose().size() == cv.base.size()
+    )
+    record("V7 Canvas 拖旋转柄改角度、状态复位、导出全分辨率", ok_v7,
+           f"mode={mode_start}->{cv._mode} angle={sh2.angle}")
+
+    cv._begin_shape_rotate(cv._rotate_handle_pos())
+    cv._apply_shape_rotate(QPoint(cc.x() + 40, cc.y() - 40), snap=True)
+    ok_v8 = abs(sh2.angle / 15 - round(sh2.angle / 15)) < 0.01
+    record("V8 Canvas Shift 吸附到 15° 整数倍", ok_v8, f"angle={sh2.angle}")
+    cv._mode, cv._rotating_shape = "idle", None
+
+    sh2.angle = 0.0
+    step_ok = cv.rotate_selected(90)
+    cv._refresh_style_panel()
+    ok_v9 = (
+        step_ok and abs(sh2.angle - 90.0) < 0.01
+        and cv.style_panel._angle_slider.value() == 90
+        and not cv.style_panel._angle_box.isHidden()
+    )
+    record("V9 菜单 90° 步进 + 样式面板角度回填", ok_v9,
+           f"angle={sh2.angle} slider={cv.style_panel._angle_slider.value()}")
+
+    tx2 = Shape(kind="text", text="ABC", pos=QPoint(500, 400))
+    cv.shapes.append(tx2)
+    cv._selected = tx2
+    cv._on_select_changed()
+    ok_v10 = (
+        cv._hit_rotate_handle(cv._rotate_handle_pos())
+        and cv.rotate_selected(90) and abs(tx2.angle - 90.0) < 0.01
+        and not cv.style_panel._angle_box.isHidden()
+        and tx2.kind in ROTATABLE_KINDS
+    )
+    record("V10 Canvas 文字可旋转、角度控件可见", ok_v10,
+           f"angle={tx2.angle}")
+
+    # ---------------- V11 Overlay ----------------
+    ov = Overlay(make_image(500, 400), dpr=1.0)
+    ov.resize(500, 400)
+    ov.sel = QRect(10, 10, 470, 370)
+    ov._mode = "editing"
+    osh = Shape(kind="ellipse")
+    osh.rect = QRect(100, 100, 160, 90)
+    ov.shapes = [osh]
+    ov._selected = osh
+    oh = ov._rotate_handle_pos()
+    ov.mousePressEvent(ov_ev(P, oh))
+    ov.mouseMoveEvent(ov_ev(M, oh + QPoint(0, 80)))
+    ov.mouseReleaseEvent(ov_ev(R, oh + QPoint(0, 80)))
+    ok_v11 = (
+        abs(osh.angle) > 5
+        and ov.sel == QRect(10, 10, 470, 370)
+        and ov._mode == "editing"
+        and ov._hit_rotate_handle(ov._rotate_handle_pos())
+    )
+    record("V11 Overlay 拖旋转柄改角度，选区与状态不变", ok_v11,
+           f"angle={osh.angle} sel={ov.sel}")
+
+    # ---------------- V12 旋转后四角缩放用局部坐标 ----------------
+    sh3 = Shape(kind="rect")
+    sh3.rect = QRect(10, 20, 100, 60)
+    sh3.angle = 45.0
+    c3 = shape_rotate_center(sh3)
+    p0 = QPointF(77, 33)
+    p2 = unrotate_point_about(rotate_point_about(p0, c3, 45), c3, 45)
+    local = shape_unrotate_point(sh3, QPoint(200, 150)).toPoint()
+    nr = shape_resize_rect(sh3.rect, "se", local)
+    ok_v12 = (
+        abs(p2.x() - p0.x()) < 0.01 and abs(p2.y() - p0.y()) < 0.01
+        and nr.isValid() and nr.width() >= 8 and nr.height() >= 8
+        and local != QPoint(200, 150)
+    )
+    record("V12 旋转后四角缩放用局部坐标、逆变换不漂移", ok_v12,
+           f"local={local} resized={nr}")
+
+    # ---------------- V13 整图旋转联动 ----------------
+    c4 = Canvas(make_image(300, 200), [], None)
+    c4.resize(1000, 680)
+    c4._fit()
+    rr = Shape(kind="rect", rect=QRect(20, 30, 80, 40))
+    rr.angle = 30.0
+    tt = Shape(kind="text", text="Hi", pos=QPoint(60, 90))
+    mm = Shape(kind="mosaic", rect=QRect(100, 50, 30, 30))
+    c4.shapes = [rr, tt, mm]
+    c4.transform_image("cw")
+    ok_v13 = (
+        abs(c4.shapes[1].angle - 90.0) < 0.01
+        and abs(c4.shapes[0].angle - 30.0) < 0.01
+        and abs(c4.shapes[2].angle) < 0.01
+    )
+    c4.transform_image("ccw")
+    ok_v13 = (
+        ok_v13 and abs(c4.shapes[1].angle) < 0.01
+        and abs(c4.shapes[0].angle - 30.0) < 0.01
+    )
+    c4.shapes[1].angle = 45.0
+    c4.transform_image("flip_h")
+    ok_v13 = ok_v13 and abs(c4.shapes[1].angle + 45.0) < 0.01
+    c4.undo()
+    # 撤销会换成快照里的克隆对象，必须读 c4.shapes 而不是旧引用
+    ok_v13 = ok_v13 and abs(c4.shapes[1].angle - 45.0) < 0.01
+    record("V13 整图旋转文字 ±90°、矩形角度不变、镜像取负、撤销恢复", ok_v13,
+           f"text={c4.shapes[1].angle} rect={c4.shapes[0].angle}")
+
+    # ---------------- V14 放缩后命中 ----------------
+    cv._selected = sh2
+    cv._set_view_scale(2.0)
+    hp2 = cv._rotate_handle_pos()
+    ok_v14 = (
+        cv._hit_rotate_handle(hp2)
+        and not cv._hit_rotate_handle(hp2 + QPoint(40, 40))
+        and cv._rotate_handle_dist() >= 18
+    )
+    record("V14 画布放缩后旋转柄命中按显示比例反算", ok_v14,
+           f"scale={cv.view_scale} dist={cv._rotate_handle_dist()}")
+
+    # ---------------- V15 不可旋转标注 ----------------
+    mo = Shape(kind="mosaic", rect=QRect(10, 10, 30, 30))
+    cv._selected = mo
+    ok_v15 = (
+        cv._rotate_handle_pos() == QPoint()
+        and not cv._hit_rotate_handle(cv._rotate_handle_pos())
+        and cv._shape_corner_points() == []
+        and not cv.rotate_selected(90)
+        and abs(mo.angle) < 0.01
+    )
+    pm = QPixmap(cv.size())
+    try:
+        pmp = QPainter(pm)
+        paint_shape_rotate_handle(pmp, mo)
+        pmp.end()
+        ov._selected = osh
+        pm2 = QPixmap(ov.size())
+        ov.render(pm2)
+    except Exception as exc:  # noqa: BLE001
+        ok_v15 = False
+        print("    绘制异常：", exc)
+    record("V15 马赛克无旋转柄、不受角度影响、绘制不抛错", ok_v15)
+
+    # ---------------- V16 文档与 i18n ----------------
+    from i18n_data import _ROWS as ROWS
+
+    keys = ("旋转角度", "旋转选中形状",
+            "顺时针旋转选中 90°", "逆时针旋转选中 90°")
+    ok_keys = all(k in ROWS and len(ROWS[k]) == 8 and all(ROWS[k]) for k in keys)
+    readme = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
+    markers = {
+        "en": "rotation handle",
+        "ja": "回転ハンドル",
+        "ko": "회전 핸들",
+        "fr": "poignée de rotation",
+        "de": "Drehgriff",
+        "es": "tirador de rotación",
+        "zh_TW": "旋轉控制柄",
+    }
+    missing = [code for code, mark in markers.items() if mark not in help_html(code)]
+    ok_v16 = (
+        "v22" in readme and "旋转柄" in readme
+        and "形状旋转" in HELP_HTML and "字形与底图一起旋转" in HELP_HTML
+        and ok_keys and not missing
+    )
+    record("V16 README / 中文帮助 / 7 语言帮助 / 8 语言词条同步", ok_v16,
+           f"keys={ok_keys} missing={missing}")
+
+    for w in (cv, ov, c4):
+        w.close()
+        w.deleteLater()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -3366,6 +3769,7 @@ if __name__ == "__main__":
     test_v19_features()
     test_v20_long_capture_quality()
     test_v21_shape_corner_resize()
+    test_v22_shape_rotation()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

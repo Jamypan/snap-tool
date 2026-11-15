@@ -6,6 +6,7 @@ snapeditor.py —— 截图遮罩层、标注绘制、浮动工具条。
 """
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -61,6 +63,13 @@ SHAPE_HANDLE_R = 5           # 绘制半径（屏幕像素，不随画布放缩�
 SHAPE_HANDLE_HIT = 11        # 命中半径（屏幕像素；Canvas 会按 view_scale 反算）
 SHAPE_MIN_SIZE = 8           # 拖角缩放时允许的最小宽 / 高
 SHAPE_CORNERS = ("nw", "ne", "se", "sw")
+
+# 可旋转的标注（矩形 / 椭圆 / 文字）；线条类本身靠端点改变方向，马赛克是像素块
+ROTATABLE_KINDS = ("rect", "ellipse", "text")
+ROTATE_HANDLE_DIST = 26      # 旋转柄离顶边的距离（图像/逻辑坐标）
+ROTATE_HANDLE_R = 6          # 旋转柄绘制半径（屏幕像素）
+ROTATE_HANDLE_HIT = 12       # 旋转柄命中半径（屏幕像素）
+ROTATE_SNAP_STEP = 15        # 按住 Shift 拖动时吸附的角度步长
 
 
 def shape_corner_points(r: QRect) -> list[tuple[str, QPoint]]:
@@ -137,6 +146,210 @@ def paint_shape_corner_handles(p: QPainter, pts: list[QPoint],
     for pt in pts:
         p.drawEllipse(QRectF(pt.x() - radius, pt.y() - radius,
                              2 * radius, 2 * radius))
+    p.restore()
+
+
+# ---------------------------------------------------------------------------
+# 形状旋转（矩形 / 椭圆 / 文字共用，Overlay 与窗口编辑器复用）
+#
+# 约定：形状自身的数据始终是「未旋转的局部几何」（rect / pos），angle 只影响
+# 绘制与交互时的坐标变换。于是导出、拖动、四角缩放、整图变换都能在同一套
+# 数据上工作，不需要把角度烘焙进坐标。
+# ---------------------------------------------------------------------------
+def normalize_angle(angle: float) -> float:
+    """把角度收敛到 (-180, 180]，避免连续旋转后数值无限增长。"""
+    a = (float(angle) + 180.0) % 360.0 - 180.0
+    if a <= -180.0:            # 把 -180 显示成更自然的 180
+        a += 360.0
+    return 0.0 if abs(a) < 1e-6 else round(a, 3)
+
+
+def shape_angle(s: Shape) -> float:
+    """可旋转标注的角度；其它标注恒为 0。"""
+    if s is None or s.kind not in ROTATABLE_KINDS:
+        return 0.0
+    return float(getattr(s, "angle", 0.0) or 0.0)
+
+
+def shape_text_box(s: Shape) -> QRect:
+    """文字标注的局部包围盒（与 draw_shape 的字体设置一致）。
+
+    没有 QGuiApplication 时（例如纯数据自检 / 后台脚本）字体度量不可用，
+    退回按字号估算，保证纯函数不依赖 GUI 实例也能安全调用。
+    """
+    if s is None or s.kind != "text" or s.pos is None:
+        return QRect()
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.instance() is None:
+        fs = max(1, int(s.font_size))
+        tw = max(40, int(len(s.text or "") * fs * 0.62)) + 8
+        th = int(fs * 1.4) + 4
+        top = s.pos.y() - int(fs * 0.8) - 2
+        return QRect(s.pos.x() - 4, int(top), int(tw), int(th))
+    f = QFont()
+    f.setPixelSize(s.font_size)
+    f.setBold(s.bold)
+    fm = QFontMetrics(f)
+    tw = max(40, fm.horizontalAdvance(s.text or "")) + 8
+    th = fm.height() + 4
+    top = s.pos.y() - fm.ascent() - 2
+    return QRect(s.pos.x() - 4, int(top), int(tw), int(th))
+
+
+def shape_rotate_rect(s: Shape) -> QRect:
+    """旋转变换所围绕的局部外接矩形；不可旋转时返回空矩形。"""
+    if s is None or s.kind not in ROTATABLE_KINDS:
+        return QRect()
+    if s.kind == "text":
+        return shape_text_box(s)
+    return s.rect.normalized() if s.rect else QRect()
+
+
+def shape_rotate_center(s: Shape) -> QPointF:
+    """旋转中心（局部几何的中心，旋转不改变它）。"""
+    r = shape_rotate_rect(s)
+    return QRectF(r).center() if not r.isNull() else QPointF()
+
+
+def rotation_transform_about(center: QPointF, angle: float) -> QTransform:
+    """绕指定中心的旋转变换（角度为 0 时是单位变换）。"""
+    tf = QTransform()
+    if abs(float(angle)) < 1e-6:
+        return tf
+    tf.translate(center.x(), center.y())
+    tf.rotate(angle)
+    tf.translate(-center.x(), -center.y())
+    return tf
+
+
+def rotate_point_about(pt: QPointF | QPoint, center: QPointF,
+                       angle: float) -> QPointF:
+    return rotation_transform_about(center, angle).map(QPointF(pt))
+
+
+def unrotate_point_about(pt: QPointF | QPoint, center: QPointF,
+                         angle: float) -> QPointF:
+    tf = rotation_transform_about(center, angle)
+    if tf.isIdentity():
+        return QPointF(pt)
+    inv, ok = tf.inverted()
+    return inv.map(QPointF(pt)) if ok else QPointF(pt)
+
+
+def shape_rotation_transform(s: Shape) -> QTransform:
+    """把「局部坐标」映射到「旋转后坐标」的变换。
+
+    不可旋转 / 角度为 0 时返回单位变换；Qt 的正角度是顺时针（y 轴向下），
+    与鼠标 atan2 的方向一致。
+    """
+    return rotation_transform_about(shape_rotate_center(s), shape_angle(s))
+
+
+def shape_rotate_point(s: Shape, pt: QPointF | QPoint) -> QPoint:
+    """局部点 → 旋转后的点。"""
+    return rotate_point_about(pt, shape_rotate_center(s), shape_angle(s)).toPoint()
+
+
+def shape_unrotate_point(s: Shape, pt: QPointF | QPoint) -> QPointF:
+    """旋转后的点 → 局部点（命中检测、拖角缩放时用）。"""
+    return unrotate_point_about(pt, shape_rotate_center(s), shape_angle(s))
+
+
+def shape_rotated_bbox(s: Shape) -> QRect:
+    """旋转后四角的外接矩形（选中高亮框用）。"""
+    pts = shape_rotated_corners(s)
+    if not pts:
+        return QRect()
+    r = QRect(pts[0], pts[0])
+    for p in pts:
+        r = r.united(QRect(p, p))
+    return r
+
+
+def shape_rotated_corners(s: Shape) -> list[QPoint]:
+    """局部外接矩形四角旋转后的位置（绘制 / 命中四角柄）。"""
+    r = shape_rotate_rect(s)
+    if r.isNull():
+        return []
+    return [shape_rotate_point(s, pt) for _, pt in shape_corner_points(r)]
+
+
+def shape_hit_rotated_corner(s: Shape, pos: QPoint, hit: int = SHAPE_HANDLE_HIT) -> str:
+    """命中旋转后的四角之一；返回角名，未命中返回空串。"""
+    if s is None or s.kind not in ("rect", "ellipse"):
+        return ""
+    best, best_d2 = "", float(hit) * float(hit)
+    for name, pt in zip(SHAPE_CORNERS, shape_rotated_corners(s)):
+        d = QPointF(pos) - QPointF(pt)
+        d2 = d.x() * d.x() + d.y() * d.y()
+        if d2 <= best_d2:
+            best, best_d2 = name, d2
+    return best
+
+
+def shape_rotate_handle_point(s: Shape, dist: int = ROTATE_HANDLE_DIST) -> QPoint:
+    """旋转柄位置：局部顶边中点上方 dist，再随形状一起旋转。"""
+    r = shape_rotate_rect(s)
+    if r.isNull():
+        return QPoint()
+    local = QPointF(QRectF(r).center().x(), r.top() - dist)
+    return shape_rotation_transform(s).map(local).toPoint()
+
+
+def shape_hit_rotate_handle(s: Shape, pos: QPoint,
+                            hit: int = ROTATE_HANDLE_HIT) -> bool:
+    if s is None or s.kind not in ROTATABLE_KINDS:
+        return False
+    h = shape_rotate_handle_point(s)
+    d = QPointF(pos) - QPointF(h)
+    return d.x() * d.x() + d.y() * d.y() <= float(hit) * float(hit)
+
+
+def rotate_angle_from_drag(base_angle: float, center: QPointF,
+                           start: QPoint, cur: QPoint,
+                           snap: bool = False) -> float:
+    """按鼠标绕中心的转角差计算新角度；snap=True 时吸附到 15° 整数倍。"""
+    a0 = math.degrees(math.atan2(start.y() - center.y(), start.x() - center.x()))
+    a1 = math.degrees(math.atan2(cur.y() - center.y(), cur.x() - center.x()))
+    delta = a1 - a0
+    if delta > 180.0:
+        delta -= 360.0
+    elif delta < -180.0:
+        delta += 360.0
+    angle = float(base_angle) + delta
+    if snap:
+        angle = round(angle / ROTATE_SNAP_STEP) * ROTATE_SNAP_STEP
+    return normalize_angle(angle)
+
+
+def paint_shape_rotate_handle(p: QPainter, s: Shape,
+                              dist: int = ROTATE_HANDLE_DIST,
+                              map_point=None) -> None:
+    """画旋转柄：从顶边中点伸出一条虚线，末端是白边蓝底的圆点。
+
+    map_point 可传入「图像坐标 → 屏幕坐标」的换算函数（窗口编辑器放缩时用），
+    这样圆点半径始终是固定屏幕像素，不会被画布缩放放大。
+    """
+    if s is None or s.kind not in ROTATABLE_KINDS:
+        return
+    r = shape_rotate_rect(s)
+    if r.isNull():
+        return
+    top = shape_rotate_point(s, QPointF(QRectF(r).center().x(), r.top()))
+    h = shape_rotate_handle_point(s, dist)
+    if map_point is not None:
+        top, h = map_point(top), map_point(h)
+    rad = ROTATE_HANDLE_R
+    p.save()
+    p.setRenderHint(QPainter.Antialiasing, True)
+    ln = QPen(QColor(255, 255, 255, 210), 1)
+    ln.setStyle(Qt.DashLine)
+    p.setPen(ln)
+    p.drawLine(QPointF(top), QPointF(h))
+    p.setPen(QPen(QColor(255, 255, 255), 2))
+    p.setBrush(QBrush(BORDER_COLOR))
+    p.drawEllipse(QRectF(h.x() - rad, h.y() - rad, 2 * rad, 2 * rad))
     p.restore()
 
 
@@ -388,6 +601,7 @@ class Shape:
     封闭图形（rect/ellipse/mosaic）的边框用 color，额外支持 fill_color（填充色）。
     文字额外支持 font_size、bg_color（背景色）。
     画笔（pen）额外支持 pen_arrow_start / pen_arrow_end：在路径起点 / 终点画箭头。
+    矩形 / 椭圆 / 文字额外支持 angle：绕自身中心的旋转角度（度，顺时针为正）。
     """
 
     kind: str
@@ -406,6 +620,7 @@ class Shape:
     fill_color: QColor | None = None          # 封闭图形填充色（None=不填充）
     pen_arrow_start: bool = False             # pen 路径起点箭头
     pen_arrow_end: bool = False               # pen 路径终点箭头
+    angle: float = 0.0                        # rect / ellipse / text 绕中心旋转（度）
 
 
 def _pixelated(src: QImage, block: int = 12) -> QImage:
@@ -629,7 +844,29 @@ def draw_shape(p: QPainter, s: Shape, base_image: QImage, dpr: float) -> None:
     """
     在已设置好坐标变换的 painter 上绘制一条标注。
 
+    矩形 / 椭圆 / 文字若带 angle，会先叠一层「绕自身中心旋转」的变换；
+    数据本身仍是未旋转的局部几何，导出与交互因此可以共用同一份坐标。
     base_image 为物理像素的原图，供马赛克取样；dpr 用于逻辑↔物理换算。
+    """
+    tf = shape_rotation_transform(s)
+    if tf.isIdentity():
+        _draw_shape_raw(p, s, base_image, dpr)
+        return
+    p.save()
+    p.setTransform(tf, True)
+    # Qt6 的 drawText(QPoint, str) 在带旋转的 world transform 下会把基线
+    # 额外平移（实测约 2×ascent），导致旋转文字偏离 shape_text_box() 的
+    # 中心；转成字形路径后填充可严格按变换映射。矩形 / 椭圆不受影响。
+    _draw_shape_raw(p, s, base_image, dpr, rotated_text=True)
+    p.restore()
+
+
+def _draw_shape_raw(p: QPainter, s: Shape, base_image: QImage, dpr: float,
+                    rotated_text: bool = False) -> None:
+    """在局部（未旋转）坐标系里绘制一条标注。
+
+    rotated_text=True 时文字改用 QPainterPath 绘制，用于旋转变换下的
+    精确对位；未旋转时仍走 drawText()，保持原有字形与基线一致。
     """
     pen = _make_pen(s)
 
@@ -714,9 +951,16 @@ def draw_shape(p: QPainter, s: Shape, base_image: QImage, dpr: float) -> None:
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(s.bg_color))
             p.drawRoundedRect(QRect(s.pos.x() - 4, top, tw, th), 3, 3)
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        p.drawText(s.pos, s.text)
+        if rotated_text:
+            path = QPainterPath()
+            path.addText(QPointF(s.pos), font, s.text)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(pen.color()))
+            p.drawPath(path)
+        else:
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawText(s.pos, s.text)
 
 
 # ---------------------------------------------------------------------------
@@ -881,6 +1125,24 @@ class StylePanel(QWidget):
         self._bold_check.toggled.connect(lambda on: self._emit("bold", on))
         root.addWidget(self._bold_check)
 
+        # --- 旋转角度（矩形 / 椭圆 / 文字）---
+        self._angle_label = QLabel(t("旋转角度"))
+        root.addWidget(self._angle_label)
+        self._angle_box = QWidget()
+        angle_row = QHBoxLayout(self._angle_box)
+        angle_row.setContentsMargins(0, 0, 0, 0)
+        angle_row.setSpacing(6)
+        self._angle_slider = QSlider(Qt.Horizontal)
+        self._angle_slider.setRange(-180, 180)
+        self._angle_slider.setValue(0)
+        self._angle_slider.setFocusPolicy(Qt.NoFocus)
+        self._angle_slider.valueChanged.connect(self._on_angle_changed)
+        angle_row.addWidget(self._angle_slider)
+        self._angle_value = QLabel("0°")
+        self._angle_value.setFixedWidth(38)
+        angle_row.addWidget(self._angle_value)
+        root.addWidget(self._angle_box)
+
         # --- 文字背景色（文字）---
         self._bg_label = QLabel(t("文字背景色"))
         root.addWidget(self._bg_label)
@@ -933,6 +1195,10 @@ class StylePanel(QWidget):
             self._pen_arrow_start,
             self._pen_arrow_end,
         ]
+        # 只有矩形 / 椭圆 / 文字能绕自身中心旋转
+        self._rotatable_only = [
+            self._angle_label, self._angle_box,
+        ]
 
         # 初始隐藏填充/背景色块（勾选「启用」后才显示）
         for b in self._fill_btns + self._bg_btns:
@@ -975,6 +1241,7 @@ class StylePanel(QWidget):
         self._fill_alpha_label.setText(t("填充透明度"))
         self._size_label.setText(t("字号"))
         self._bold_check.setText(t("加粗"))
+        self._angle_label.setText(t("旋转角度"))
         self._bg_label.setText(t("文字背景色"))
         self._bg_check.setText(t("启用"))
         self._pen_arrow_label.setText(t("端点箭头"))
@@ -984,6 +1251,10 @@ class StylePanel(QWidget):
     # ---------------------------------------------------------- 工具方法
     def _emit(self, key: str, value) -> None:
         self.style_changed.emit({key: value})
+
+    def _on_angle_changed(self, value: int) -> None:
+        self._angle_value.setText(f"{int(value)}°")
+        self._emit("angle", float(value))
 
     def _make_preset_color_buttons(self, key: str) -> list:
         """生成一排预设颜色块，点击即 emit 对应的样式键。
@@ -1075,6 +1346,7 @@ class StylePanel(QWidget):
         kind = shape.kind if shape else None
         is_shape = kind in ("rect", "ellipse", "mosaic")
         is_text = kind == "text"
+        is_rotatable = kind in ROTATABLE_KINDS
         # 没有选中标注时也显示，方便先设好「新建画笔/直线」的默认箭头
         is_pen = self._show_pen_arrows and (
             kind in ("pen", "line") or shape is None
@@ -1099,6 +1371,8 @@ class StylePanel(QWidget):
             w.setVisible(not is_text)
         for w in self._pen_only:
             w.setVisible(is_pen)
+        for w in self._rotatable_only:
+            w.setVisible(is_rotatable)
 
         # 线宽
         self._width_slider.blockSignals(True)
@@ -1115,6 +1389,14 @@ class StylePanel(QWidget):
         self._size_slider.blockSignals(True)
         self._size_slider.setValue(int(font_size))
         self._size_slider.blockSignals(False)
+
+        # 旋转角度（只对矩形 / 椭圆 / 文字可见）
+        angle = int(round(normalize_angle(shape_angle(shape)))) if shape else 0
+        angle = max(-180, min(180, angle))
+        self._angle_slider.blockSignals(True)
+        self._angle_slider.setValue(angle)
+        self._angle_slider.blockSignals(False)
+        self._angle_value.setText(f"{angle}°")
 
         # 加粗
         bold = shape.bold if shape else False
@@ -1854,6 +2136,13 @@ class Overlay(QWidget):
         self._resize_shape: Shape | None = None
         self._resize_shape_corner = ""               # nw / ne / se / sw
         self._resize_shape_base: QRect | None = None  # 拖动开始时的 rect 快照
+        self._resize_shape_center = QPointF()         # 拖动开始时的旋转中心
+        self._resize_shape_angle = 0.0               # 拖动开始时的角度
+        # 拖动旋转柄旋转矩形 / 椭圆 / 文字
+        self._rotating_shape: Shape | None = None
+        self._rotate_base_angle = 0.0
+        self._rotate_start_pos = QPoint()
+        self._rotate_center = QPointF()
 
         # --- 重绘节流 / 脏区跟踪 ---
         self._last_repaint = 0.0                  # time.monotonic() 秒
@@ -2256,12 +2545,25 @@ class Overlay(QWidget):
                 s.pen_arrow_start = bool(changes["pen_arrow_start"])
             if "pen_arrow_end" in changes:
                 s.pen_arrow_end = bool(changes["pen_arrow_end"])
+            if "angle" in changes and s.kind in ROTATABLE_KINDS:
+                s.angle = normalize_angle(float(changes["angle"]))
         self.update()
 
     def _select_shape_at(self, pos: QPoint) -> None:
-        """点击选中一条标注（用于改样式）。返回是否命中。"""
+        """点击选中一条标注（用于改样式）。返回是否命中。
+
+        可旋转标注先把点击点逆变换回局部坐标，再用未旋转的包围盒判定。
+        """
         for s in reversed(self.shapes):
-            if s.kind in ("rect", "ellipse", "mosaic") and s.rect and s.rect.adjusted(-6, -6, 6, 6).contains(pos):
+            local = (
+                shape_unrotate_point(s, pos).toPoint()
+                if s.kind in ROTATABLE_KINDS else pos
+            )
+            if s.kind in ("rect", "ellipse") and s.rect and s.rect.adjusted(-6, -6, 6, 6).contains(local):
+                self._selected = s
+                self._on_select_changed()
+                return True
+            if s.kind == "mosaic" and s.rect and s.rect.adjusted(-6, -6, 6, 6).contains(pos):
                 self._selected = s
                 self._on_select_changed()
                 return True
@@ -2281,17 +2583,10 @@ class Overlay(QWidget):
                         self._on_select_changed()
                         return True
             if s.kind == "text" and s.pos:
-                # 用文字实际包围盒判定（按内容宽度 + 字号高度），
-                # 外扩一圈便于点选/拖动；字形在基线下方，故向下多留一些。
-                from PySide6.QtGui import QFontMetrics
-
-                f = QFont()
-                f.setPixelSize(s.font_size)
-                fm = QFontMetrics(f)
-                tw = max(40, fm.horizontalAdvance(s.text)) + 24
-                th = max(30, s.font_size) + 20
-                box = QRect(s.pos.x() - 12, s.pos.y() - 8, tw, th)
-                if box.contains(pos):
+                # 与 shape_text_box 共用同一套包围盒，旋转中心才不会和
+                # 命中中心错开；外扩一圈方便点选 / 拖动。
+                box = shape_text_box(s).adjusted(-8, -6, 16, 16)
+                if box.contains(local):
                     self._selected = s
                     self._on_select_changed()
                     return True
@@ -2440,19 +2735,53 @@ class Overlay(QWidget):
         self._teardown()
         self.to_editor.emit(cropped, [])
 
-    # ------------------------------------------------------------ 形状四角
+    # ------------------------------------------------------------ 形状四角 / 旋转
     def _shape_corner_points(self) -> list[QPoint]:
-        """当前选中的矩形 / 椭圆的四个角（逻辑坐标）；其它标注返回空。"""
+        """当前选中的矩形 / 椭圆的四个角（旋转后的逻辑坐标）。"""
         s = self._selected
         if s is None or s.kind not in ("rect", "ellipse") or not s.rect:
             return []
-        return [pt for _, pt in shape_corner_points(s.rect.normalized())]
+        return shape_rotated_corners(s)
 
     def _hit_shape_corner(self, pos: QPoint) -> str:
+        return shape_hit_rotated_corner(self._selected, pos)
+
+    def _rotate_handle_dist(self) -> int:
+        return ROTATE_HANDLE_DIST
+
+    def _rotate_handle_pos(self) -> QPoint:
         s = self._selected
-        if s is None or s.kind not in ("rect", "ellipse") or not s.rect:
-            return ""
-        return shape_hit_corner(s.rect.normalized(), pos)
+        if s is None or s.kind not in ROTATABLE_KINDS:
+            return QPoint()
+        return shape_rotate_handle_point(s, self._rotate_handle_dist())
+
+    def _hit_rotate_handle(self, pos: QPoint) -> bool:
+        s = self._selected
+        if s is None or s.kind not in ROTATABLE_KINDS:
+            return False
+        h = self._rotate_handle_pos()
+        d = QPointF(pos) - QPointF(h)
+        return d.x() * d.x() + d.y() * d.y() <= ROTATE_HANDLE_HIT ** 2
+
+    def _begin_shape_rotate(self, pos: QPoint) -> None:
+        s = self._selected
+        self._mode = "rotating_shape"
+        self._rotating_shape = s
+        self._rotate_base_angle = shape_angle(s)
+        self._rotate_start_pos = QPoint(pos)
+        self._rotate_center = shape_rotate_center(s)
+        self.setCursor(Qt.CrossCursor)
+        self._cursor_cache = Qt.CrossCursor
+
+    def _apply_shape_rotate(self, pos: QPoint, snap: bool = False) -> None:
+        s = self._rotating_shape
+        if s is None:
+            return
+        s.angle = rotate_angle_from_drag(
+            self._rotate_base_angle, self._rotate_center,
+            self._rotate_start_pos, pos, snap,
+        )
+        self._repaint()
 
     # ------------------------------------------------------------ 箭头端点
     def _hit_arrow_endpoint(self, pos: QPoint, selected_only: bool = False):
@@ -2540,6 +2869,11 @@ class Overlay(QWidget):
                 self._begin_arrow_reshape(hit)
                 return
 
+            # 1.4) 旋转柄（矩形 / 椭圆 / 文字）：优先于四角，通常浮在形状上方
+            if self._hit_rotate_handle(pos):
+                self._begin_shape_rotate(pos)
+                return
+
             # 1.5) 选中矩形 / 椭圆的四角控制柄：优先于选区八点，
             #      形状角恰好压在选区角上时按「调形状」处理。
             corner = self._hit_shape_corner(pos) if self.sel.contains(pos) else ""
@@ -2548,6 +2882,8 @@ class Overlay(QWidget):
                 self._resize_shape = self._selected
                 self._resize_shape_corner = corner
                 self._resize_shape_base = QRect(self._selected.rect)
+                self._resize_shape_center = shape_rotate_center(self._selected)
+                self._resize_shape_angle = shape_angle(self._selected)
                 cur = shape_corner_cursor(corner)
                 if cur is not None and cur != self._cursor_cache:
                     self.setCursor(cur)
@@ -2719,6 +3055,12 @@ class Overlay(QWidget):
             self._repaint()
             return
 
+        if self._mode == "rotating_shape" and self._rotating_shape is not None:
+            self._apply_shape_rotate(
+                pos, snap=bool(ev.modifiers() & Qt.ShiftModifier)
+            )
+            return
+
         if (
             self._mode == "resizing_shape"
             and self._resize_shape and self._resize_shape_base
@@ -2729,8 +3071,13 @@ class Overlay(QWidget):
                 max(r.left(), min(pos.x(), r.right())),
                 max(r.top(), min(pos.y(), r.bottom())),
             )
+            # 形状可能带旋转：把屏幕点逆变换回局部坐标再缩放，
+            # 中心/角度用拖动开始时的快照，避免 rect 变化导致中心漂移。
+            local = unrotate_point_about(
+                pt, self._resize_shape_center, self._resize_shape_angle
+            ).toPoint()
             self._resize_shape.rect = shape_resize_rect(
-                self._resize_shape_base, self._resize_shape_corner, pt
+                self._resize_shape_base, self._resize_shape_corner, local
             )
             self._repaint()
             return
@@ -2757,6 +3104,8 @@ class Overlay(QWidget):
             corner = self._hit_shape_corner(pos) if self.sel.contains(pos) else ""
             if self.sel.contains(pos) and self._hit_arrow_endpoint(pos):
                 cur = Qt.SizeAllCursor          # 箭头端点：提示可拉伸
+            elif self._hit_rotate_handle(pos):
+                cur = Qt.CrossCursor            # 旋转柄：提示可绕中心旋转
             elif corner:
                 cur = shape_corner_cursor(corner)   # 形状四角：斜向缩放
             else:
@@ -2834,12 +3183,21 @@ class Overlay(QWidget):
             self._place_style_panel()
             self.update()
 
+        if self._mode == "rotating_shape":
+            # 结束旋转：保持选中，样式面板回填新角度
+            self._mode = "editing"
+            self._rotating_shape = None
+            self._place_style_panel()
+            self.update()
+
         if self._mode == "resizing_shape":
             # 结束拖角缩放：保持选中，回到编辑态
             self._mode = "editing"
             self._resize_shape = None
             self._resize_shape_corner = ""
             self._resize_shape_base = None
+            self._resize_shape_center = QPointF()
+            self._resize_shape_angle = 0.0
             self._place_style_panel()
             self.update()
 
@@ -3174,13 +3532,21 @@ class Overlay(QWidget):
                     p.setPen(hl)
                     p.setBrush(Qt.NoBrush)
                     s = self._selected
-                    if s.kind in ("rect", "ellipse", "mosaic") and s.rect:
+                    if s.kind in ROTATABLE_KINDS:
+                        # 可旋转标注：虚线框也跟着一起转
+                        box = shape_rotate_rect(s)
+                        if not box.isNull():
+                            tf = shape_rotation_transform(s)
+                            p.save()
+                            if not tf.isIdentity():
+                                p.setTransform(tf, True)
+                            p.drawRect(box.adjusted(-4, -4, 4, 4))
+                            p.restore()
+                    elif s.kind == "mosaic" and s.rect:
                         p.drawRect(s.rect.adjusted(-4, -4, 4, 4))
                     elif s.kind in ("arrow", "line") and s.start and s.end:
                         # 箭头改用沿轴虚线 + 两端控制柄表示选中，不再画大矩形框
                         p.drawLine(s.start, s.end)
-                    elif s.kind == "text" and s.pos:
-                        p.drawRect(QRect(s.pos.x(), s.pos.y(), 244, s.font_size + 16))
                 p.restore()
 
             # 选中箭头的两端控制柄：画在选区裁剪之外，端点贴近选区边缘时
@@ -3201,6 +3567,8 @@ class Overlay(QWidget):
             # 选中矩形 / 椭圆的四角控制柄：同样画在裁剪之外，贴着选区
             # 边缘时也能完整看到并拖动。拖动任一角即可改宽高与形状。
             paint_shape_corner_handles(p, self._shape_corner_points())
+            # 旋转柄：矩形 / 椭圆 / 文字都有，拖动即可绕中心任意旋转
+            paint_shape_rotate_handle(p, self._selected, self._rotate_handle_dist())
 
             # 4) 边框
             pen = QPen(BORDER_COLOR)
@@ -3212,6 +3580,7 @@ class Overlay(QWidget):
             if self._mode in (
                 "selecting", "editing", "moving", "resizing", "drawing",
                 "dragging_shape", "reshaping_arrow", "resizing_shape",
+                "rotating_shape",
             ):
                 # 5) 八个控制点
                 p.setPen(Qt.NoPen)

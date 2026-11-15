@@ -55,6 +55,9 @@ from snapeditor import (
     OcrLayer,
     OcrPanel,
     PEN_WIDTH,
+    ROTATABLE_KINDS,
+    ROTATE_HANDLE_DIST,
+    ROTATE_HANDLE_HIT,
     SHAPE_HANDLE_HIT,
     Shape,
     StylePanel,
@@ -62,11 +65,24 @@ from snapeditor import (
     _reading_order,
     _text_edit_color,
     draw_shape,
+    normalize_angle,
     paint_shape_corner_handles,
+    paint_shape_rotate_handle,
+    rotate_angle_from_drag,
+    shape_angle,
     shape_corner_cursor,
     shape_corner_points,
     shape_hit_corner,
     shape_resize_rect,
+    shape_rotate_center,
+    shape_rotate_handle_point,
+    shape_rotate_rect,
+    shape_text_box,
+    shape_rotated_bbox,
+    shape_rotated_corners,
+    shape_hit_rotated_corner,
+    shape_unrotate_point,
+    unrotate_point_about,
 )
 from i18n import LANG, app_name, t
 
@@ -120,6 +136,13 @@ class Canvas(QWidget):
         self._resize_shape: Shape | None = None
         self._resize_shape_corner = ""               # nw / ne / se / sw
         self._resize_shape_base: QRect | None = None
+        self._resize_shape_center = QPointF()        # 拖动开始时的旋转中心
+        self._resize_shape_angle = 0.0              # 拖动开始时的角度
+        # 拖动旋转柄旋转矩形 / 椭圆 / 文字
+        self._rotating_shape: Shape | None = None
+        self._rotate_base_angle = 0.0
+        self._rotate_start_pos = QPoint()
+        self._rotate_center = QPointF()
 
         # 视图变换：把物理图像坐标映射到画布像素
         self.view_scale = 1.0
@@ -279,6 +302,7 @@ class Canvas(QWidget):
             ns.pos = QPoint(s.pos)
         ns.pen_arrow_start = bool(getattr(s, "pen_arrow_start", False))
         ns.pen_arrow_end = bool(getattr(s, "pen_arrow_end", False))
+        ns.angle = float(getattr(s, "angle", 0.0) or 0.0)
         return ns
 
     # ------------------------------------------------------------ 工具 / 样式
@@ -349,6 +373,8 @@ class Canvas(QWidget):
                     target.pen_arrow_start = bool(value)
                 elif key == "pen_arrow_end":
                     target.pen_arrow_end = bool(value)
+                elif key == "angle" and target.kind in ROTATABLE_KINDS:
+                    target.angle = normalize_angle(float(value))
             else:
                 if key == "color":
                     self._color = QColor(value)
@@ -419,13 +445,8 @@ class Canvas(QWidget):
                 r = r.united(QRect(p, p))
             return r
         if s.kind == "text" and s.pos:
-            f = QFont()
-            f.setPixelSize(s.font_size)
-            fm = QFontMetrics(f)
-            tw = max(40, fm.horizontalAdvance(s.text)) + 8
-            th = fm.height() + 4
-            top = s.pos.y() - fm.ascent() - 2
-            return QRect(s.pos.x() - 4, top, tw, th)
+            # 与 shape_text_box 保持一致（含 bold），旋转中心才准确
+            return shape_text_box(s)
         return None
 
     def _select_shape_at(self, pos: QPoint) -> bool:
@@ -433,8 +454,12 @@ class Canvas(QWidget):
             bb = self._bbox(s)
             if bb is None:
                 continue
+            local = (
+                shape_unrotate_point(s, pos).toPoint()
+                if s.kind in ROTATABLE_KINDS else pos
+            )
             if s.kind == "text":
-                if bb.contains(pos):
+                if bb.contains(local):
                     self._selected = s
                     self._on_select_changed()
                     return True
@@ -443,7 +468,7 @@ class Canvas(QWidget):
             tol = max(6, int(self._width / self.view_scale) + 6) if s.kind != "pen" else 6
             if s.kind in ("rect", "ellipse", "mosaic"):
                 grown = bb.adjusted(-tol, -tol, tol, tol)
-                if grown.contains(pos):
+                if grown.contains(local):
                     self._selected = s
                     self._on_select_changed()
                     return True
@@ -510,19 +535,65 @@ class Canvas(QWidget):
         return s.rect.normalized()
 
     def _hit_shape_corner(self, pos: QPoint) -> str:
-        """pos 是图像坐标；命中半径按显示比例反算，放缩后手感一致。"""
-        r = self._selected_corner_rect()
-        if r is None:
-            return ""
+        """pos 是图像坐标；四角按旋转后的位置命中，半径按显示比例反算。"""
         hit = max(1, int(SHAPE_HANDLE_HIT / max(self.view_scale, 1e-3)))
-        return shape_hit_corner(r, pos, hit)
+        return shape_hit_rotated_corner(self._selected, pos, hit)
 
     def _shape_corner_points(self) -> list[QPoint]:
-        """四角控制柄的屏幕坐标（绘制用，半径固定为屏幕像素）。"""
-        r = self._selected_corner_rect()
-        if r is None:
+        """四角控制柄的屏幕坐标（随形状旋转，半径固定为屏幕像素）。"""
+        s = self._selected
+        if s is None or s.kind not in ("rect", "ellipse"):
             return []
-        return [self._to_screen(pt) for _, pt in shape_corner_points(r)]
+        return [self._to_screen(pt) for pt in shape_rotated_corners(s)]
+
+    # ---------------------------------------------------------- 形状旋转
+    def _rotate_handle_dist(self) -> int:
+        """旋转柄与顶边的图像坐标距离：让屏幕上的距离大致恒定。"""
+        return max(18, int(round(ROTATE_HANDLE_DIST / max(self.view_scale, 0.05))))
+
+    def _rotate_handle_pos(self) -> QPoint:
+        s = self._selected
+        if s is None or s.kind not in ROTATABLE_KINDS:
+            return QPoint()
+        return shape_rotate_handle_point(s, self._rotate_handle_dist())
+
+    def _hit_rotate_handle(self, pos: QPoint) -> bool:
+        s = self._selected
+        if s is None or s.kind not in ROTATABLE_KINDS:
+            return False
+        h = self._rotate_handle_pos()
+        hit = ROTATE_HANDLE_HIT / max(self.view_scale, 1e-3)
+        d = QPointF(pos) - QPointF(h)
+        return d.x() * d.x() + d.y() * d.y() <= hit * hit
+
+    def _begin_shape_rotate(self, pos: QPoint) -> None:
+        s = self._selected
+        self._mode = "rotating_shape"
+        self._rotating_shape = s
+        self._rotate_base_angle = shape_angle(s)
+        self._rotate_start_pos = QPoint(pos)
+        self._rotate_center = shape_rotate_center(s)
+        self.setCursor(Qt.CrossCursor)
+
+    def _apply_shape_rotate(self, pos: QPoint, snap: bool = False) -> None:
+        s = self._rotating_shape
+        if s is None:
+            return
+        s.angle = rotate_angle_from_drag(
+            self._rotate_base_angle, self._rotate_center,
+            self._rotate_start_pos, pos, snap,
+        )
+        self._repaint()
+
+    def rotate_selected(self, degrees: float) -> bool:
+        """菜单 / 快捷键：把选中形状按 90° 步进旋转。"""
+        s = self._selected
+        if s is None or s.kind not in ROTATABLE_KINDS:
+            return False
+        s.angle = normalize_angle(shape_angle(s) + float(degrees))
+        self._refresh_style_panel()
+        self.update()
+        return True
 
     # ------------------------------------------------------------ 几何辅助
     @staticmethod
@@ -688,6 +759,11 @@ class Canvas(QWidget):
             self._begin_arrow_reshape(hit)
             return
 
+        # 旋转柄（矩形 / 椭圆 / 文字）优先于四角与点选
+        if self._hit_rotate_handle(pos):
+            self._begin_shape_rotate(pos)
+            return
+
         # 选中矩形 / 椭圆后，四角控制柄优先于「点选 / 拖动 / 画新图形」
         corner = self._hit_shape_corner(pos)
         if corner:
@@ -695,6 +771,8 @@ class Canvas(QWidget):
             self._resize_shape = self._selected
             self._resize_shape_corner = corner
             self._resize_shape_base = QRect(self._selected.rect)
+            self._resize_shape_center = shape_rotate_center(self._selected)
+            self._resize_shape_angle = shape_angle(self._selected)
             self.setCursor(shape_corner_cursor(corner))
             return
 
@@ -745,6 +823,12 @@ class Canvas(QWidget):
             return
         pos = self._to_image(ev.position().toPoint())
 
+        if self._mode == "rotating_shape" and self._rotating_shape is not None:
+            self._apply_shape_rotate(
+                pos, snap=bool(ev.modifiers() & Qt.ShiftModifier)
+            )
+            return
+
         if (
             self._mode == "resizing_shape"
             and self._resize_shape and self._resize_shape_base
@@ -755,8 +839,13 @@ class Canvas(QWidget):
                 max(r.left(), min(pos.x(), r.right())),
                 max(r.top(), min(pos.y(), r.bottom())),
             )
+            # 旋转过的形状：把屏幕点逆变换回局部坐标再缩放，中心/角度用
+            # 拖动开始时的快照，避免 rect 变化导致旋转中心漂移。
+            local = unrotate_point_about(
+                pt, self._resize_shape_center, self._resize_shape_angle
+            ).toPoint()
             self._resize_shape.rect = shape_resize_rect(
-                self._resize_shape_base, self._resize_shape_corner, pt
+                self._resize_shape_base, self._resize_shape_corner, local
             )
             self._repaint()
             return
@@ -802,6 +891,8 @@ class Canvas(QWidget):
             corner = self._hit_shape_corner(pos)
             if self._hit_arrow_endpoint(pos):
                 self.setCursor(Qt.SizeAllCursor)
+            elif self._hit_rotate_handle(pos):
+                self.setCursor(Qt.CrossCursor)
             elif corner:
                 self.setCursor(shape_corner_cursor(corner))
             elif self._select_shape_at_hint(pos):
@@ -818,9 +909,13 @@ class Canvas(QWidget):
             bb = self._bbox(s)
             if bb is None:
                 continue
+            local = (
+                shape_unrotate_point(s, pos).toPoint()
+                if s.kind in ROTATABLE_KINDS else pos
+            )
             tol = max(6, int(self._width / self.view_scale) + 6)
             if s.kind in ("rect", "ellipse", "mosaic", "text"):
-                if bb.adjusted(-tol, -tol, tol, tol).contains(pos):
+                if bb.adjusted(-tol, -tol, tol, tol).contains(local):
                     return True
             elif s.kind in ("arrow", "line"):
                 if self._near_seg(pos, s.start, s.end, tol):
@@ -880,11 +975,20 @@ class Canvas(QWidget):
             self.update()
             return
 
+        if self._mode == "rotating_shape":
+            self._mode = "idle"
+            self._rotating_shape = None
+            self._place_style_panel()
+            self.update()
+            return
+
         if self._mode == "resizing_shape":
             self._mode = "idle"
             self._resize_shape = None
             self._resize_shape_corner = ""
             self._resize_shape_base = None
+            self._resize_shape_center = QPointF()
+            self._resize_shape_angle = 0.0
             self._place_style_panel()
             self.update()
             return
@@ -958,7 +1062,11 @@ class Canvas(QWidget):
 
         # 选中标注高亮 + 箭头端点控制柄
         if self._selected:
-            bb = self._bbox(self._selected)
+            bb = (
+                shape_rotated_bbox(self._selected)
+                if self._selected.kind in ROTATABLE_KINDS
+                else self._bbox(self._selected)
+            )
             if bb is not None:
                 hb = QRect(
                     int(round(self.off_x + bb.x() * self.view_scale)),
@@ -985,6 +1093,11 @@ class Canvas(QWidget):
 
             # 选中矩形 / 椭圆的四角控制柄（屏幕像素固定大小，不随放缩变粗）
             paint_shape_corner_handles(p, self._shape_corner_points())
+            # 旋转柄：矩形 / 椭圆 / 文字通用，画布放缩后仍是固定屏幕大小
+            paint_shape_rotate_handle(
+                p, self._selected, self._rotate_handle_dist(),
+                map_point=self._to_screen,
+            )
 
     def resizeEvent(self, ev) -> None:  # noqa: N802
         self._fit()
@@ -1129,6 +1242,18 @@ class Canvas(QWidget):
             return QPoint(w - 1 - x, y)
         return QPoint(x, h - 1 - y)                        # flip_v
 
+    @staticmethod
+    def _map_point_f(pt: QPointF, mode: str, w: int, h: int) -> QPointF:
+        """浮点版坐标映射：文字包围盒中心用它换算，避免基线起点取整偏差。"""
+        x, y = pt.x(), pt.y()
+        if mode == "cw":
+            return QPointF(h - 1 - y, x)
+        if mode == "ccw":
+            return QPointF(y, w - 1 - x)
+        if mode == "flip_h":
+            return QPointF(w - 1 - x, y)
+        return QPointF(x, h - 1 - y)                    # flip_v
+
     @classmethod
     def _map_rect(cls, r: QRect, mode: str, w: int, h: int) -> QRect:
         """矩形随整图变换；旋转 90° 时宽高互换。"""
@@ -1145,7 +1270,8 @@ class Canvas(QWidget):
         """整图变换：底图 + 全部标注坐标一起变，导出仍是全分辨率。
 
         mode: cw 顺时针 90° / ccw 逆时针 90° / flip_h 左右镜像 / flip_v 上下镜像。
-        变换进撤销栈，Ctrl+Z 可恢复。文字标注只移动位置，字形保持水平可读。
+        变换进撤销栈，Ctrl+Z 可恢复。文字标注跟着底图一起旋转（不再保持水平），
+        矩形 / 椭圆自身的角度保持不变——它们的几何已由外接矩形映射完成旋转。
         """
         if self.base.isNull() or mode not in ("cw", "ccw", "flip_h", "flip_v"):
             return
@@ -1183,7 +1309,24 @@ class Canvas(QWidget):
             if s.points:
                 s.points = [self._map_point(p, mode, w, h) for p in s.points]
             if s.pos is not None:
-                s.pos = self._map_point(s.pos, mode, w, h)
+                if s.kind == "text":
+                    # 文字：按「包围盒中心」映射，字形再跟着底图转 90°。
+                    # 只搬基线起点会让旋转后的文字偏离原位置；以中心为基准
+                    # 旋转不改变中心，所以映射中心 + 保持相对偏移最稳。
+                    box = shape_text_box(s)
+                    c = QRectF(box).center()
+                    offset = QPointF(s.pos) - c
+                    s.pos = (self._map_point_f(c, mode, w, h) + offset).toPoint()
+                    old = shape_angle(s)
+                    if mode == "cw":
+                        s.angle = normalize_angle(old + 90)
+                    elif mode == "ccw":
+                        s.angle = normalize_angle(old - 90)
+                    else:
+                        # 镜像：字形不做反字（仍可读），只把方向按镜像取负
+                        s.angle = normalize_angle(-old)
+                else:
+                    s.pos = self._map_point(s.pos, mode, w, h)
             # 马赛克缓存取自旧图，变换后必须丢弃重算
             if hasattr(s, "_mosaic_cache"):
                 delattr(s, "_mosaic_cache")
@@ -1246,6 +1389,8 @@ class EditorWindow(QMainWindow):
     _FILE_TEXTS = ("复制到剪贴板\tCtrl+Enter", "另存为…\tCtrl+S", "关闭编辑器\tEsc")
     _EDIT_TEXTS = ("撤销\tCtrl+Z", "OCR 取字", "样式面板")
     _TRANSFORM_TEXTS = ("顺时针旋转 90°", "逆时针旋转 90°", "左右镜像", "上下镜像")
+    # 只旋转「选中的矩形 / 椭圆 / 文字」，与上面的整图旋转区分开
+    _ROTATE_TEXTS = ("顺时针旋转选中 90°", "逆时针旋转选中 90°")
     _PEN_TEXTS = ("不加箭头", "只加起点", "只加终点", "两端都加")
     _VIEW_TEXTS = ("放大", "缩小", "实际大小 1:1", "适应窗口")
 
@@ -1289,6 +1434,20 @@ class EditorWindow(QMainWindow):
             m_transform.addAction(a)
             self._actions[f"transform{i}"] = a
 
+        # 形状旋转：只作用于当前选中的矩形 / 椭圆 / 文字，90° 步进
+        m_rotate = m_edit.addMenu(t("旋转选中形状"))
+        self._menus["rotate"] = m_rotate
+        for i, (text_key, deg, shortcut) in enumerate(zip(
+            self._ROTATE_TEXTS, (90, -90), ("Ctrl+[", "Ctrl+]"),
+        )):
+            a = QAction(t(text_key), self)
+            a.setShortcut(shortcut)
+            a.triggered.connect(
+                lambda _=False, d=deg: self.canvas.rotate_selected(d)
+            )
+            m_rotate.addAction(a)
+            self._actions[f"rotate{i}"] = a
+
         # 端点箭头：既是新建画笔/直线的默认，也作用于当前选中的画笔或直线
         m_pen = m_edit.addMenu(t("端点箭头"))
         self._menus["pen"] = m_pen
@@ -1328,12 +1487,13 @@ class EditorWindow(QMainWindow):
         self._menus["file"].setTitle(t("文件(&F)"))
         self._menus["edit"].setTitle(t("编辑(&E)"))
         self._menus["transform"].setTitle(t("图像变换"))
+        self._menus["rotate"].setTitle(t("旋转选中形状"))
         self._menus["pen"].setTitle(t("端点箭头"))
         self._menus["view"].setTitle(t("视图(&V)"))
         for prefix, keys in (
             ("file", self._FILE_TEXTS), ("edit", self._EDIT_TEXTS),
             ("transform", self._TRANSFORM_TEXTS), ("pen", self._PEN_TEXTS),
-            ("view", self._VIEW_TEXTS),
+            ("view", self._VIEW_TEXTS), ("rotate", self._ROTATE_TEXTS),
         ):
             for i, text_key in enumerate(keys):
                 self._actions[f"{prefix}{i}"].setText(t(text_key))

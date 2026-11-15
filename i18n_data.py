@@ -915,5 +915,29 @@ _ROWS.update({
         "缩放 {pct}%", "縮放 {pct}%", "Zoom {pct}%", "ズーム {pct}%",
         "확대 {pct}%", "Zoom {pct}%", "Zoom {pct}%", "Zoom {pct}%",
     ),
+
+    # -------------------------------------------------- v22 形状旋转
+    "旋转角度": (
+        "旋转角度", "旋轉角度", "Rotation angle", "回転角度", "회전 각도",
+        "Angle de rotation", "Drehwinkel", "Ángulo de rotación",
+    ),
+    "旋转选中形状": (
+        "旋转选中形状", "旋轉選取形狀", "Rotate Selected Shape",
+        "選択中の図形を回転", "선택한 도형 회전",
+        "Pivoter la forme sélectionnée", "Ausgewählte Form drehen",
+        "Rotar forma seleccionada",
+    ),
+    "顺时针旋转选中 90°": (
+        "顺时针旋转选中 90°", "順時針旋轉選取 90°", "Rotate Selected 90° CW",
+        "選択中を時計回りに 90°", "선택 항목 시계 방향 90°",
+        "Rotation sélection 90° horaire", "Auswahl 90° im Uhrzeigersinn",
+        "Rotar selección 90° horaria",
+    ),
+    "逆时针旋转选中 90°": (
+        "逆时针旋转选中 90°", "逆時針旋轉選取 90°", "Rotate Selected 90° CCW",
+        "選択中を反時計回りに 90°", "선택 항목 반시계 방향 90°",
+        "Rotation sélection 90° antihoraire", "Auswahl 90° gegen den Uhrzeigersinn",
+        "Rotar selección 90° antihoraria",
+    ),
 })
 
