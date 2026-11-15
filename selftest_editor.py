@@ -126,6 +126,21 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     N7  关于窗口为非模态单例且可重复打开
     N8  截屏前关于窗口会被隐藏并恢复（不会被拍进图里）
 
+  Stage P  独立「滚动长截图」命令（方案 2）
+    P1  主窗口有信号 / 菜单动作 / 按钮，点击都能发出 long_capture_requested
+    P2  8 语言切换后按钮 / 菜单文案即时刷新，英文无中文残留
+    P3  Overlay.set_long_mode 强制 rect、切「确定」提示、清窗口探测
+    P4  长截图模式 _confirm 发 long_shot（逻辑坐标）且不发 to_editor
+    P5  普通模式 _confirm 仍发 to_editor（不回归）
+    P6  语言切换后「确定」提示仍按长截图 key 翻译
+    P7  逻辑选区 → 屏幕物理矩形的原点 / DPR 换算（含负原点）
+    P8  start_long_capture 走 rect + long_mode，且 busy 时不再启动
+    P9  _close_overlay(restore=False) 拼接期间不恢复自有窗口
+    P10 托盘有独立动作，语言刷新覆盖它；App 已连接主窗口信号
+    P11 关于 8 语言简介为用户指定文案，邮箱仍在，无旧「模仿微信」字样
+    P12 帮助 8 语言均为 9 节且不再描述旧的工具条入口
+    P13 _begin_capture(long_mode=True) 真的给 Overlay 开了长截图模式
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -1865,6 +1880,270 @@ def test_i18n():
         w.hide()
 
 
+def test_long_capture() -> None:
+    """Stage P  独立「滚动长截图」命令：入口 → 框选 → 确定 → 直接拼接。"""
+    import inspect
+    import re
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    import i18n
+    import snap as snapmod
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from hotkeys import Hotkey
+    from i18n_docs import about_html, help_html
+    from snapui import ABOUT_HTML, HELP_HTML, MainWindow, make_icon
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    # P1 主窗口信号 / 菜单动作 / 按钮都在，且点击真能发出信号
+    with TemporaryDirectory(prefix="snaptool-p-") as tmp:
+        mw = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp))
+        fired: list = []
+        mw.long_capture_requested.connect(lambda: fired.append(1))
+        has_signal = hasattr(mw, "long_capture_requested")
+        a_long = mw._actions.get("long_capture")
+        b_long = mw.findChild(QPushButton, "long")
+        has_menu = a_long is not None and "滚动" in a_long.text()
+        has_btn = b_long is not None and "滚动" in b_long.text()
+        if a_long is not None:
+            a_long.trigger()
+        if b_long is not None:
+            b_long.click()
+        ok_p1 = has_signal and has_menu and has_btn and len(fired) == 2
+        record("P1 主窗口信号/菜单/按钮三处入口齐备且可用", ok_p1,
+               f"signal={has_signal} menu={has_menu} btn={has_btn} fired={len(fired)}")
+
+        # P2 切换 8 种语言，按钮与菜单文案即时刷新且英文无中文残留
+        bad_lang, cjk_bad = [], []
+        for code in i18n.LANGS:
+            i18n.LANG.set_preference(code, persist=False)
+            app.processEvents()
+            btn_text = b_long.text() if b_long is not None else ""
+            menu_text = a_long.text() if a_long is not None else ""
+            if not (btn_text and menu_text and menu_text in btn_text):
+                bad_lang.append(code)
+            if code == "en" and re.search(r"[\u4e00-\u9fff]", btn_text + menu_text):
+                cjk_bad.append(btn_text)
+        ok_p2 = not bad_lang and not cjk_bad
+        record("P2 8 语言按钮/菜单即时刷新且英文无残留", ok_p2,
+               f"异常语言={bad_lang} 英文残留={cjk_bad[:1]}")
+        i18n.LANG.set_preference("zh_CN", persist=False)
+        app.processEvents()
+        mw.close()
+
+    # P3 Overlay.set_long_mode：强制 rect、清窗口探测、切「确定」提示
+    base = make_image(400, 200)
+    ov = Overlay(base, dpr=2.0)
+    ov.resize(200, 100)
+    ov.set_capture_mode("window", lambda p: None)
+    ov.set_long_mode(True)
+    tip_key = ov.toolbar._tip_keys.get("action:确定")
+    ok_p3 = (
+        ov.long_mode and ov.capture_mode == "rect"
+        and ov._window_picker is None and ov._mode == "idle"
+        and tip_key == "开始滚动拼接 (Enter)"
+        and ov.toolbar._actions["确定"].toolTip()
+        == i18n.LANG.translate("开始滚动拼接 (Enter)")
+    )
+    record("P3 set_long_mode 强制 rect 并切换确定提示", ok_p3,
+           f"mode={ov.capture_mode} tip_key={tip_key}")
+    ov.close()
+
+    # P4 长截图模式 _confirm：发 long_shot（逻辑坐标），不发 to_editor
+    ov2 = Overlay(base, dpr=2.0)
+    ov2.resize(200, 100)
+    ov2.set_long_mode(True)
+    ov2.sel = QRect(30, 20, 60, 40)
+    ov2._mode = "editing"
+    got_long, got_editor = [], []
+    ov2.long_shot.connect(lambda r: got_long.append(QRect(r)))
+    ov2.to_editor.connect(lambda b, sh: got_editor.append(1))
+    ov2._confirm()
+    ok_p4 = (
+        len(got_long) == 1 and not got_editor
+        and got_long[0] == QRect(30, 20, 60, 40)
+    )
+    record("P4 长截图确定发 long_shot 且逻辑坐标不变", ok_p4,
+           f"long={len(got_long)} rect={got_long[0] if got_long else None} editor={len(got_editor)}")
+
+    # 过小的选区不应触发拼接
+    ov2b = Overlay(base, dpr=2.0)
+    ov2b.resize(200, 100)
+    ov2b.set_long_mode(True)
+    ov2b.sel = QRect(10, 10, 3, 3)
+    tiny: list = []
+    ov2b.long_shot.connect(lambda r: tiny.append(1))
+    ov2b._confirm()
+    record("P4b 过小选区不启动拼接", not tiny, f"emitted={len(tiny)}")
+    ov2.close(); ov2b.close()
+
+    # P5 普通模式仍走 to_editor（回归）
+    ov3 = Overlay(base, dpr=2.0)
+    ov3.resize(200, 100)
+    ov3.sel = QRect(30, 20, 60, 40)
+    ov3._mode = "editing"
+    norm_long, norm_editor = [], []
+    ov3.long_shot.connect(lambda r: norm_long.append(1))
+    ov3.to_editor.connect(lambda b, sh: norm_editor.append(b))
+    ov3._confirm()
+    ok_p5 = len(norm_editor) == 1 and not norm_long and norm_editor[0].size() == QRect(60, 40, 120, 80).size()
+    record("P5 普通截图仍进编辑器（不回归）", ok_p5,
+           f"editor={len(norm_editor)} long={len(norm_long)}")
+    ov3.close()
+
+    # P6 语言切换后「确定」提示仍用长截图 key
+    ov4 = Overlay(base, dpr=2.0)
+    ov4.set_long_mode(True)
+    i18n.LANG.set_preference("en", persist=False)
+    app.processEvents()
+    en_tip = ov4.toolbar._actions["确定"].toolTip()
+    ok_p6 = en_tip == "Start stitching (Enter)"
+    record("P6 语言切换后确定提示仍按长截图文案", ok_p6, f"en={en_tip!r}")
+    i18n.LANG.set_preference("zh_CN", persist=False)
+    app.processEvents()
+    ov4.close()
+
+    # P7 局部逻辑选区 → 屏幕物理矩形（原点可为负、DPR 可为分数）
+    r1 = snapmod.overlay_rect_to_screen(QRect(30, 20, 60, 40), QPoint(0, 0), 2.0)
+    r2 = snapmod.overlay_rect_to_screen(QRect(30, 20, 60, 40), QPoint(-1920, 100), 1.5)
+    ok_p7 = (
+        (r1.x, r1.y, r1.w, r1.h) == (60, 40, 120, 80)
+        and (r2.x, r2.y, r2.w, r2.h) == (-2835, 180, 90, 60)
+    )
+    record("P7 坐标换算含虚拟屏原点与 DPR", ok_p7,
+           f"r1={(r1.x, r1.y, r1.w, r1.h)} r2={(r2.x, r2.y, r2.w, r2.h)}")
+
+    # P8 start_long_capture 走 rect + long_mode；busy / overlay 时不再启动
+    holder = snapmod.App.__new__(snapmod.App)
+    holder.overlay = None
+    holder.busy = None
+    calls: list = []
+    holder._begin_capture = lambda mode, long_mode: calls.append((mode, long_mode))
+    holder.start_long_capture()
+    holder.overlay = object()
+    holder.start_long_capture()
+    holder.overlay = None
+    holder.busy = object()
+    holder.start_long_capture()
+    ok_p8 = calls == [("rect", True)]
+    record("P8 start_long_capture 走 rect+长截图且忙时不重入", ok_p8,
+           f"calls={calls}")
+
+    # P9 拼接期间不恢复自有窗口，结束后恢复
+    holder2 = snapmod.App.__new__(snapmod.App)
+    holder2._ocr_busy = True
+    holder2.overlay = None
+    restored: list = []
+    holder2._restore_own_windows = lambda: restored.append(1)
+    holder2._close_overlay(restore=False)
+    no_restore = (not restored) and (holder2._ocr_busy is False)
+    holder2._close_overlay()
+    ok_p9 = no_restore and len(restored) == 1
+    record("P9 拼接期间保持隐藏、结束统一恢复", ok_p9,
+           f"no_restore={no_restore} restored={len(restored)}")
+
+    # P10 App 已连接主窗口信号 / 托盘动作 / 语言刷新覆盖
+    src_init = inspect.getsource(snapmod.App.__init__)
+    src_retr = inspect.getsource(snapmod.App._retranslate_tray)
+    src_long = inspect.getsource(snapmod.App._on_long_shot)
+    ok_p10 = (
+        "long_capture_requested.connect(self.start_long_capture)" in src_init
+        and 'self._tray_actions["long_capture"]' in src_init
+        and '("long_capture", "滚动长截图…")' in src_retr
+        and "_close_overlay(restore=False)" in src_long
+        and "_restore_own_windows()" in src_long
+        and "overlay_rect_to_screen(logical_rect, origin, dpr)" in src_long
+    )
+    record("P10 信号/托盘/坐标/窗口恢复均已接线", ok_p10,
+           f"init={src_init.count('long_capture')} retr={src_retr.count('long_capture')}")
+
+    # P11 关于 8 语言简介 + 邮箱，且无旧简介
+    old_words = ("模仿微信", "与微信无关", "不涉及任何逆向")
+    bad_about = []
+    for code in i18n.LANGS:
+        html = about_html(code)
+        if ("mailto:283096251@qq.com" not in html
+                or any(w in html for w in old_words)
+                or "滚动" not in html and "Scroll" not in html and "スクロール" not in html
+                and "스크롤" not in html and "défilante" not in html
+                and "Scroll-" not in html and "Captura larga" not in html
+                and "捲動" not in html):
+            bad_about.append(code)
+    ok_p11 = (
+        "一个自制功能强大的Windows桌面截图软件。" in ABOUT_HTML
+        and not bad_about
+        and not any(w in ABOUT_HTML for w in old_words)
+    )
+    record("P11 关于 8 语言简介已替换且邮箱保留", ok_p11,
+           f"异常语言={bad_about}")
+
+    # P12 帮助 8 语言均为 9 节，且不再描述旧的工具条入口
+    bad_help = []
+    for code in i18n.LANGS:
+        html = help_html(code)
+        if (html.count("<h2>") != 9
+                or "9." not in html
+                or "工具条「长截图」" in html):
+            bad_help.append(code)
+    ok_p12 = HELP_HTML.count("<h2>") == 9 and not bad_help
+    record("P12 帮助 8 语言均含独立长截图章节且无旧入口", ok_p12,
+           f"异常语言={bad_help} zh_h2={HELP_HTML.count('<h2>')}")
+
+    # P13 集成：_begin_capture 真的给新建的 Overlay 打开长截图模式。
+    # 用假抓屏 / 假虚拟屏 / 假托盘，避免依赖真实桌面与系统托盘。
+    from unittest.mock import MagicMock
+
+    from PIL import Image
+
+    holder3 = snapmod.App.__new__(snapmod.App)
+    holder3.app = app
+    holder3.tray = MagicMock()
+    holder3.overlay = None
+    holder3.busy = None
+    holder3.preview = None
+    holder3.editor = None
+    holder3._help_window = None
+    holder3._about_box = None
+    holder3._workers = []
+    holder3._hidden_windows = []
+    holder3._ocr_busy = False
+    holder3.save_dir = Path(".")
+    holder3._hide_own_windows = lambda: None
+    holder3._hide_visible_own_windows = lambda: None
+    holder3._restore_own_windows = lambda: None
+    holder3.main_window = MagicMock()
+
+    orig_grab = snapmod.snapback.grab_all_screens
+    orig_vscreen = snapmod.snapback.virtual_screen
+    snapmod.snapback.grab_all_screens = lambda: Image.new("RGB", (200, 100), (30, 60, 90))
+    snapmod.snapback.virtual_screen = lambda: snapmod.snapback.ScreenRect(-100, -20, 200, 100)
+    try:
+        holder3._begin_capture("rect", True)
+        ov_p13 = holder3.overlay
+        ok_p13 = (
+            ov_p13 is not None and ov_p13.long_mode
+            and ov_p13.capture_mode == "rect"
+            and ov_p13._window_picker is None
+            and ov_p13.toolbar._tip_keys.get("action:确定") == "开始滚动拼接 (Enter)"
+            and holder3._capture_origin is not None
+        )
+        record("P13 _begin_capture 长截图模式端到端生效", ok_p13,
+               f"overlay={ov_p13 is not None} long_mode={getattr(ov_p13, 'long_mode', None)} "
+               f"origin={getattr(holder3, '_capture_origin', None)}")
+    finally:
+        snapmod.snapback.grab_all_screens = orig_grab
+        snapmod.snapback.virtual_screen = orig_vscreen
+        if holder3.overlay is not None:
+            holder3.overlay.close()
+            holder3.overlay = None
+
+    # 恢复语言偏好，避免影响后续 / 真实配置
+    i18n.LANG.set_preference("zh_CN", persist=False)
+    app.processEvents()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -1889,6 +2168,7 @@ if __name__ == "__main__":
     test_mirror_icons()
     test_about_and_app_icon()
     test_i18n()
+    test_long_capture()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

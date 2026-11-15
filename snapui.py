@@ -107,7 +107,8 @@ code { background:#f3f4f6; padding:1px 4px; }
 <tr><td>全屏截图</td><td>进入时自动选中整个虚拟屏幕，无需拖选</td><td>截整个桌面或多显示器合屏</td></tr>
 </table>
 <p class="hint">窗口模式会跳过截屏助手自己的窗口；启动截图时本程序的主窗口、帮助窗口、预览窗口都会临时隐藏，避免被拍进图里，结束后自动恢复。
-三种模式确定选区后都进入同一个编辑器，标注、取字、复制、保存的用法完全一致。</p>
+三种模式确定选区后都进入同一个编辑器，标注、取字、复制、保存的用法完全一致。
+另有不进编辑器的独立「滚动长截图」命令，见第 9 节。</p>
 
 <h2>3. 全局热键</h2>
 <p>默认 <b>Ctrl + Shift + A</b> 唤起截图，使用的模式由主窗口的「默认模式」决定（会记住，重启后仍有效）。
@@ -127,7 +128,7 @@ code { background:#f3f4f6; padding:1px 4px; }
 <tr><td>画笔端点箭头</td><td>工具栏「样式」打开样式面板，勾选「起点加箭头 / 终点加箭头」；无选中时设新建画笔默认，选中画笔时改当前线。也可用菜单「编辑 → 画笔端点箭头」</td></tr>
 <tr><td>撤销</td><td>Ctrl + Z 或工具条「撤销」（整图变换也能撤销）</td></tr>
 <tr><td>复制 / 保存 / 取消</td><td>Enter 或工具条「复制」；工具条「保存」；Esc 或工具条「✕」</td></tr>
-<tr><td>长截图</td><td>先框选滚动区域，再点工具条「长截图」，滚动中按 Esc 结束</td></tr>
+<tr><td>滚动长截图</td><td>独立命令，不进入编辑器：主窗口按钮 /「截图(&S) → 滚动长截图…」/ 托盘右键均可启动，详见第 9 节</td></tr>
 </table>
 <p class="hint">旋转 90° 后图片宽高互换，矩形/箭头/画笔/文字等标注位置跟着变换；文字只移动位置、字形仍保持水平可读。导出始终是全分辨率。</p>
 
@@ -156,6 +157,16 @@ code { background:#f3f4f6; padding:1px 4px; }
 <li><b>高分屏坐标不准：</b>程序已开启 per-monitor DPI 感知；若仍偏移，重启程序后再试。</li>
 <li><b>杀软误报：</b>全局热键 + 屏幕捕获容易被误报，未签名的 exe 需要加入信任。</li>
 </ul>
+
+<h2>9. 滚动长截图</h2>
+<p>这是与三种截图模式并列的<b>独立命令</b>，从主窗口按钮区「滚动长截图…」、「截图(&S) → 滚动长截图…」或托盘右键「滚动长截图…」启动。它<b>不进入编辑器</b>，而是框选后直接滚动拼接。</p>
+<ol>
+<li>启动后先隐藏本程序所有窗口，再抓一帧底图并显示遮罩；</li>
+<li>按住鼠标左键<b>框选要滚动的区域</b>（例如网页正文），可拖动选区、拖八个控制点微调；</li>
+<li>点浮出的「确定」或按 <b>Enter</b>：程序自动滚动、逐帧抓屏，用模板匹配找相邻帧的重叠行并拼成长图；滚动中按 <b>Esc</b> 可随时结束；</li>
+<li>拼接完成后弹出预览窗口，可直接另存为 PNG / JPG。</li>
+</ol>
+<p class="hint">拼接期间本程序窗口保持隐藏、进度条也会避开选区，避免被拍进长图；结束后自动恢复。若页面含固定悬浮元素或动画导致无法自动对齐，会提示结果可能不完整，可缩小选区或改用普通截图。</p>
 </body></html>
 """
 
@@ -173,6 +184,7 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
 也可直接双击 restart.bat 一键重启。启动诊断见 %APPDATA%\\SnapTool\\startup.log。
 
 三种截图模式：框选（拖鼠标选区域）、窗口（悬停高亮并单击）、全屏（自动选中整个虚拟屏幕）。
+另有独立命令「滚动长截图…」（主窗口 /「截图」菜单 / 托盘右键）：框选滚动区域后点「确定」自动拼接成长图，不进入编辑器。
 默认模式与全局热键保存在 %APPDATA%\\SnapTool\\settings.json，
 可在主窗口或托盘菜单「设置热键…」里修改。
 
@@ -182,8 +194,8 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
 ABOUT_HTML = f"""
 <div style="font-family:'Microsoft YaHei',sans-serif; font-size:13px; color:#1f2937; line-height:1.6;">
 <p style="font-size:19px; font-weight:bold; margin:0 0 8px 0;">{APP_NAME}</p>
-<p>一个模仿微信截屏体验的 Windows 桌面截图工具。<b>纯原创实现，与微信无关</b>，不涉及任何逆向。</p>
-<p>功能：三种截图模式、对象化标注编辑、整图旋转 / 镜像、画笔端点箭头、滚动长截图、中文 OCR 逐行盖回取字、全局热键自定义。</p>
+<p>一个自制功能强大的Windows桌面截图软件。</p>
+<p>功能：三种截图模式、对象化标注编辑、整图旋转 / 镜像、画笔端点箭头、独立「滚动长截图」命令、中文 OCR 逐行盖回取字、全局热键自定义、8 种界面语言。</p>
 <p style="font-size:13px;">联系邮箱：<a href="mailto:{CONTACT_EMAIL}" style="color:#0a6ed1;">{CONTACT_EMAIL}</a></p>
 <p style="font-size:12px; color:#6b7280;">技术栈：Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime)。<br>
 第三方组件许可：PySide6 (LGPL)、RapidOCR / PaddleOCR / OpenCV (Apache-2.0)、ONNX Runtime (MIT)。</p>
@@ -268,6 +280,7 @@ class MainWindow(QMainWindow):
     """启动即显示的程序窗口：菜单、模式按钮、热键与默认模式。"""
 
     capture_requested = Signal(str)      # rect / window / fullscreen
+    long_capture_requested = Signal()    # 独立命令：滚动长截图（框选→确定→自动拼接）
     mode_changed = Signal(str)           # 用户改了「默认模式」
     hotkey_requested = Signal()
     help_requested = Signal(str)         # help / cli
@@ -283,6 +296,9 @@ class MainWindow(QMainWindow):
         "QPushButton#mode { background:#ffffff; border:1px solid #d1d5db; border-radius:8px;"
         " padding:14px 6px; color:#111827; font-size:13px; }"
         "QPushButton#mode:hover { border-color:#0a84ff; background:#f0f7ff; }"
+        "QPushButton#long { background:#f0f7ff; border:1px solid #b6d7fb; border-radius:8px;"
+        " padding:10px 8px; color:#0a6ed1; font-size:13px; font-weight:bold; }"
+        "QPushButton#long:hover { border-color:#0a84ff; background:#e2f0ff; }"
         "QPushButton#minor { padding:4px 12px; }"
         "QPushButton#primary { background:#0a84ff; color:#fff; border:none; border-radius:6px;"
         " padding:8px 16px; font-weight:bold; }"
@@ -335,6 +351,11 @@ class MainWindow(QMainWindow):
             )
             m_shot.addAction(a)
             self._actions[f"shot_{mode}"] = a
+        m_shot.addSeparator()
+        a_long = QAction(t("滚动长截图…"), self)
+        a_long.triggered.connect(lambda _checked=False: self.long_capture_requested.emit())
+        m_shot.addAction(a_long)
+        self._actions["long_capture"] = a_long
 
         m_set = mb.addMenu(t("设置(&E)"))
         self._menus["settings"] = m_set
@@ -422,6 +443,18 @@ class MainWindow(QMainWindow):
             self._mode_buttons[mode] = b
         root.addLayout(row)
 
+        # 独立命令：滚动长截图（不属于三种截图模式，走专门的框选→拼接流程）
+        self._b_long = QPushButton(
+            f"{t('滚动长截图…')}    {t('框选区域后自动滚动拼接成长图')}"
+        )
+        self._b_long.setObjectName("long")
+        self._b_long.setMinimumHeight(42)
+        self._b_long.setToolTip(t("框选区域后自动滚动拼接成长图"))
+        self._b_long.clicked.connect(
+            lambda _checked=False: self.long_capture_requested.emit()
+        )
+        root.addWidget(self._b_long)
+
         self._tip = QLabel(
             t("提示：截图中按 Esc 取消；选区确定后可标注、取字、复制或保存。 详细说明见「帮助 → 使用说明」。")
         )
@@ -451,7 +484,7 @@ class MainWindow(QMainWindow):
             ("dir", "打开保存目录"), ("minimize", "最小化到托盘"),
             ("quit", "退出"), ("hotkey", "设置热键…"),
             ("help_help", "使用说明…"), ("help_cli", "命令行参数…"),
-            ("about", "关于…"),
+            ("about", "关于…"), ("long_capture", "滚动长截图…"),
         ):
             self._actions[key].setText(t(text_key))
         for mode in CAPTURE_MODES:
@@ -469,6 +502,10 @@ class MainWindow(QMainWindow):
         self._lbl_now.setText(t("立即截图"))
         for mode, btn in self._mode_buttons.items():
             btn.setText(f"{mode_label(mode)}\n{t(MODE_DESC[mode])}")
+        self._b_long.setText(
+            f"{t('滚动长截图…')}    {t('框选区域后自动滚动拼接成长图')}"
+        )
+        self._b_long.setToolTip(t("框选区域后自动滚动拼接成长图"))
         self._tip.setText(
             t("提示：截图中按 Esc 取消；选区确定后可标注、取字、复制或保存。 详细说明见「帮助 → 使用说明」。")
         )

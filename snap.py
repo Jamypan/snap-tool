@@ -145,6 +145,23 @@ def default_save_dir() -> Path:
     return d
 
 
+def overlay_rect_to_screen(
+    logical_rect: QRect, origin: QPoint, dpr: float
+) -> "snapback.ScreenRect":
+    """Overlay 局部逻辑选区 → 屏幕物理矩形。
+
+    origin 是 Overlay(0,0) 的全局逻辑坐标（多显示器时可能为负），dpr 为
+    设备像素比。长截图要在真实屏幕上滚动，所以必须先把选区还原成物理坐标；
+    普通编辑器只裁剪内存里的底图，不需要这一步。
+    """
+    return snapback.ScreenRect(
+        int(round((logical_rect.x() + origin.x()) * dpr)),
+        int(round((logical_rect.y() + origin.y()) * dpr)),
+        int(round(logical_rect.width() * dpr)),
+        int(round(logical_rect.height() * dpr)),
+    )
+
+
 def save_qimage(img: QImage, path: Path) -> None:
     suffix = path.suffix.lower() or ".png"
     fmt = "JPG" if suffix in (".jpg", ".jpeg") else "PNG"
@@ -356,6 +373,7 @@ class App:
         icon = make_icon()
         self.main_window = MainWindow(icon, self.hotkey, self.capture_mode, self.save_dir)
         self.main_window.capture_requested.connect(self.start_capture)
+        self.main_window.long_capture_requested.connect(self.start_long_capture)
         self.main_window.mode_changed.connect(self._on_mode_changed)
         self.main_window.hotkey_requested.connect(self.open_hotkey_settings)
         self.main_window.help_requested.connect(self.show_help)
@@ -384,6 +402,10 @@ class App:
             )
             self.menu.addAction(act)
             self._tray_actions[f"mode_{mode}"] = act
+        act_long = QAction(t("滚动长截图…"), self.menu)
+        act_long.triggered.connect(lambda _checked=False: self.start_long_capture())
+        self.menu.addAction(act_long)
+        self._tray_actions["long_capture"] = act_long
         self.menu.addSeparator()
         act_hotkey = QAction(t("设置热键…"), self.menu)
         act_hotkey.triggered.connect(lambda _checked=False: self.open_hotkey_settings())
@@ -459,6 +481,7 @@ class App:
             ("show", "显示主窗口"), ("hotkey", "设置热键…"),
             ("language", "语言…"), ("dir", "打开保存目录"),
             ("help", "使用说明…"), ("about", "关于…"), ("quit", "退出"),
+            ("long_capture", "滚动长截图…"),
         ):
             self._tray_actions[key].setText(t(text_key))
         for mode in CAPTURE_MODES:
@@ -640,7 +663,20 @@ class App:
             return
         if not isinstance(mode, str) or mode not in CAPTURE_MODES:
             mode = self.capture_mode
+        self._begin_capture(mode, long_mode=False)
 
+    def start_long_capture(self) -> None:
+        """独立命令「滚动长截图」：框选滚动区域 → 确定 → 直接滚动拼接。
+
+        与普通截图共用隐藏窗口 / 抓屏 / 遮罩，但不进入编辑器；确定后
+        由 Overlay.long_shot 交给 _on_long_shot 启动 StitchWorker。
+        """
+        if self.overlay is not None or self.busy is not None:
+            return
+        self._begin_capture("rect", long_mode=True)
+
+    def _begin_capture(self, mode: str, long_mode: bool) -> None:
+        """隐藏自有窗口 → 抓一帧底图 → 显示遮罩（普通截图 / 长截图共用）。"""
         # 先把自己的窗口全部藏起来，避免拍进截图里
         self._hide_own_windows()
         self.tray.setVisible(False)
@@ -666,13 +702,18 @@ class App:
         qimg = pil_to_qimage(pil)
 
         # 全屏：截完直接进窗口化编辑器，不需选择 / 确定这一步
-        if mode == "fullscreen":
+        if mode == "fullscreen" and not long_mode:
             self._on_to_editor(qimg, [])
             return
 
         phys = snapback.virtual_screen()
         screen = self.app.primaryScreen()
         dpr = screen.devicePixelRatio() or 1.0
+        # 记下 Overlay 左上角对应的全局逻辑坐标：长截图要在真实屏幕上滚动，
+        # 「确定」时遮罩已 hide，不能再依赖 mapToGlobal 的结果。
+        self._capture_origin = QPoint(
+            int(round(phys.x / dpr)), int(round(phys.y / dpr))
+        )
 
         self.overlay = Overlay(qimg, dpr)
         self.overlay.setGeometry(
@@ -685,6 +726,8 @@ class App:
         )
         # 三种模式：框选 / 窗口（悬停高亮单击）/ 全屏（自动选中整个虚拟屏幕）
         self.overlay.set_capture_mode(mode, self._pick_window)
+        if long_mode:
+            self.overlay.set_long_mode(True)
         self.overlay.done.connect(self._on_done)
         self.overlay.cancelled.connect(self._on_cancel)
         self.overlay.long_shot.connect(self._on_long_shot)
@@ -723,14 +766,17 @@ class App:
             return None
         return (q, info.title)
 
-    def _close_overlay(self) -> None:
+    def _close_overlay(self, *, restore: bool = True) -> None:
         # 遮罩关闭时取字任务的结果已无处展示，同时解除 busy 锁，
         # 否则用户按 Esc 取消后下次取字会被永久挡住。
+        # restore=False 用于长截图：拼接期间主窗口等自有窗口必须保持隐藏，
+        # 否则每一帧都会把它们拍进长图，等拼接结束再统一恢复。
         self._ocr_busy = False
         if self.overlay:
             self.overlay.deleteLater()
             self.overlay = None
-        self._restore_own_windows()
+        if restore:
+            self._restore_own_windows()
 
     def _on_cancel(self) -> None:
         self._close_overlay()
@@ -762,27 +808,42 @@ class App:
 
     # ------------------------------------------------------------ 长截图
     def _on_long_shot(self, logical_rect: QRect) -> None:
+        """Overlay 交来的选区（局部逻辑坐标）→ 屏幕物理矩形 → 滚动拼接。"""
         if logical_rect.isNull() or logical_rect.width() < 8:
+            self._close_overlay()
             return
-        dpr = self.overlay.dpr if self.overlay else 1.0
-        rect = snapback.ScreenRect(
-            int(round(logical_rect.x() * dpr)),
-            int(round(logical_rect.y() * dpr)),
-            int(round(logical_rect.width() * dpr)),
-            int(round(logical_rect.height() * dpr)),
-        )
-        self._close_overlay()
+        ov = self.overlay
+        dpr = ov.dpr if ov else 1.0
+        origin = getattr(self, "_capture_origin", QPoint(0, 0))
+        # 虚拟屏幕原点在多显示器下可能是负数，叠加 Overlay 全局原点再乘 dpr，
+        # 否则副屏上的选区会整体偏移，滚到错误的位置。
+        rect = overlay_rect_to_screen(logical_rect, origin, dpr)
+        # 拼接是逐帧抓屏：主窗口 / 帮助 / 关于等自有窗口若在拼接期间恢复，
+        # 会被一帧一帧拍进长图。这里只关闭遮罩，等拼接结束再统一恢复。
+        self._close_overlay(restore=False)
 
         self.busy = BusyBar()
-        self.busy.show()
         screen_geo = self.app.primaryScreen().availableGeometry()
-        self.busy.move(screen_geo.center().x() - 130, screen_geo.top() + 60)
+        self.busy.adjustSize()
+        bw, bh = self.busy.width(), self.busy.height()
+        bx = max(
+            screen_geo.left() + 8,
+            min(screen_geo.center().x() - bw // 2, screen_geo.right() - bw - 8),
+        )
+        # 进度条同样会被抓进长图：尽量放到选区之外（顶部优先，选区贴顶则改底部）
+        sel_top_logical = logical_rect.y() + origin.y()
+        by = screen_geo.top() + 8
+        if sel_top_logical < bh + 24:
+            by = screen_geo.bottom() - bh - 8
+        self.busy.move(bx, by)
+        self.busy.show()
 
         worker = StitchWorker(rect)
         worker.progress.connect(self.busy.update_text)
 
         def on_ok(pil_img, stats) -> None:
             self._close_busy()
+            self._restore_own_windows()
             qimg = pil_to_qimage(pil_img)
             self.preview = PreviewWindow(qimg, self.save_dir)
             self.preview.show()
@@ -798,6 +859,7 @@ class App:
 
         def on_fail(msg: str) -> None:
             self._close_busy()
+            self._restore_own_windows()
             QMessageBox.warning(None, app_name(), t("长截图失败：{error}", error=msg))
 
         worker.ok.connect(on_ok)

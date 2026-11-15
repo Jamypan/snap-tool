@@ -1585,6 +1585,16 @@ class Toolbar(QWidget):
         )
         LANG.changed.connect(self.retranslate_ui)
 
+    def set_confirm_tip(self, text_key: str) -> None:
+        """切换「确定」按钮的提示文案（长截图流程与常规编辑流程不同）。
+
+        同时更新 _tip_keys，保证切换界面语言后 retranslate_ui 用对文案。
+        """
+        self._tip_keys["action:确定"] = text_key
+        btn = self._actions.get("确定")
+        if btn is not None:
+            btn.setToolTip(t(text_key))
+
     def retranslate_ui(self, _code: str = "") -> None:
         """图标 key 保持中文不变，只刷新按钮提示文字。"""
         for key, text_key in self._tip_keys.items():
@@ -1676,6 +1686,9 @@ class Overlay(QWidget):
 
         self._mode = "idle"               # idle | picking | selecting | editing
         self.capture_mode = "rect"        # rect | window | fullscreen
+        self.long_mode = False            # 独立「滚动长截图」命令：框选→确定→直接拼接
+        # 遮罩上的提示文字在 paintEvent 里现取 t()，语言切换后需触发重绘
+        LANG.changed.connect(self.update)
         self._window_picker = None        # callable(pos) -> (QRect, title) | QRect | None
         self._hover_rect: QRect | None = None
         self._confirm_mode = False        # 选择完成、仅显示「确定/取消」的阶段
@@ -1708,6 +1721,9 @@ class Overlay(QWidget):
         self.toolbar.close_clicked.connect(self.cancel)
         self.toolbar.copy_clicked.connect(self._confirm)
         self.toolbar.save_clicked.connect(lambda: self.save_requested.emit(self.compose()))
+        # 旧工具条「长截图」按钮：确认模式下被 set_confirm_mode(True) 隐藏，
+        # 现已由主窗口 / 托盘的独立命令取代。保留作兼容入口：它同样发
+        # Overlay 局部逻辑选区，与 _confirm 的长截图分支语义一致。
         self.toolbar.long_clicked.connect(lambda: self.long_shot.emit(QRect(self.sel) if self.sel else QRect()))
         self.toolbar.ocr_clicked.connect(lambda: self.ocr.emit(self.raw_crop()))
         self.toolbar.style_clicked.connect(self._toggle_style_panel)
@@ -1757,6 +1773,22 @@ class Overlay(QWidget):
         )
 
     # ------------------------------------------------------------ 截图模式
+    def set_long_mode(self, on: bool = True) -> None:
+        """切换为独立「滚动长截图」流程。
+
+        与普通截图共用同一套框选 / 调整 / 确认交互，但点「确定」后
+        不进入编辑器，而是把选区交给宿主直接做滚动拼接。
+        长截图只允许 rect 框选（窗口 / 全屏没有「滚动区域」的概念）。
+        """
+        self.long_mode = on
+        self.capture_mode = "rect"
+        self._window_picker = None
+        self._mode = "idle"
+        self.toolbar.set_confirm_tip(
+            "开始滚动拼接 (Enter)" if on else "确认选区，进入程序窗口继续编辑 (Enter)"
+        )
+        self.update()
+
     def set_capture_mode(self, mode: str, window_picker=None) -> None:
         """在 setGeometry 之后、show 之前调用。
 
@@ -2195,13 +2227,24 @@ class Overlay(QWidget):
         # 选择阶段双击无任何编辑动作（拖动选区 / 拖控制点 / 确定 才是该阶段功能）
 
     def _confirm(self) -> None:
-        """选择阶段点「确定」/ 回车：把选区（物理像素）裁剪出来，交给窗口化
-        编辑器继续做标注、取字、复制、保存等其它操作。"""
+        """选择阶段点「确定」/ 回车。
+
+        普通截图：把选区（物理像素）裁剪出来，交给窗口化编辑器继续编辑。
+        长截图模式：发出局部逻辑选区，由 App 换算成屏幕物理矩形后直接拼接。
+        """
         self._commit_text()
         if not self.sel:
             self.cancel()
             return
         r = self.sel.normalized()
+        if self.long_mode:
+            if r.width() < 8 or r.height() < 8:
+                return
+            # 与工具条「长截图」按钮保持一致：发 Overlay 局部逻辑坐标，
+            # 由 App 加上虚拟屏幕原点并乘 dpr 换算成物理像素矩形。
+            self._teardown()
+            self.long_shot.emit(QRect(r))
+            return
         phys = self.to_phys(r).intersected(
             QRect(0, 0, self.base.width(), self.base.height())
         )
@@ -2939,13 +2982,18 @@ class Overlay(QWidget):
                 p.drawText(QRect(sel.left(), ly, tw, th), Qt.AlignCenter, label)
 
         elif self._mode == "idle":
-            # 没开始框选时给个提示
+            # 没开始框选时给个提示；长截图模式说明「确定」即开始拼接
             p.setFont(QFont("", 13))
             p.setPen(QColor(255, 255, 255, 210))
+            hint = (
+                t("框选要滚动的区域，点「确定」开始自动拼接    Esc 取消")
+                if self.long_mode
+                else t("按住鼠标左键框选区域    Esc 取消")
+            )
             p.drawText(
                 self.rect().adjusted(0, 40, 0, 0),
                 Qt.AlignHCenter | Qt.AlignTop,
-                t("按住鼠标左键框选区域    Esc 取消"),
+                hint,
             )
 
         # 记录本次实际画出的选区，供下一次 _repaint 计算「擦残影」脏区

@@ -761,5 +761,31 @@ _ROWS.update({
         "Kein nutzbares OCR-Sprachpaket installiert (zh-CN OCR-Paket nötig)",
         "No hay paquete de idioma OCR utilizable (se requiere zh-CN OCR)",
     ),
+    # ------------------------------------------------------------ 独立「滚动长截图」命令
+    "滚动长截图…": (
+        "滚动长截图…", "捲動長截圖…", "Scrolling Capture…", "スクロールキャプチャ…",
+        "스크롤 캡처…", "Capture défilante…", "Scroll-Aufnahme…", "Captura larga…",
+    ),
+    "框选区域后自动滚动拼接成长图": (
+        "框选区域后自动滚动拼接成长图", "框選區域後自動捲動拼接成長圖",
+        "Select an area to auto-scroll and stitch", "範囲を選んで自動スクロール結合",
+        "영역을 선택하면 자동 스크롤로 이어 붙입니다", "Sélectionnez une zone à assembler par défilement",
+        "Bereich wählen und automatisch zusammenfügen", "Seleccione un área para unirla al desplazarse",
+    ),
+    "框选要滚动的区域，点「确定」开始自动拼接    Esc 取消": (
+        "框选要滚动的区域，点「确定」开始自动拼接    Esc 取消",
+        "框選要捲動的區域，點「確定」開始自動拼接    Esc 取消",
+        "Drag to select the scrolling area, then click OK to stitch    Esc cancels",
+        "スクロールする範囲をドラッグで選び、「OK」で結合開始    Esc で取消",
+        "스크롤할 영역을 드래그한 뒤 확인을 누르면 자동 결합    Esc 취소",
+        "Faites glisser pour choisir la zone, puis OK pour assembler    Esc annule",
+        "Zum Aufnehmen Bereich ziehen, dann OK zum Zusammenfügen    Esc bricht ab",
+        "Arrastre para elegir el área y pulse Aceptar para unir    Esc cancela",
+    ),
+    "开始滚动拼接 (Enter)": (
+        "开始滚动拼接 (Enter)", "開始捲動拼接 (Enter)", "Start stitching (Enter)",
+        "結合を開始 (Enter)", "결합 시작 (Enter)", "Démarrer l'assemblage (Entrée)",
+        "Zusammenfügen starten (Enter)", "Iniciar unión (Enter)",
+    ),
 })
 
