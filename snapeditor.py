@@ -1885,6 +1885,9 @@ class Overlay(QWidget):
 
     def _set_tool(self, key: str) -> None:
         self._tool = key
+        # 马赛克没有可调样式：切到马赛克工具时立刻收起已打开的样式面板
+        if key == "mosaic":
+            self.style_panel.hide()
         if key == "text":
             cur = Qt.IBeamCursor
         elif key == "select":
@@ -1903,7 +1906,17 @@ class Overlay(QWidget):
             self.update()
 
     # ------------------------------------------------------------ 样式
+    def _style_panel_allowed(self) -> bool:
+        """马赛克不需要样式面板：马赛克工具激活或选中马赛克标注时都不显示。"""
+        if getattr(self, "_tool", "") == "mosaic":
+            return False
+        sel = getattr(self, "_selected", None)
+        return not (sel is not None and getattr(sel, "kind", "") == "mosaic")
+
     def _toggle_style_panel(self) -> None:
+        if not self._style_panel_allowed():
+            self.style_panel.hide()
+            return
         if self.style_panel.isVisible():
             self.style_panel.hide()
             return
@@ -2042,10 +2055,12 @@ class Overlay(QWidget):
             self._place_toolbar()
             self.toolbar.show()
             self.toolbar.raise_()
-        if self._selected:
+        if self._selected and self._style_panel_allowed():
             self._place_style_panel()
             self.style_panel.show()
             self.style_panel.raise_()
+        else:
+            self.style_panel.hide()
         self._set_tool(self._tool)      # 把光标从箭头改回绘制/选择态
         self.setFocus()
         self.update()
@@ -2187,8 +2202,13 @@ class Overlay(QWidget):
             s.pos = QPoint(snap["pos"])
 
     def _on_select_changed(self) -> None:
-        """选中标注变化后：自动弹出样式面板并回填，或隐藏。"""
-        if self._selected is not None:
+        """选中标注变化后：自动弹出样式面板并回填，或隐藏。
+
+        马赛克是纯像素化效果，没有颜色 / 线宽 / 线型可调，按需求不弹面板。
+        """
+        if not self._style_panel_allowed():
+            self.style_panel.hide()
+        elif self._selected is not None:
             # 选中了标注 → 自动打开样式面板，方便立即编辑
             self._refresh_style_panel()
             self._place_style_panel()

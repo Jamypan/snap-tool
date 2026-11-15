@@ -160,6 +160,13 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     Q16 StitchWorker 默认带 ScrollControl，控制条信号 / 钩子已接线
     Q17 主窗口按钮副标题改为「点击窗口后自动滚动」
 
+  Stage R  马赛克不弹样式面板
+    R1  Canvas / Overlay 的 _style_panel_allowed 判定正确
+    R2  Canvas 画完马赛克自动选中不弹面板，普通标注仍弹出
+    R3  Overlay 选中马赛克不弹面板，普通标注仍弹出
+    R4  切到马赛克工具立刻收起已开面板，手动打开也被拦住
+    R5  OCR 结束恢复编辑态时，马赛克不会重新弹出面板
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -2519,6 +2526,97 @@ def test_long_capture_v17() -> None:
     app.processEvents()
 
 
+def test_mosaic_style_panel() -> None:
+    """Stage R：马赛克工具 / 马赛克标注都不弹样式面板，普通标注不回归。"""
+    app = QApplication.instance()
+    base = make_image(400, 300)
+
+    def shown(panel) -> bool:
+        # 离屏下父窗口未必可见，isVisible() 会连带返回 False；
+        # isHidden() 只反映显式 show/hide，正好用来断言「弹出意图」。
+        return not panel.isHidden()
+
+    mos = Shape(kind="mosaic", rect=QRect(20, 20, 80, 60))
+    rect = Shape(kind="rect", rect=QRect(120, 20, 80, 60))
+
+    cv = Canvas(base, [], None)
+    ov = Overlay(base, dpr=1.0)
+    ov.sel = QRect(10, 10, 300, 200)
+
+    # R1 允许判定：默认允许；马赛克工具 / 选中马赛克不允许；其它标注允许
+    ok_r1 = cv._style_panel_allowed() and ov._style_panel_allowed()
+    cv._set_tool("mosaic")
+    ov._set_tool("mosaic")
+    ok_r1 &= not cv._style_panel_allowed() and not ov._style_panel_allowed()
+    cv._set_tool("select")
+    ov._set_tool("select")
+    cv._selected = ov._selected = mos
+    ok_r1 &= not cv._style_panel_allowed() and not ov._style_panel_allowed()
+    cv._selected = ov._selected = rect
+    ok_r1 &= cv._style_panel_allowed() and ov._style_panel_allowed()
+    record("R1 马赛克工具/标注被样式面板过滤，普通标注保留", ok_r1,
+           f"canvas={cv._style_panel_allowed()} overlay={ov._style_panel_allowed()}")
+
+    # R2 窗口编辑器：画完马赛克自动选中不弹，普通标注仍自动弹出
+    cv._selected = None
+    cv._on_select_changed()
+    cv._selected = mos
+    cv._on_select_changed()
+    mos_hidden = cv.style_panel.isHidden()
+    cv._selected = rect
+    cv._on_select_changed()
+    rect_shown = shown(cv.style_panel)
+    record("R2 Canvas 马赛克自动选中不弹面板、矩形仍弹出", mos_hidden and rect_shown,
+           f"mosaic_hidden={mos_hidden} rect_shown={rect_shown}")
+
+    # R3 遮罩编辑器：同样的行为
+    ov._selected = mos
+    ov._on_select_changed()
+    ov_mos_hidden = ov.style_panel.isHidden()
+    ov._selected = rect
+    ov._on_select_changed()
+    ov_rect_shown = shown(ov.style_panel)
+    record("R3 Overlay 马赛克自动选中不弹面板、矩形仍弹出",
+           ov_mos_hidden and ov_rect_shown,
+           f"mosaic_hidden={ov_mos_hidden} rect_shown={ov_rect_shown}")
+
+    # R4 切到马赛克工具立刻收起已开面板；手动打开（菜单 / 工具条）也被拦住
+    before = shown(cv.style_panel) and shown(ov.style_panel)
+    cv._set_tool("mosaic")
+    ov._set_tool("mosaic")
+    after_tool = cv.style_panel.isHidden() and ov.style_panel.isHidden()
+    cv._toggle_style_panel()
+    ov._toggle_style_panel()
+    after_toggle = cv.style_panel.isHidden() and ov.style_panel.isHidden()
+    cv._selected = ov._selected = mos
+    cv._set_tool("select")
+    ov._set_tool("select")
+    cv._toggle_style_panel()
+    ov._toggle_style_panel()
+    after_sel = cv.style_panel.isHidden() and ov.style_panel.isHidden()
+    record("R4 切工具收起面板 + 手动入口也被拦截",
+           before and after_tool and after_toggle and after_sel,
+           f"before={before} tool={after_tool} toggle={after_toggle} selected={after_sel}")
+
+    # R5 取字结束恢复编辑态时，不会把面板重新弹回马赛克上
+    cv._selected = ov._selected = mos
+    cv._hide_ocr_panel()
+    ov.hide_ocr_panel()
+    hidden_mos = cv.style_panel.isHidden() and ov.style_panel.isHidden()
+    cv._selected = ov._selected = rect
+    cv._hide_ocr_panel()
+    ov.hide_ocr_panel()
+    shown_rect = shown(cv.style_panel) and shown(ov.style_panel)
+    record("R5 OCR 恢复时马赛克不弹、普通标注仍弹", hidden_mos and shown_rect,
+           f"mosaic_hidden={hidden_mos} rect_shown={shown_rect}")
+
+    cv.close()
+    ov.close()
+    cv.deleteLater()
+    ov.deleteLater()
+    app.processEvents()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -2545,6 +2643,7 @@ if __name__ == "__main__":
     test_i18n()
     test_long_capture()
     test_long_capture_v17()
+    test_mosaic_style_panel()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

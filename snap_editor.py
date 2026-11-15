@@ -222,8 +222,21 @@ class Canvas(QWidget):
     # ------------------------------------------------------------ 工具 / 样式
     def _set_tool(self, key: str) -> None:
         self._tool = key
+        # 马赛克没有可调样式：切到马赛克工具时立刻收起已打开的样式面板
+        if key == "mosaic":
+            self.style_panel.hide()
+
+    def _style_panel_allowed(self) -> bool:
+        """马赛克不需要样式面板：马赛克工具激活或选中马赛克标注时都不显示。"""
+        if getattr(self, "_tool", "") == "mosaic":
+            return False
+        sel = getattr(self, "_selected", None)
+        return not (sel is not None and getattr(sel, "kind", "") == "mosaic")
 
     def _toggle_style_panel(self) -> None:
+        if not self._style_panel_allowed():
+            self.style_panel.hide()
+            return
         if self.style_panel.isVisible():
             self.style_panel.hide()
         else:
@@ -292,7 +305,10 @@ class Canvas(QWidget):
         self.update()
 
     def _on_select_changed(self) -> None:
-        if self._selected is not None:
+        if not self._style_panel_allowed():
+            # 马赛克工具 / 选中马赛克：不弹面板，已经开着的也收起
+            self.style_panel.hide()
+        elif self._selected is not None:
             self._refresh_style_panel()
             self._place_style_panel()
             self.style_panel.show()
@@ -863,9 +879,11 @@ class Canvas(QWidget):
         self.toolbar.show()
         self.toolbar.raise_()
         self._place_style_panel()
-        if self._selected is not None:
+        if self._selected is not None and self._style_panel_allowed():
             self.style_panel.show()
             self.style_panel.raise_()
+        else:
+            self.style_panel.hide()
         self.setCursor(Qt.CrossCursor)
         self.setFocus()
         self.update()
