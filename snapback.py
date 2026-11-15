@@ -34,6 +34,11 @@ VK_LBUTTON = 0x01
 VK_RBUTTON = 0x02
 VK_ESCAPE = 0x1B
 
+SW_HIDE = 0
+SW_SHOWNOACTIVATE = 4
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+WS_EX_TOPMOST = 0x00000008
+
 user32 = ctypes.windll.user32 if sys.platform == "win32" else None
 
 
@@ -421,22 +426,193 @@ class ScrollControl:
 
 
 # ---------------------------------------------------------------------------
+# 长截图期间的屏幕浮层（输入法工具条 / 候选窗 / 提示条）
+# ---------------------------------------------------------------------------
+# 这类窗口固定在屏幕坐标、不随页面滚动，逐帧抓屏时会被一遍遍拍进长图，
+# 形成周期性重复的小白条；它们还会干扰模板匹配，把重叠量带偏，导致帧间
+# 出现大段重复内容（看起来像「拼接缝隙」）。拼接期间临时隐藏，结束一律恢复。
+_FLOATING_HINTS = (
+    "imeui", "imebroker", "msctfime", "chsime", "textinputhost",
+    "textinput", "sogou", "qimei", "pinyin", "baiduime", "mspy",
+    "candidate", "tooltips_class32", "tooltip", "corewindow",
+    "inputmethod", "输入法", "候选",
+)
+
+
+def _process_name(pid: int) -> str:
+    """取进程可执行文件名（小写）。取不到就返回空串，不影响主流程。"""
+    if sys.platform != "win32" or not pid:
+        return ""
+    try:
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(1024)
+            k32.QueryFullProcessImageNameW(
+                wintypes.HANDLE(handle), 0, buf, ctypes.byref(size)
+            )
+            import os
+            return os.path.basename(buf.value).lower()
+        finally:
+            k32.CloseHandle(wintypes.HANDLE(handle))
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _rects_intersect(a: ScreenRect, b: ScreenRect) -> bool:
+    return (
+        a.x < b.x + b.w and b.x < a.x + a.w
+        and a.y < b.y + b.h and b.y < a.y + a.h
+    )
+
+
+def _is_floating_overlay(
+    capture: ScreenRect,
+    win: ScreenRect,
+    cls: str,
+    title: str,
+    proc: str,
+    pid: int,
+    own_pid: int,
+    exstyle: int = 0,
+) -> bool:
+    """纯判定函数：只认「与选区相交的小浮层」，不碰正常主窗口。
+
+    除了按类名 / 进程名识别输入法，凡是置顶或工具型的小窗口也一起清场：
+    第三方输入法悬浮条类名千奇百怪，但它们同样会一帧一条地拍进长图。
+    """
+    if pid == own_pid or win.w < 8 or win.h < 8:
+        return False
+    if not _rects_intersect(capture, win):
+        return False
+    if win.w > max(160, capture.w * 0.7) or win.h > max(100, capture.h * 0.35):
+        return False
+    text = f"{cls} {title} {proc}".lower()
+    keyword_hit = any(hint in text for hint in _FLOATING_HINTS)
+    tool_like = bool(exstyle & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST))
+    return keyword_hit or tool_like
+
+
+def find_floating_overlays(rect: ScreenRect, exclude_pid: int | None = None) -> list[int]:
+    """枚举需要临时隐藏的浮层窗口句柄；任何 Win32 异常都退化为「不隐藏」。"""
+    if user32 is None:
+        return []
+    import os
+
+    if exclude_pid is None:
+        exclude_pid = os.getpid()
+    found: list[int] = []
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def _cb(hwnd, _lparam) -> bool:
+        try:
+            h = int(hwnd or 0)
+            if not h or not user32.IsWindowVisible(wintypes.HWND(h)):
+                return True
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(wintypes.HWND(h), ctypes.byref(pid))
+            if pid.value == exclude_pid:
+                return True
+            r = _RECT()
+            if not user32.GetWindowRect(wintypes.HWND(h), ctypes.byref(r)):
+                return True
+            win = ScreenRect(r.left, r.top, r.right - r.left, r.bottom - r.top)
+            cls_buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(wintypes.HWND(h), cls_buf, len(cls_buf))
+            n = user32.GetWindowTextLengthW(wintypes.HWND(h))
+            title_buf = ctypes.create_unicode_buffer(max(1, n + 1))
+            user32.GetWindowTextW(wintypes.HWND(h), title_buf, len(title_buf))
+            exstyle = user32.GetWindowLongW(wintypes.HWND(h), GWL_EXSTYLE)
+            if _is_floating_overlay(
+                rect, win, cls_buf.value, title_buf.value,
+                _process_name(pid.value), pid.value, exclude_pid, exstyle,
+            ):
+                found.append(h)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    try:
+        user32.EnumWindows(WNDENUMPROC(_cb), 0)
+    except Exception:  # noqa: BLE001
+        return []
+    return found
+
+
+def hide_floating_overlays(hwnds: list[int]) -> None:
+    """每帧抓屏前调用一次：输入法可能自己把工具条重新弹出来。"""
+    if user32 is None:
+        return
+    for h in hwnds:
+        try:
+            user32.ShowWindow(wintypes.HWND(h), SW_HIDE)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def restore_floating_overlays(hwnds: list[int]) -> None:
+    """拼接结束 / 异常都要恢复，SW_SHOWNOACTIVATE 不抢用户输入焦点。"""
+    if user32 is None:
+        return
+    for h in hwnds:
+        try:
+            user32.ShowWindow(wintypes.HWND(h), SW_SHOWNOACTIVATE)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+# ---------------------------------------------------------------------------
 # 长截图拼接
 # ---------------------------------------------------------------------------
+def overlap_row_diff(acc: np.ndarray, frame: np.ndarray, top: int) -> float:
+    """重叠区逐行像素差的中位数（0 = 完全对齐）。
+
+    用「中间列带 + 行中位数」而不是整幅均值：输入法工具条、链接提示条这类
+    固定浮层只占少数行/边缘列，中位数几乎不受影响，但真正的错位会让绝大
+    多数行都差很多。用于多候选匹配里挑出真正对齐的位置。
+    """
+    if acc.shape[1] != frame.shape[1] or top < 0 or top >= acc.shape[0] - 4:
+        return 255.0
+    overlap = min(acc.shape[0] - top, frame.shape[0])
+    if overlap < 8:
+        # 滚到底时重叠本来就只剩几行，不该因此把匹配分数打下去，
+        # 交给上层 min_new_rows / 到底连续确认去判断。
+        return 0.0
+    c0 = int(frame.shape[1] * 0.12)
+    c1 = max(c0 + 8, int(frame.shape[1] * 0.88))
+    a = acc[top: top + overlap: 2, c0:c1: 2].astype(np.int16)
+    b = frame[0: overlap: 2, c0:c1: 2].astype(np.int16)
+    if a.shape != b.shape or a.size == 0:
+        return 255.0
+    return float(np.median(np.abs(a - b).mean(axis=(1, 2))))
+
+
 def find_vertical_overlap(
     acc: np.ndarray,
     frame: np.ndarray,
     search_rows: int = 400,
     template_rows: int = 120,
     template_offset: int = 0,
+    *,
+    max_candidates: int = 5,
 ) -> tuple[int, float]:
     """
     在已拼接图像 acc 中定位新帧 frame 顶部的匹配位置。
 
-    返回 (frame 第 0 行在 acc 中的行号, score)。score 为归一化相关系数（0~1）。
-    template_offset 让模板从新帧中部开始取：网页常有固定顶栏 / 悬浮导航，
-    若总拿 frame[0:120] 当模板，这段每帧都长得一样，会把匹配位置带偏。
-    尺寸不足 / 无法匹配时返回 (-1, 0.0)。
+    返回 (frame 第 0 行在 acc 中的行号, score)。尺寸不足返回 (-1, 0.0)。
+
+    v20 抗浮层对齐：
+      · 只在画面中间列带上做相关匹配，避开左侧链接提示条、右侧输入法工具条；
+      · 取多个相关峰值候选，再用「重叠区逐行差的中位数」挑真正对齐的那个
+        —— 固定浮层 / 重复卡片会让相关系数峰值落在错误位置，但错位会让
+        绝大多数行都对不上，中位数差立刻暴露出来；
+      · 在 ±2 行内微调，消除 1~2px 的硬接缝；
+      · score 把对齐差折算进去，错得离谱时会低于阈值，交给上层重试。
     """
     import cv2
 
@@ -445,17 +621,51 @@ def find_vertical_overlap(
     if acc.shape[0] < template_rows or frame.shape[0] < template_offset + template_rows:
         return -1, 0.0
 
-    template = frame[template_offset: template_offset + template_rows]
+    # 两侧各留 12%：网页左右常贴着固定侧栏 / 悬浮条，中间主体最可信
+    c0 = int(frame.shape[1] * 0.12)
+    c1 = max(c0 + 8, int(frame.shape[1] * 0.88))
+    template = frame[
+        template_offset: template_offset + template_rows, c0:c1
+    ]
     search_top = max(0, acc.shape[0] - search_rows)
-    search = acc[search_top:]
+    search = acc[search_top:, c0:c1]
     if search.shape[0] < template_rows:
         return -1, 0.0
 
     res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
-    _, max_val, _, max_loc = cv2.minMaxLoc(res)
-    m = search_top + max_loc[1]
-    # m 对应 frame 第 template_offset 行；换算回 frame 第 0 行的位置
-    return m - template_offset, float(max_val)
+    # 纯色模板会让 CCOEFF_NORMED 出现 NaN，先压成无效值
+    res = np.nan_to_num(res, nan=-1.0, posinf=-1.0, neginf=-1.0)
+    # 模板与搜索区等宽 → res 形状为 (N, 1)：逐个取峰值并抑制邻近行，
+    # 得到互不相同的候选位置（网页里常有多块长得一样的卡片）。
+    work = res.copy()
+    candidates: list[tuple[int, float]] = []
+    for _ in range(max(1, max_candidates)):
+        _, val, _, loc = cv2.minMaxLoc(work)
+        if not np.isfinite(val) or val < 0.0:
+            break
+        row = int(loc[1])
+        candidates.append((row, float(val)))
+        work[max(0, row - 3): min(work.shape[0], row + 4), 0] = -1.0
+    if not candidates:
+        return -1, 0.0
+
+    best_key: tuple[float, float, float] | None = None
+    best_top, best_score = -1, 0.0
+    for row, corr in candidates:
+        m = search_top + row
+        t0 = m - template_offset
+        for delta in (-2, -1, 0, 1, 2):
+            top = t0 + delta
+            if top < 0 or top > acc.shape[0] - 8:
+                continue
+            diff = overlap_row_diff(acc, frame, top)
+            # 惩罚保持温和：轮播图 / GIF / 懒加载会让少量行变化，不能因此
+            # 把本该通过的一帧判成匹配失败；主要靠候选间比较挑出正确位置。
+            score = corr * (1.0 - min(0.4, diff / 400.0))
+            key = (score, -diff, corr)
+            if best_key is None or key > best_key:
+                best_key, best_top, best_score = key, top, score
+    return best_top, float(best_score)
 
 
 def stitch_scroll(
@@ -476,11 +686,13 @@ def stitch_scroll(
     retry_limit: int = 2,
     retry_settle: float = 0.35,
     adapt_scroll: bool = True,
+    hide_overlays: bool = True,
+    bottom_guard: int = 32,
 ) -> tuple[Image.Image, dict]:
     """
     自动滚动并拼接长截图（选中的窗口客户区即 rect）。
 
-    做法：把光标移到选区中心 → 抓帧 → 滚轮向下 → 再抓帧 →
+    做法：把光标移到选区右侧滚动条 → 抓帧 → 滚轮向下 → 再抓帧 →
     用模板匹配算出两帧的重叠量 → 只保留新增的部分拼到画布上。
 
     网页抗中断（v19）：
@@ -488,8 +700,19 @@ def stitch_scroll(
         单帧「没动」多半只是平滑滚动 / 惯性未稳定，或滚轮发给了别的窗口。
       · 匹配失败先减小步长、多等一拍重试 retry_limit 次，不再一帧就放弃。
       · 模板从 frame 中部取，避开网页固定顶栏；搜索窗随窗口高度放大。
-      · 每帧滚轮前重新把光标锁回选区中心，防止用户移动鼠标后滚错窗口。
+      · 每帧滚轮前重新锁定光标，防止用户移动鼠标后滚错窗口。
       · 步长按上一帧新增行数自适应，避免一次滚过头导致找不到重叠。
+
+    画质清理（v20）：
+      · 临时隐藏输入法工具条 / 候选窗等与选区相交的小浮窗，结束必恢复；
+        这些浮层固定在屏幕坐标，否则每帧都会被拍进去形成周期性小白条。
+      · 光标改停在右侧滚动条附近而不是画面中心：停在链接上时浏览器会在
+        左下角弹出 URL 提示条，滚动中链接一直换，提示条也就一帧一条。
+      · 捕获区底部预留 bottom_guard 行，浏览器状态条 / 浮层底边不进画面；
+        被让出的内容会在后续滚动中自然进入捕获区，滚到底后再补一帧完整
+        画面把页脚那几十行接回来，长图不缺尾。
+      · 匹配只取中间列带、多候选 + 重叠区一致性验证，避免浮层把重叠量
+        带偏，产生大段重复内容（看起来像「拼接缝隙」）。
 
     control 提供交互语义：左键暂停 / 再按继续、右键结束、点「确定」结束；
     拼接线程在等待期间高频 poll()，暂停时不抓帧也不滚轮。
@@ -497,13 +720,24 @@ def stitch_scroll(
     临时隐藏 / 恢复控制条，避免它自己被拍进长图。
 
     返回 (拼接结果图, 统计信息 dict)；stats.stop_reason 记录结束原因，
-    stats.retries / stats.score / stats.notches 便于诊断。
+    stats.retries / stats.score / stats.align_diff / stats.overlays_hidden
+    等字段便于诊断。
     """
-    cx = rect.x + rect.w // 2
-    cy = rect.y + rect.h // 2
+    # 底部预留：客户区最下面几十像素是浏览器状态条 / 浮层的高发区
+    guard = min(max(0, int(bottom_guard)), max(0, rect.h // 6))
+    grab_rect = ScreenRect(rect.x, rect.y, rect.w, max(1, rect.h - guard))
+    # 右侧滚动条附近既保证滚轮发给目标窗口，又不会 hover 到链接
+    cx = rect.x + rect.w - max(3, min(10, rect.w // 120))
+    cy = rect.y + grab_rect.h // 2
     saved_cursor = get_cursor_pos()
     set_cursor_pos(cx, cy)
     time.sleep(0.12)
+
+    try:
+        hidden = find_floating_overlays(grab_rect) if hide_overlays else []
+    except Exception:  # noqa: BLE001  探测失败不阻断拼接
+        hidden = []
+    hide_floating_overlays(hidden)
 
     canvas: np.ndarray | None = None
     notches = -abs(int(scroll_notches)) or -3
@@ -513,10 +747,13 @@ def stitch_scroll(
         "frames": 0,
         "stop_reason": "unknown",
         "score": 0.0,
+        "align_diff": 0.0,
         "height": 0,
         "cursor_restored": False,
         "retries": 0,
         "notches": notches,
+        "overlays_hidden": len(hidden),
+        "bottom_guard": guard,
     }
 
     def _stop_requested() -> bool:
@@ -576,7 +813,10 @@ def stitch_scroll(
             if on_before_grab is not None:
                 on_before_grab()
             try:
-                img = grab_region(rect)
+                # 输入法可能自己把工具条重新弹出来，每帧抓屏前再压一次
+                if hidden:
+                    hide_floating_overlays(hidden)
+                img = grab_region(grab_rect)
             finally:
                 if on_after_grab is not None:
                     on_after_grab()
@@ -597,6 +837,9 @@ def stitch_scroll(
                     template_offset=template_offset,
                 )
                 stats["score"] = round(score, 4)
+                stats["align_diff"] = (
+                    round(overlap_row_diff(canvas, frame, top), 2) if top >= 0 else 255.0
+                )
 
                 if top == -1 or score < match_threshold:
                     match_fail_streak += 1
@@ -652,8 +895,33 @@ def stitch_scroll(
         else:
             stats["stop_reason"] = "max-frames"
 
+        # 到底后补一帧完整高度：页面已不再滚动，完整帧比捕获区多出的
+        # guard 行就是页脚，把底部预留让出的那几十像素补回长图末尾。
+        if guard and stats["stop_reason"] == "reached-bottom" and canvas is not None:
+            try:
+                if hidden:
+                    hide_floating_overlays(hidden)
+                tail = np.array(grab_region(rect))
+                t_rows = min(120, max(24, tail.shape[0] // 4))
+                t_off = min(96, max(0, tail.shape[0] // 6))
+                top_t, score_t = find_vertical_overlap(
+                    canvas, tail,
+                    search_rows=max(400, tail.shape[0] * 2),
+                    template_rows=t_rows, template_offset=t_off,
+                )
+                add = canvas.shape[0] - top_t      # 重叠行数
+                extra = tail.shape[0] - add          # 完整帧比捕获区多出的行数
+                if (
+                    top_t >= 0 and score_t >= match_threshold
+                    and 0 <= add < tail.shape[0] and 0 < extra <= guard + 8
+                ):
+                    canvas = np.vstack([canvas, tail[add:]])
+                    stats["score"] = round(score_t, 4)
+            except Exception:  # noqa: BLE001  补尾失败不影响已拼好的长图
+                pass
+
         if canvas is None:
-            canvas = np.array(grab_region(rect))
+            canvas = np.array(grab_region(grab_rect))
 
         stats["height"] = int(canvas.shape[0])
         return Image.fromarray(canvas), stats
@@ -661,6 +929,7 @@ def stitch_scroll(
     finally:
         set_cursor_pos(*saved_cursor)
         stats["cursor_restored"] = True
+        restore_floating_overlays(hidden)
 
 
 # ---------------------------------------------------------------------------

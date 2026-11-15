@@ -184,6 +184,19 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     S14 放大 / 缩小 / 1:1 / 适应窗口倍率正确
     S15 中键拖动画布平移且不改变显示比例
 
+  Stage T  v20：长截图画质（浮层 / 缝隙）
+    T1  只隐藏与选区相交的小浮层，主窗口 / 窗口外 / 本进程排除
+    T2  非 Windows 环境浮层处理静默降级
+    T3  浮层每帧压住、结束恢复，统计字段齐全
+    T4  抓帧异常时浮层仍被恢复
+    T5  捕获区底部预留安全行、光标停在右侧滚动条
+    T6  带固定浮层仍能精确对齐
+    T7  假相关峰值被重叠区一致性验证纠正
+    T8  重叠区行差分辨正确对齐与 3px 错位
+    T9  到底时重叠不足 8 行不误伤匹配分数
+    T10 README 已记录 v20 画质修复
+    T11 滚到底后补抓完整画面，长图不缺尾
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -2329,6 +2342,7 @@ def test_long_capture_v17() -> None:
             control=ctrl,
             on_before_grab=bump_before,
             on_after_grab=bump_after,
+            hide_overlays=False, bottom_guard=0,
         )
         had_pause = any(s[0] and not s[1] for s in changes)   # 真正进入过暂停
         had_resume = any(not s[0] and not s[1] for s in changes)
@@ -2356,6 +2370,7 @@ def test_long_capture_v17() -> None:
             settle_seconds=0,
             on_before_grab=bump_before,
             on_after_grab=bump_after,
+            hide_overlays=False, bottom_guard=0,
         )
         ok_q8 = (
             stats2["stop_reason"] == "reached-bottom"
@@ -2668,6 +2683,7 @@ def test_v19_features() -> None:
         img, stats = sb.stitch_scroll(
             sb.ScreenRect(0, 0, 60, frame_h),
             settle_seconds=0, max_frames=max_frames,
+            hide_overlays=False, bottom_guard=0,
         )
         return img, stats, h
 
@@ -2724,7 +2740,9 @@ def test_v19_features() -> None:
     # S5 模板偏移：frame[20:60] 对应 acc[120:160]，应换算出 frame 第 0 行 = acc 第 100 行
     rng = np.random.default_rng(7)
     acc = rng.integers(0, 256, (300, 60, 3), dtype=np.uint8)
-    fr = np.vstack([acc[100:180], rng.integers(0, 256, (120, 60, 3), dtype=np.uint8)])
+    # v20：重叠区（frame 前 200 行）必须与 canvas 尾部一致，真实拼接里
+    # 这两段本来就是同一块页面内容；后半段才是本次滚动新进画面的内容。
+    fr = np.vstack([acc[100:300], rng.integers(0, 256, (120, 60, 3), dtype=np.uint8)])
     top5, score5 = sb.find_vertical_overlap(
         acc, fr, search_rows=300, template_rows=40, template_offset=20
     )
@@ -2858,6 +2876,192 @@ def test_v19_features() -> None:
     app.processEvents()
 
 
+def test_v20_long_capture_quality() -> None:
+    """Stage T：长截图画质 —— 浮层清理 / 安全光标 / 抗干扰对齐。"""
+    import numpy as np
+    from PIL import Image
+
+    import snapback as sb
+
+    capture = sb.ScreenRect(100, 100, 1200, 800)
+
+    # ---------------- T1~T2  浮层判定与非 Windows 降级 ----------------
+    ime = sb.ScreenRect(1100, 700, 160, 40)
+    main_win = sb.ScreenRect(100, 100, 1200, 800)
+    away = sb.ScreenRect(3000, 3000, 120, 40)
+    huge = sb.ScreenRect(100, 100, 1000, 700)
+    core = "Windows.UI.Core.CoreWindow"
+    ok_t1 = (
+        sb._is_floating_overlay(capture, ime, core, "", "textinputhost.exe", 111, 999)
+        and sb._is_floating_overlay(capture, ime, "tooltips_class32", "", "chrome.exe", 112, 999)
+        and sb._is_floating_overlay(capture, ime, "X", "输入法候选", "sogouimebroker.exe", 113, 999)
+        and sb._is_floating_overlay(capture, ime, "WeirdClass", "", "vendor.exe", 117, 999, sb.WS_EX_TOOLWINDOW)
+        and not sb._is_floating_overlay(capture, ime, "OrdinaryWindow", "note", "app.exe", 118, 999, 0)
+        and not sb._is_floating_overlay(capture, main_win, "Chrome_WidgetWin_1", "Bing", "chrome.exe", 114, 999)
+        and not sb._is_floating_overlay(capture, away, core, "", "textinputhost.exe", 115, 999)
+        and not sb._is_floating_overlay(capture, huge, core, "", "textinputhost.exe", 116, 999)
+        and not sb._is_floating_overlay(capture, ime, core, "", "textinputhost.exe", 999, 999)
+    )
+    record("T1 只隐藏与选区相交的小浮层，主窗口/窗口外/本进程都排除", ok_t1,
+           "ime/tooltip/toolwindow hit; main/away/huge/own excluded")
+
+    orig_u32 = sb.user32
+    try:
+        sb.user32 = None
+        no_win = sb.find_floating_overlays(capture) == []
+        sb.hide_floating_overlays([1])
+        sb.restore_floating_overlays([1])
+    finally:
+        sb.user32 = orig_u32
+    record("T2 非 Windows 环境浮层处理静默降级", no_win, f"find={no_win}")
+
+    # ---------------- T3~T4  隐藏/恢复、底部安全行、右侧光标 ----------------
+    names = (
+        "grab_region", "find_vertical_overlap", "_send_mouse_wheel",
+        "get_cursor_pos", "set_cursor_pos", "find_floating_overlays",
+        "hide_floating_overlays", "restore_floating_overlays",
+    )
+    orig = {n: getattr(sb, n) for n in names}
+    seen: dict = {"hide": 0, "restore": 0, "rects": [], "cursor": []}
+    blank = np.full((200, 60, 3), 120, dtype=np.uint8)
+
+    try:
+        sb.find_floating_overlays = lambda r: [101, 102]
+        sb.hide_floating_overlays = lambda hs: seen.__setitem__("hide", seen["hide"] + 1)
+        sb.restore_floating_overlays = lambda hs: seen.__setitem__(
+            "restore", seen["restore"] + 1
+        )
+        sb.find_vertical_overlap = lambda a, b, **kw: (max(0, a.shape[0] - 60), 0.99)
+        sb._send_mouse_wheel = lambda n: None
+        sb.get_cursor_pos = lambda: (0, 0)
+        sb.set_cursor_pos = lambda x, y: seen["cursor"].append((x, y))
+
+        def fake_grab(r):
+            seen["rects"].append(r)
+            return Image.fromarray(blank)
+
+        sb.grab_region = fake_grab
+        img3, st3 = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 600, 240), settle_seconds=0, max_frames=2,
+            hide_overlays=True, bottom_guard=24,
+        )
+        ok_t3 = (
+            seen["hide"] >= 3 and seen["restore"] == 1
+            and st3["overlays_hidden"] == 2
+            and "align_diff" in st3 and "bottom_guard" in st3
+        )
+        record("T3 浮层每帧压住、结束恢复且统计字段齐全", ok_t3,
+               f"hide={seen['hide']} restore={seen['restore']} stats={sorted(st3)}")
+
+        # 抓帧抛异常时也必须恢复，否则输入法工具条会一直消失
+        def boom(_r):
+            raise RuntimeError("grab failed")
+
+        sb.grab_region = boom
+        try:
+            sb.stitch_scroll(
+                sb.ScreenRect(0, 0, 600, 240), settle_seconds=0, max_frames=1,
+                hide_overlays=True, bottom_guard=0,
+            )
+        except RuntimeError:
+            pass
+        ok_t4 = seen["restore"] == 2
+        record("T4 抓帧异常时浮层仍被恢复", ok_t4,
+               f"restore={seen['restore']}")
+
+        sb.grab_region = fake_grab
+        seen["rects"].clear()
+        seen["cursor"].clear()
+        img5, st5 = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 600, 240), settle_seconds=0, max_frames=2,
+            hide_overlays=False, bottom_guard=24,
+        )
+        guarded = [r for r in seen["rects"] if r.h == 216]
+        # 最后一次 set_cursor_pos 是把光标还给用户（saved_cursor=(0,0)）
+        active = seen["cursor"][:-1]
+        right_side = [p for p in active if p[0] >= 600 - 12]
+        ok_t5 = (
+            len(guarded) == len(seen["rects"]) >= 1
+            and st5["bottom_guard"] == 24
+            and len(right_side) == len(active) >= 1
+            and seen["cursor"][-1] == (0, 0)
+        )
+        record("T5 捕获区底部预留安全行、光标停在右侧滚动条而非画面中心",
+               ok_t5, f"rects={[r.h for r in seen['rects']]} "
+                      f"cursor_x={[p[0] for p in seen['cursor']]}")
+
+        # T11 到底补尾：正常帧都用缩短的捕获区，最后一帧用完整 rect
+        sb.find_vertical_overlap = lambda a, b, **kw: (max(0, a.shape[0] - 10), 0.99)
+        seen["rects"].clear()
+        img11, st11 = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 600, 240), settle_seconds=0, max_frames=6,
+            hide_overlays=False, bottom_guard=24,
+        )
+        ok_t11 = (
+            st11["stop_reason"] == "reached-bottom"
+            and seen["rects"][-1].h == 240
+            and any(r.h == 216 for r in seen["rects"][:-1])
+        )
+        record("T11 滚到底后补抓完整画面，长图不缺尾", ok_t11,
+               f"reason={st11['stop_reason']} rects={[r.h for r in seen['rects']]}")
+    finally:
+        for n, fn in orig.items():
+            setattr(sb, n, fn)
+
+    # ---------------- T6~T9  抗浮层对齐 ----------------
+    rng = np.random.default_rng(3)
+    page = rng.integers(0, 256, (500, 80, 3), dtype=np.uint8)
+
+    def make_case(with_fake_peak: bool):
+        acc = page[:300].copy()
+        fr = np.vstack([
+            page[200:300], rng.integers(0, 256, (100, 80, 3), dtype=np.uint8)
+        ])
+        if with_fake_peak:
+            acc[60:100] = fr[30:70].copy()   # 相关系数更高但整体错位
+        # 每帧固定在屏幕右下 / 左下的浮层（输入法工具条 / URL 提示条）
+        white = np.full((18, 26, 3), 255, dtype=np.uint8)
+        blue = np.full((14, 50, 3), 200, dtype=np.uint8)
+        fr[-18:, -26:] = white
+        fr[-14:, 0:50] = blue
+        acc[-18:, -26:] = white
+        acc[-14:, 0:50] = blue
+        return acc, fr
+
+    acc6, fr6 = make_case(False)
+    top6, score6 = sb.find_vertical_overlap(
+        acc6, fr6, search_rows=300, template_rows=40, template_offset=30
+    )
+    record("T6 带固定浮层仍能精确对齐（top≈200）",
+           abs(top6 - 200) <= 2 and score6 > 0.9,
+           f"top={top6} score={score6:.3f}")
+
+    acc7, fr7 = make_case(True)
+    top7, score7 = sb.find_vertical_overlap(
+        acc7, fr7, search_rows=300, template_rows=40, template_offset=30
+    )
+    record("T7 假相关峰值被重叠区一致性验证纠正",
+           abs(top7 - 200) <= 2 and score7 > 0.9,
+           f"top={top7} score={score7:.3f}")
+
+    d_ok = sb.overlap_row_diff(acc7, fr7, 200)
+    d_bad = sb.overlap_row_diff(acc7, fr7, 197)
+    record("T8 重叠区行差能分辨正确对齐与 3px 错位",
+           d_ok < 5 and d_bad > d_ok + 5,
+           f"correct={d_ok:.1f} shifted={d_bad:.1f}")
+
+    same = np.zeros((100, 20, 3), dtype=np.uint8)
+    record("T9 到底时重叠不足 8 行不误伤匹配分数",
+           sb.overlap_row_diff(same, same, 95) == 0.0,
+           f"diff={sb.overlap_row_diff(same, same, 95)}")
+
+    # ---------------- T10  版本记录 ----------------
+    from pathlib import Path
+    readme = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
+    record("T10 README 已记录 v20 画质修复", "v20" in readme and "输入法" in readme,
+           f"v20={'v20' in readme} ime={'输入法' in readme}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -2886,6 +3090,7 @@ if __name__ == "__main__":
     test_long_capture_v17()
     test_mosaic_style_panel()
     test_v19_features()
+    test_v20_long_capture_quality()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
