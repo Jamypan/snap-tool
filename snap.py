@@ -234,7 +234,7 @@ class StitchWorker(QThread):
     Qt 信号可以跨线程 emit，所以控制条的状态刷新走 state_changed。
     """
 
-    progress = Signal(int, int)
+    progress = Signal(int, int, float)   # 帧数 / 当前高度 / 最近一次匹配得分
     state_changed = Signal(bool, str)
     ok = Signal(object, dict)
     failed = Signal(str)
@@ -257,7 +257,7 @@ class StitchWorker(QThread):
         try:
             img, stats = snapback.stitch_scroll(
                 self.rect,
-                on_progress=lambda f, h, c: self.progress.emit(f, h),
+                on_progress=lambda f, h, c, s: self.progress.emit(f, h, s),
                 should_stop=snapback.is_escape_pressed,
                 control=ctrl,
                 on_before_grab=self.before_grab,
@@ -319,6 +319,7 @@ class BusyBar(QWidget):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self._frames, self._height = 0, 0
+        self._score: float | None = None
         self._paused = False
 
         root = QVBoxLayout(self)
@@ -362,8 +363,9 @@ class BusyBar(QWidget):
         self.retranslate_ui()
         LANG.changed.connect(self.retranslate_ui)
 
-    def update_text(self, frames: int, height: int) -> None:
+    def update_text(self, frames: int, height: int, score: float | None = None) -> None:
         self._frames, self._height = frames, height
+        self._score = score
         self._render_detail()
 
     def set_paused(self, paused: bool, _reason: str = "") -> None:
@@ -376,9 +378,11 @@ class BusyBar(QWidget):
         )
 
     def _render_detail(self) -> None:
-        self.detail.setText(
-            t("已拼 {frames} 帧 · {height}px", frames=self._frames, height=self._height)
-        )
+        text = t("已拼 {frames} 帧 · {height}px", frames=self._frames, height=self._height)
+        if self._score is not None:
+            # 数字无需翻译；匹配分掉下来时用户能立刻看出「页面在动」导致难对齐
+            text += " · " + t("匹配 {score}", score=f"{self._score:.2f}")
+        self.detail.setText(text)
 
     def retranslate_ui(self, _code: str = "") -> None:
         self._render_state()
@@ -1021,18 +1025,31 @@ class App:
             self.preview.show()
             self.preview.raise_()
             self.preview.activateWindow()
+            # v19：把「为什么结束」讲清楚，方便区分真到底与异常中断
             reason = stats.get("stop_reason")
-            if reason in ("match-failed", "no-overlap"):
+            frames = stats.get("frames", 0)
+            height = stats.get("height", 0)
+            score = f"{float(stats.get('score', 0.0)):.2f}"
+            early = {
+                "match-failed": t("内容无法自动对齐"),
+                "no-overlap": t("内容无法自动对齐"),
+                "no-new-content": t("页面没有新增内容"),
+                "max-frames": t("帧数已达上限"),
+                "max-height": t("高度已达上限"),
+            }
+            if reason in early:
                 self._tray_message(
                     app_name(),
-                    t("内容未能自动对齐，结果可能不完整（页面可能有固定悬浮元素或动画）"),
-                    QSystemTrayIcon.Warning,
-                    4000,
+                    t("长截图提前结束：{reason} · 共 {frames} 帧 · 匹配 {score}",
+                      reason=early[reason], frames=frames, score=score),
+                    QSystemTrayIcon.Warning, 6000,
                 )
-            elif reason == "reached-bottom":
+            else:
                 self._tray_message(
-                    app_name(), t("已滚动到底，长截图自动结束"),
-                    QSystemTrayIcon.Information, 2200,
+                    app_name(),
+                    t("长截图完成 · 共 {frames} 帧 · {height}px",
+                      frames=frames, height=height),
+                    QSystemTrayIcon.Information, 2600,
                 )
 
         def on_fail(msg: str) -> None:

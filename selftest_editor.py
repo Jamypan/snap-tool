@@ -167,6 +167,23 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     R4  切到马赛克工具立刻收起已开面板，手动打开也被拦住
     R5  OCR 结束恢复编辑态时，马赛克不会重新弹出面板
 
+  Stage S  v19：长截图抗中断 / 透明色与填充 alpha / 画布视图放缩
+    S1  单帧「几乎没动」不会立刻判到底，会重试后继续拼接
+    S2  匹配失败先重试再继续，不一帧就放弃
+    S3  连续失败超过上限才以 match-failed 结束
+    S4  一次滚过头时自适应减小滚轮步长
+    S5  模板偏移换算回 frame 第 0 行位置（避开固定顶栏）
+    S6  每帧滚轮前重新锁定光标，滚轮次数不超过定位次数
+    S7  控制条显示最近一次匹配分数
+    S8  透明线条画出来确实没有边框像素
+    S9  文字标注隐藏透明色块，封闭图形显示
+    S10 填充透明度滑块回填与修改都正确
+    S11 文字编辑框对透明色做前景色兜底
+    S12 放缩以鼠标为锚点，导出仍是全分辨率
+    S13 视图菜单 4 项含快捷键且 8 语言刷新、状态栏显示比例
+    S14 放大 / 缩小 / 1:1 / 适应窗口倍率正确
+    S15 中键拖动画布平移且不改变显示比例
+
 用法：  python selftest_editor.py
 退出码：0 = 全部通过；1 = 有失败项。
 """
@@ -2301,7 +2318,7 @@ def test_long_capture_v17() -> None:
 
     try:
         sb.grab_region = fake_grab
-        sb.find_vertical_overlap = lambda a, b: (0, 0.99)
+        sb.find_vertical_overlap = lambda a, b, **kw: (0, 0.99)
         sb._send_mouse_wheel = lambda n: holder.__setitem__("wheels", holder["wheels"] + 1)
         sb.get_cursor_pos = lambda: (0, 0)
         sb.set_cursor_pos = lambda x, y: None
@@ -2331,9 +2348,9 @@ def test_long_capture_v17() -> None:
                f"pause={had_pause} resume={had_resume} "
                f"reason={stats['stop_reason']} paused_grabs={holder['paused_grabs']}")
 
-        # Q8 滚到底：overlap 只剩 10 行新增 → reached-bottom 自动结束
+        # Q8 滚到底：新增行连续 3 帧都几乎为 0 才判到底（v19 抗误判）
         holder.update(grabs=0, wheels=0, before=0, after=0)
-        sb.find_vertical_overlap = lambda a, b: (max(0, a.shape[0] - 10), 0.99)
+        sb.find_vertical_overlap = lambda a, b, **kw: (max(0, a.shape[0] - 10), 0.99)
         img2, stats2 = sb.stitch_scroll(
             sb.ScreenRect(0, 0, 60, 40),
             settle_seconds=0,
@@ -2342,9 +2359,10 @@ def test_long_capture_v17() -> None:
         )
         ok_q8 = (
             stats2["stop_reason"] == "reached-bottom"
-            and holder["grabs"] == 2
-            and holder["before"] == holder["after"] == 2
+            and holder["grabs"] == 4          # 首帧 + 连续 3 帧确认，不再一帧就收工
+            and holder["before"] == holder["after"] == 4
             and img2.height == 40
+            and stats2["retries"] == 2
         )
         record("Q8 滚到底自动结束且抓帧钩子成对调用", ok_q8,
                f"reason={stats2['stop_reason']} grabs={holder['grabs']} "
@@ -2617,6 +2635,229 @@ def test_mosaic_style_panel() -> None:
     app.processEvents()
 
 
+def test_v19_features() -> None:
+    """Stage S：长截图抗中断 / 透明色与填充 alpha / 画布视图放缩。"""
+    import numpy as np
+    from PIL import Image
+
+    import i18n
+    import snap as snapmod
+    import snapback as sb
+    from snapeditor import StylePanel, _text_edit_color, draw_shape
+
+    app = QApplication.instance()
+
+    # ---------------- S1~S4 / S6  拼接抗中断（假抓屏、假滚轮） ----------------
+    names = ("grab_region", "find_vertical_overlap", "_send_mouse_wheel",
+             "get_cursor_pos", "set_cursor_pos")
+    orig = {n: getattr(sb, n) for n in names}
+
+    def run(finder, *, frame_h: int = 200, max_frames: int = 5):
+        frame = np.full((frame_h, 60, 3), 120, dtype=np.uint8)
+        h = {"grabs": 0, "wheels": 0, "cursor": 0}
+
+        def fake_grab(_rect):
+            h["grabs"] += 1
+            return Image.fromarray(frame)
+
+        sb.grab_region = fake_grab
+        sb.find_vertical_overlap = finder
+        sb._send_mouse_wheel = lambda n: h.__setitem__("wheels", h["wheels"] + 1)
+        sb.get_cursor_pos = lambda: (0, 0)
+        sb.set_cursor_pos = lambda x, y: h.__setitem__("cursor", h["cursor"] + 1)
+        img, stats = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 60, frame_h),
+            settle_seconds=0, max_frames=max_frames,
+        )
+        return img, stats, h
+
+    try:
+        # S1 单帧低新增 → 重试确认，不会立刻 reached-bottom
+        c1 = {"n": 0}
+
+        def finder1(a, b, **kw):
+            c1["n"] += 1
+            return (a.shape[0] - (10 if c1["n"] == 1 else 100), 0.99)
+
+        img1, st1, h1 = run(finder1, max_frames=5)
+        ok_s1 = (st1["stop_reason"] != "reached-bottom" and st1["retries"] >= 1
+                 and img1.height > 200 and st1["frames"] >= 4)
+        record("S1 单帧几乎没动不会误判到底", ok_s1,
+               f"reason={st1['stop_reason']} retries={st1['retries']} height={img1.height}")
+
+        # S2 匹配失败先重试再继续
+        c2 = {"n": 0}
+
+        def finder2(a, b, **kw):
+            c2["n"] += 1
+            if c2["n"] <= 2:
+                return (0, 0.1)
+            return (a.shape[0] - 100, 0.99)
+
+        img2, st2, h2 = run(finder2, max_frames=6)
+        ok_s2 = (st2["retries"] == 2 and img2.height > 200
+                 and st2["stop_reason"] not in ("match-failed", "no-overlap"))
+        record("S2 匹配失败重试后继续拼接", ok_s2,
+               f"reason={st2['stop_reason']} retries={st2['retries']} height={img2.height}")
+
+        # S3 连续失败超过上限才结束
+        img3, st3, h3 = run(lambda a, b, **kw: (0, 0.1), max_frames=8)
+        ok_s3 = st3["stop_reason"] == "match-failed" and st3["retries"] == 2
+        record("S3 连续失败超上限才结束", ok_s3,
+               f"reason={st3['stop_reason']} retries={st3['retries']}")
+
+        # S4 一次滚过头 → 自适应减小步长
+        img4, st4, h4 = run(lambda a, b, **kw: (a.shape[0] - 150, 0.99),
+                            frame_h=200, max_frames=4)
+        ok_s4 = abs(st4["notches"]) < 3 and st4["stop_reason"] == "max-frames"
+        record("S4 自适应减小滚轮步长", ok_s4,
+               f"notches={st4['notches']} reason={st4['stop_reason']}")
+
+        # S6 每帧滚轮前重新锁定光标
+        ok_s6 = h4["cursor"] >= h4["wheels"] >= 1
+        record("S6 每帧滚轮前重新锁定光标", ok_s6,
+               f"cursor={h4['cursor']} wheels={h4['wheels']}")
+    finally:
+        for n, fn in orig.items():
+            setattr(sb, n, fn)
+
+    # S5 模板偏移：frame[20:60] 对应 acc[120:160]，应换算出 frame 第 0 行 = acc 第 100 行
+    rng = np.random.default_rng(7)
+    acc = rng.integers(0, 256, (300, 60, 3), dtype=np.uint8)
+    fr = np.vstack([acc[100:180], rng.integers(0, 256, (120, 60, 3), dtype=np.uint8)])
+    top5, score5 = sb.find_vertical_overlap(
+        acc, fr, search_rows=300, template_rows=40, template_offset=20
+    )
+    ok_s5 = abs(top5 - 100) <= 2 and score5 > 0.9
+    record("S5 模板偏移换算回 frame 第 0 行", ok_s5,
+           f"top={top5} score={score5:.3f}")
+
+    # S7 控制条显示匹配分数
+    bar_s = snapmod.BusyBar()
+    bar_s.update_text(3, 2400, 0.93)
+    ok_s7 = "0.93" in bar_s.detail.text() and "3" in bar_s.detail.text()
+    record("S7 控制条显示最近匹配分数", ok_s7, bar_s.detail.text())
+    bar_s.close()
+    bar_s.deleteLater()
+
+    # ---------------- S8~S11  透明色 / 填充透明度 ----------------
+    def draw_rect(color: QColor) -> QColor:
+        img = QImage(100, 60, QImage.Format_ARGB32_Premultiplied)
+        img.fill(QColor(255, 255, 255))
+        p = QPainter(img)
+        s = Shape(kind="rect")
+        s.rect, s.color, s.width = QRect(20, 10, 50, 30), color, 3
+        draw_shape(p, s, img, 1.0)
+        p.end()
+        return img.pixelColor(20, 25)
+
+    clear = draw_rect(QColor("#00000000"))
+    red = draw_rect(QColor("#ff0000"))
+    ok_s8 = (clear.red() == 255 and clear.green() == 255 and clear.blue() == 255
+             and red.red() > 200 and red.green() < 80)
+    record("S8 透明线条不产生边框像素", ok_s8,
+           f"transparent=({clear.red()},{clear.green()},{clear.blue()}) "
+           f"red=({red.red()},{red.green()},{red.blue()})")
+
+    sp_s = StylePanel(show_pen_arrows=True)
+    defaults_s = {
+        "color": QColor("#ff0000"), "width": 3, "line_style": "solid",
+        "font_size": 18, "bg_color": None,
+        "pen_arrow_start": False, "pen_arrow_end": False,
+    }
+    sp_s.set_state(Shape(kind="text", text="x", pos=QPoint(0, 0)), defaults_s)
+    hidden_text = sp_s._transparent_btn.isHidden()
+    sp_s.set_state(Shape(kind="rect", rect=QRect(0, 0, 10, 10)), defaults_s)
+    ok_s9 = hidden_text and not sp_s._transparent_btn.isHidden()
+    record("S9 文字隐藏透明色块、封闭图形显示", ok_s9,
+           f"text_hidden={hidden_text} rect_hidden={sp_s._transparent_btn.isHidden()}")
+
+    got_s: list = []
+    sp_s.style_changed.connect(lambda d: got_s.append(d))
+    sp_s.set_state(Shape(kind="rect", rect=QRect(0, 0, 10, 10),
+                         fill_color=QColor("#40ff0000")), defaults_s)
+    back_alpha = sp_s._fill_alpha_slider.value()
+    sp_s._fill_alpha_slider.setValue(80)
+    emitted = got_s[-1] if got_s else {}
+    ok_s10 = back_alpha == 25 and emitted.get("fill_color") == "#ccff0000"
+    record("S10 填充透明度回填与修改", ok_s10,
+           f"back={back_alpha} emitted={emitted}")
+    sp_s.close()
+    sp_s.deleteLater()
+
+    ok_s11 = (_text_edit_color(QColor("#00000000")) == "#ffffff"
+              and _text_edit_color(QColor("#ff0000")) == "#ff0000")
+    record("S11 文字编辑框对透明色兜底", ok_s11,
+           _text_edit_color(QColor("#00000000")))
+
+    # ---------------- S12~S15  画布视图放缩 ----------------
+    cv_s = Canvas(make_image(1600, 900), [], None)
+    cv_s.resize(1000, 680)
+    cv_s._fit()
+    anchor = QPoint(300, 250)
+    before = cv_s._to_image(anchor)
+    cv_s._set_view_scale(cv_s.view_scale * 2, anchor)
+    composed = cv_s.compose()
+    ok_s12 = (cv_s._to_image(anchor) == before
+              and composed.width() == 1600 and composed.height() == 900)
+    record("S12 锚点放缩且导出保持全分辨率", ok_s12,
+           f"anchor={before.x()},{before.y()} -> {cv_s._to_image(anchor).x()},"
+           f"{cv_s._to_image(anchor).y()} export={composed.width()}x{composed.height()}")
+
+    ed_s = EditorWindow(make_image(160, 90), [], None)
+    acts = ed_s._menus["view"].actions()
+    ok_menu = (len(acts) == 4 and all(a.text() for a in acts)
+               and all(not a.shortcut().isEmpty() for a in acts))
+    bad_lang_s = []
+    for code in i18n.LANGS:
+        i18n.LANG.set_preference(code, persist=False)
+        app.processEvents()
+        if not all(a.text() for a in acts):
+            bad_lang_s.append(code)
+    i18n.LANG.set_preference("zh_CN", persist=False)
+    app.processEvents()
+    ok_s13 = ok_menu and not bad_lang_s and "%" in ed_s.statusBar().currentMessage()
+    record("S13 视图菜单 4 项 + 快捷键 + 8 语言 + 状态栏", ok_s13,
+           f"menu={ok_menu} bad_lang={bad_lang_s} status={ed_s.statusBar().currentMessage()}")
+
+    cv_e = ed_s.canvas
+    s0 = cv_e.view_scale
+    cv_e.zoom_in()
+    s1 = cv_e.view_scale
+    cv_e.zoom_out()
+    s2 = cv_e.view_scale
+    cv_e.zoom_actual()
+    s3 = cv_e.view_scale
+    cv_e.zoom_fit()
+    s4 = cv_e.view_scale
+    ok_s14 = (s1 > s0 and abs(s2 - s0) < 1e-6
+              and abs(s3 - 1.0) < 1e-6 and abs(s4 - s0) < 1e-6)
+    record("S14 放大/缩小/1:1/适应窗口倍率正确", ok_s14,
+           f"{s0:.3f} -> {s1:.3f} -> {s2:.3f} -> {s3:.3f} -> {s4:.3f}")
+
+    cv_e.zoom_in()
+    cv_e.zoom_in()
+    old_off = (cv_e.off_x, cv_e.off_y)
+    p0 = QPoint(400, 300)
+    cv_e.mousePressEvent(QMouseEvent(
+        QEvent.MouseButtonPress, p0, p0, Qt.MiddleButton, Qt.MiddleButton, Qt.NoModifier))
+    p1 = QPoint(460, 330)
+    cv_e.mouseMoveEvent(QMouseEvent(
+        QEvent.MouseMove, p1, p1, Qt.MiddleButton, Qt.MiddleButton, Qt.NoModifier))
+    moved = (cv_e.off_x, cv_e.off_y) != old_off
+    scale_kept = abs(cv_e.view_scale - s1 * 1.25) < 1e-6
+    cv_e.mouseReleaseEvent(QMouseEvent(
+        QEvent.MouseButtonRelease, p1, p1, Qt.MiddleButton, Qt.MiddleButton, Qt.NoModifier))
+    ok_s15 = moved and scale_kept and cv_e._mode == "idle"
+    record("S15 中键平移不改变显示比例", ok_s15,
+           f"moved={moved} scale={cv_e.view_scale:.3f} mode={cv_e._mode}")
+
+    for w in (cv_s, ed_s):
+        w.close()
+        w.deleteLater()
+    app.processEvents()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -2644,6 +2885,7 @@ if __name__ == "__main__":
     test_long_capture()
     test_long_capture_v17()
     test_mosaic_style_panel()
+    test_v19_features()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

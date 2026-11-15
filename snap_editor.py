@@ -59,6 +59,7 @@ from snapeditor import (
     StylePanel,
     Toolbar,
     _reading_order,
+    _text_edit_color,
     draw_shape,
 )
 from i18n import LANG, app_name, t
@@ -74,6 +75,7 @@ class Canvas(QWidget):
     save_requested = Signal(QImage)
     ocr_requested = Signal(QImage)
     close_requested = Signal()
+    zoom_changed = Signal(float)      # 当前显示比例（1.0 = 原始像素 100%）
 
     def __init__(self, image: QImage, shapes: list[Shape], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -111,8 +113,12 @@ class Canvas(QWidget):
 
         # 视图变换：把物理图像坐标映射到画布像素
         self.view_scale = 1.0
-        self.off_x = 0
-        self.off_y = 0
+        self._fit_scale = 1.0         # 「适应窗口」的基准比例
+        self._zoom = 1.0              # 用户放缩倍率（相对适应窗口）
+        self.off_x = 0.0
+        self.off_y = 0.0
+        self._pan_origin: QPoint | None = None
+        self._pan_off = (0.0, 0.0)
 
         # 重绘节流
         self._last_repaint = 0.0
@@ -178,9 +184,55 @@ class Canvas(QWidget):
         scale = min(avail_w / iw, avail_h / ih, 1.0)
         if scale <= 0:
             scale = 0.1
+        self._fit_scale = scale
+        self.view_scale = scale * self._zoom
+        # 放大到超过窗口时保持居中（偏移可为负），配合中键拖动浏览其它区域
+        self.off_x = (self.width() - iw * self.view_scale) / 2.0
+        self.off_y = (self.height() - ih * self.view_scale) / 2.0
+        self.zoom_changed.emit(self.view_scale)
+
+    # ------------------------------------------------------------ 视图放缩
+    def _set_view_scale(self, scale: float, anchor: QPoint | None = None) -> None:
+        """以 anchor（屏幕坐标）为不动点设置显示比例；不影响导出分辨率。"""
+        scale = max(0.05, min(16.0, float(scale)))
+        if anchor is None:
+            anchor = QPoint(self.width() // 2, self.height() // 2)
+        ip = self._to_image(anchor)                 # 用旧比例求锚点对应的图像坐标
         self.view_scale = scale
-        self.off_x = max(pad, (self.width() - iw * scale) / 2.0)
-        self.off_y = max(pad, (self.height() - ih * scale) / 2.0)
+        self._zoom = scale / max(self._fit_scale, 1e-6)
+        self.off_x = anchor.x() - ip.x() * scale
+        self.off_y = anchor.y() - ip.y() * scale
+        if self._text_edit is not None:
+            self._commit_text()                     # 编辑中的文字框不跟着缩放，先提交
+        self._place_ocr_layer()                     # 取字行块按新比例重新盖回
+        self.zoom_changed.emit(self.view_scale)
+        self.update()
+
+    def zoom_in(self) -> None:
+        self._set_view_scale(self.view_scale * 1.25)
+
+    def zoom_out(self) -> None:
+        self._set_view_scale(self.view_scale / 1.25)
+
+    def zoom_actual(self) -> None:
+        self._set_view_scale(1.0)
+
+    def zoom_fit(self) -> None:
+        self._zoom = 1.0
+        self._fit()
+
+    def wheelEvent(self, ev) -> None:  # noqa: N802
+        """Ctrl + 滚轮：以光标所在点为锚点放缩。"""
+        if ev.modifiers() & Qt.ControlModifier:
+            delta = ev.angleDelta().y()
+            if delta:
+                self._set_view_scale(
+                    self.view_scale * (1.15 ** (delta / 120.0)),
+                    ev.position().toPoint(),
+                )
+            ev.accept()
+            return
+        super().wheelEvent(ev)
 
     def _to_screen(self, ip: QPoint) -> QPoint:
         return QPoint(
@@ -483,7 +535,7 @@ class Canvas(QWidget):
         e.setStyleSheet(
             "QLineEdit { background: rgba(0,0,0,160); color: %s; "
             "border: 1px dashed #0aaeff; padding: 2px; }" % (
-                (existing.color if existing else QColor(self._color)).name()
+                _text_edit_color(existing.color if existing else QColor(self._color))
             )
         )
         if existing is not None:
@@ -586,6 +638,13 @@ class Canvas(QWidget):
         if self._ocr_active():
             return
         self._commit_text()
+        if ev.button() == Qt.MiddleButton:
+            self._mode = "panning"
+            self._pan_origin = ev.position().toPoint()
+            self._pan_off = (self.off_x, self.off_y)
+            self.setCursor(Qt.ClosedHandCursor)
+            ev.accept()
+            return
         pos = self._to_image(ev.position().toPoint())
         if ev.button() != Qt.LeftButton:
             return
@@ -633,6 +692,13 @@ class Canvas(QWidget):
 
     def mouseMoveEvent(self, ev) -> None:
         if self._ocr_active():
+            return
+        if self._mode == "panning" and self._pan_origin is not None:
+            d = ev.position().toPoint() - self._pan_origin
+            self.off_x = self._pan_off[0] + d.x()
+            self.off_y = self._pan_off[1] + d.y()
+            self._place_ocr_layer()
+            self.update()
             return
         pos = self._to_image(ev.position().toPoint())
 
@@ -704,6 +770,12 @@ class Canvas(QWidget):
 
     def mouseReleaseEvent(self, ev) -> None:
         if self._ocr_active():
+            return
+        if self._mode == "panning" and ev.button() == Qt.MiddleButton:
+            self._mode = "idle"
+            self._pan_origin = None
+            self._set_tool(self._tool)
+            ev.accept()
             return
         if self._mode == "drawing" and self._draft:
             d = self._draft
@@ -1101,6 +1173,7 @@ class EditorWindow(QMainWindow):
     _EDIT_TEXTS = ("撤销\tCtrl+Z", "OCR 取字", "样式面板")
     _TRANSFORM_TEXTS = ("顺时针旋转 90°", "逆时针旋转 90°", "左右镜像", "上下镜像")
     _PEN_TEXTS = ("不加箭头", "只加起点", "只加终点", "两端都加")
+    _VIEW_TEXTS = ("放大", "缩小", "实际大小 1:1", "适应窗口")
 
     def _build_menu(self) -> None:
         mb = self.menuBar()
@@ -1157,6 +1230,23 @@ class EditorWindow(QMainWindow):
             m_pen.addAction(a)
             self._actions[f"pen{i}"] = a
 
+        # 视图放缩：只改显示比例，导出仍是全分辨率原图
+        m_view = mb.addMenu(t("视图(&V)"))
+        self._menus["view"] = m_view
+        for i, (text_key, slot, shortcut) in enumerate(zip(
+            self._VIEW_TEXTS,
+            (self.canvas.zoom_in, self.canvas.zoom_out,
+             self.canvas.zoom_actual, self.canvas.zoom_fit),
+            ("Ctrl+=", "Ctrl+-", "Ctrl+1", "Ctrl+0"),
+        )):
+            a = QAction(t(text_key), self)
+            a.setShortcut(shortcut)
+            a.triggered.connect(lambda _=False, f=slot: f())
+            m_view.addAction(a)
+            self._actions[f"view{i}"] = a
+        self.canvas.zoom_changed.connect(self._show_zoom)
+        self._show_zoom(self.canvas.view_scale)
+
         LANG.changed.connect(self.retranslate_ui)
 
     def retranslate_ui(self, _code: str = "") -> None:
@@ -1165,12 +1255,19 @@ class EditorWindow(QMainWindow):
         self._menus["edit"].setTitle(t("编辑(&E)"))
         self._menus["transform"].setTitle(t("图像变换"))
         self._menus["pen"].setTitle(t("端点箭头"))
+        self._menus["view"].setTitle(t("视图(&V)"))
         for prefix, keys in (
             ("file", self._FILE_TEXTS), ("edit", self._EDIT_TEXTS),
             ("transform", self._TRANSFORM_TEXTS), ("pen", self._PEN_TEXTS),
+            ("view", self._VIEW_TEXTS),
         ):
             for i, text_key in enumerate(keys):
                 self._actions[f"{prefix}{i}"].setText(t(text_key))
+
+    def _show_zoom(self, scale: float) -> None:
+        self.statusBar().showMessage(
+            t("缩放 {pct}%", pct=int(round(scale * 100)))
+        )
 
     def show_ocr_busy(self) -> None:
         self.canvas.show_ocr_busy()

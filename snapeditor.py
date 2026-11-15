@@ -645,6 +645,11 @@ PRESET_COLORS = [
 ]
 
 
+def _text_edit_color(c: QColor) -> str:
+    """文字输入框的前景色：透明线条不能让正在输入的字也看不见。"""
+    return c.name(QColor.HexRgb) if isinstance(c, QColor) and c.alpha() > 0 else "#ffffff"
+
+
 class StylePanel(QWidget):
     """浮动样式面板。
 
@@ -663,6 +668,7 @@ class StylePanel(QWidget):
         # 画笔端点箭头只有窗口化编辑器支持（遮罩现在不做标注），按需显示。
         super().__init__(parent)
         self._show_pen_arrows = show_pen_arrows
+        self._fill_rgb = "#0a84ff"       # 填充色 RGB（alpha 由滑块单独控制）
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
         # 面板内默认用常规箭头光标（避免继承遮罩的十字光标），
@@ -702,6 +708,17 @@ class StylePanel(QWidget):
             b.clicked.connect(lambda _=False, col=c: self._emit("color", col))
             self._color_grid.addWidget(b)
             self._color_btns.append(b)
+        # 透明线条：#AARRGGBB 中 alpha=0，画出来即无边框 / 无线条
+        self._transparent_btn = QPushButton("\u2205")
+        self._transparent_btn.setFixedSize(22, 22)
+        self._transparent_btn.setProperty("color", "#00000000")
+        self._transparent_btn.setToolTip(t("透明（无边框）"))
+        self._transparent_btn.setCursor(Qt.PointingHandCursor)
+        self._transparent_btn.setFocusPolicy(Qt.NoFocus)
+        self._transparent_btn.clicked.connect(
+            lambda _=False: self._emit("color", "#00000000")
+        )
+        self._color_grid.addWidget(self._transparent_btn)
         root.addLayout(self._color_grid)
 
         self._custom_btn = QPushButton(t("自定义颜色…"))
@@ -752,6 +769,15 @@ class StylePanel(QWidget):
         for b in self._fill_btns:
             self._fill_grid.addWidget(b)
         root.addLayout(self._fill_grid)
+        self._fill_alpha_label = QLabel(t("填充透明度"))
+        root.addWidget(self._fill_alpha_label)
+        self._fill_alpha_slider = QSlider(Qt.Horizontal)
+        self._fill_alpha_slider.setRange(0, 100)
+        self._fill_alpha_slider.setValue(50)       # 先设值再连信号，避免构造期误 emit
+        self._fill_alpha_slider.setFocusPolicy(Qt.NoFocus)
+        self._fill_alpha_slider.setEnabled(False)  # 未启用填充时置灰
+        self._fill_alpha_slider.valueChanged.connect(self._on_fill_alpha)
+        root.addWidget(self._fill_alpha_slider)
 
         # --- 字号（文字）---
         self._size_label = QLabel(t("字号"))
@@ -806,6 +832,7 @@ class StylePanel(QWidget):
         # 按类型收集控件组，方便按需显隐
         self._shape_only = [
             self._fill_label, self._fill_check,
+            self._fill_alpha_label, self._fill_alpha_slider,
         ] + self._fill_btns
         self._text_only = [
             self._size_label, self._size_slider,
@@ -860,6 +887,8 @@ class StylePanel(QWidget):
         self._line_style_combo.setCurrentIndex(idx)
         self._fill_label.setText(t("填充色"))
         self._fill_check.setText(t("启用"))
+        self._transparent_btn.setToolTip(t("透明（无边框）"))
+        self._fill_alpha_label.setText(t("填充透明度"))
         self._size_label.setText(t("字号"))
         self._bold_check.setText(t("加粗"))
         self._bg_label.setText(t("文字背景色"))
@@ -892,10 +921,28 @@ class StylePanel(QWidget):
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(
-                lambda _=False, col=c, k=key: self._emit(k, self._with_alpha(col))
+                lambda _=False, col=c, k=key: self._emit(k, self._picked(k, col))
             )
             btns.append(b)
         return btns
+
+    def _alpha_byte(self) -> int:
+        """滑块百分比 → QColor 的 0~255 alpha。"""
+        return int(round(max(0, min(100, self._fill_alpha_slider.value())) * 255 / 100))
+
+    def _picked(self, key: str, col: str) -> str:
+        """预设色块点击：填充色用当前透明度，其它保持固定半透明。"""
+        if key == "fill_color":
+            self._fill_rgb = col
+            return self._with_alpha(col, self._alpha_byte())
+        return self._with_alpha(col)
+
+    def _on_fill_alpha(self, value: int) -> None:
+        if self._fill_alpha_slider.signalsBlocked():
+            return
+        c = QColor(self._fill_rgb)
+        c.setAlpha(int(round(max(0, min(100, value)) * 255 / 100)))
+        self._emit("fill_color", c.name(QColor.HexArgb))
 
     @staticmethod
     def _with_alpha(hex_color: str, alpha: int = 0x80) -> str:
@@ -913,9 +960,9 @@ class StylePanel(QWidget):
     def _on_fill_toggle(self, on: bool) -> None:
         for b in self._fill_btns:
             b.setVisible(on)
+        self._fill_alpha_slider.setEnabled(on)
         if on:
-            # 默认给一个明显的半透明蓝（约 50% 不透明），避免太淡看不见
-            self._emit("fill_color", "#800a84ff")
+            self._emit("fill_color", self._picked("fill_color", self._fill_rgb))
         else:
             self._emit("fill_color", None)
 
@@ -1007,6 +1054,12 @@ class StylePanel(QWidget):
         self._fill_check.blockSignals(False)
         for b in self._fill_btns:
             b.setVisible(fill is not None)
+        self._fill_alpha_slider.setEnabled(fill is not None)
+        if fill is not None and isinstance(fill, QColor):
+            self._fill_rgb = fill.name(QColor.HexRgb)
+            self._fill_alpha_slider.blockSignals(True)
+            self._fill_alpha_slider.setValue(int(round(fill.alpha() * 100 / 255)))
+            self._fill_alpha_slider.blockSignals(False)
 
         # 文字背景色
         self._bg_check.blockSignals(True)
@@ -1017,9 +1070,10 @@ class StylePanel(QWidget):
 
         # 颜色块高亮当前色：当前色加白色描边，其余用灰描边
         cur_hex = color.name(QColor.HexRgb).lower() if isinstance(color, QColor) else str(color).lower()
+        is_transparent = isinstance(color, QColor) and color.alpha() == 0
         for b in self._color_btns:
             c = b.property("color").lower()
-            if c == cur_hex:
+            if c == cur_hex and not is_transparent:
                 b.setStyleSheet(
                     f"background:{c}; border:2px solid #ffffff; border-radius:4px;"
                 )
@@ -1027,6 +1081,14 @@ class StylePanel(QWidget):
                 b.setStyleSheet(
                     f"background:{c}; border:1px solid #555; border-radius:4px;"
                 )
+        # 文字不该被设成透明（否则内容看不见），所以文字标注时隐藏该色块
+        self._transparent_btn.setVisible(not is_text)
+        self._transparent_btn.setStyleSheet(
+            "color:#e8e8e8; background:#3c3c3c; border:2px solid #ffffff;"
+            "border-radius:4px; padding:0;" if is_transparent else
+            "color:#e8e8e8; background:#3c3c3c; border:1px dashed #888;"
+            "border-radius:4px; padding:0;"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2686,14 +2748,14 @@ class Overlay(QWidget):
         e = QLineEdit(self)
         e.setStyleSheet(
             "QLineEdit { background: rgba(0,0,0,140); color: %s; "
-            "border: 1px dashed #0aaeff; padding: 2px; }" % self._color.name()
+            "border: 1px dashed #0aaeff; padding: 2px; }" % _text_edit_color(self._color)
         )
         if existing is not None:
             # 编辑已有文字：回填内容、字号、颜色，并记录被编辑对象
             e.setText(existing.text)
             e.setStyleSheet(
                 "QLineEdit { background: rgba(0,0,0,140); color: %s; "
-                "border: 1px dashed #0aaeff; padding: 2px; }" % existing.color.name()
+                "border: 1px dashed #0aaeff; padding: 2px; }" % _text_edit_color(existing.color)
             )
             self._editing_shape = existing
             e.move(existing.pos)

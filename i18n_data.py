@@ -836,5 +836,84 @@ _ROWS.update({
         "Ende erreicht — Aufnahme automatisch beendet",
         "Se llegó al final — captura finalizada automáticamente",
     ),
+
+    # -------------------------------------------------- v19 长截图结束诊断
+    "匹配 {score}": (
+        "匹配 {score}", "匹配 {score}", "Match {score}", "一致度 {score}",
+        "일치도 {score}", "Correspondance {score}", "Übereinstimmung {score}",
+        "Coincidencia {score}",
+    ),
+    "长截图完成 · 共 {frames} 帧 · {height}px": (
+        "长截图完成 · 共 {frames} 帧 · {height}px",
+        "長截圖完成 · 共 {frames} 幀 · {height}px",
+        "Capture complete · {frames} frames · {height}px",
+        "スクロール キャプチャ完了 · {frames} フレーム · {height}px",
+        "스크롤 캡처 완료 · {frames} 프레임 · {height}px",
+        "Capture terminée · {frames} images · {height}px",
+        "Aufnahme abgeschlossen · {frames} Bilder · {height}px",
+        "Captura completa · {frames} fotogramas · {height}px",
+    ),
+    "长截图提前结束：{reason} · 共 {frames} 帧 · 匹配 {score}": (
+        "长截图提前结束：{reason} · 共 {frames} 帧 · 匹配 {score}",
+        "長截圖提前結束：{reason} · 共 {frames} 幀 · 匹配 {score}",
+        "Capture stopped early: {reason} · {frames} frames · match {score}",
+        "途中で終了：{reason} · {frames} フレーム · 一致度 {score}",
+        "조기 종료: {reason} · {frames} 프레임 · 일치도 {score}",
+        "Capture interrompue : {reason} · {frames} images · corr. {score}",
+        "Aufnahme vorzeitig beendet: {reason} · {frames} Bilder · Treffer {score}",
+        "Captura interrumpida: {reason} · {frames} fotogramas · coinc. {score}",
+    ),
+    "内容无法自动对齐": (
+        "内容无法自动对齐", "內容無法自動對齊", "Content could not be aligned",
+        "位置合わせできませんでした", "자동 정렬 실패", "Alignement impossible",
+        "Ausrichtung fehlgeschlagen", "No se pudo alinear",
+    ),
+    "页面没有新增内容": (
+        "页面没有新增内容", "頁面沒有新增內容", "Page produced no new content",
+        "ページに新しい内容がありません", "페이지에 새 내용이 없습니다",
+        "Aucun nouveau contenu", "Kein neuer Inhalt", "Sin contenido nuevo",
+    ),
+    "帧数已达上限": (
+        "帧数已达上限", "幀數已達上限", "Frame limit reached",
+        "フレーム数が上限に達しました", "프레임 수 한도 도달",
+        "Limite d'images atteinte", "Bildgrenze erreicht", "Límite de fotogramas",
+    ),
+    "高度已达上限": (
+        "高度已达上限", "高度已達上限", "Height limit reached",
+        "高さが上限に達しました", "높이 한도 도달",
+        "Hauteur maximale atteinte", "Höhengrenze erreicht", "Altura máxima",
+    ),
+
+    # -------------------------------------------------- v19 透明色 / 填充透明度
+    "透明（无边框）": (
+        "透明（无边框）", "透明（無邊框）", "Transparent (no border)",
+        "透明（枠なし）", "투명（테두리 없음）", "Transparent (sans bordure)",
+        "Transparent (ohne Rand)", "Transparente (sin borde)",
+    ),
+    "填充透明度": (
+        "填充透明度", "填色不透明度", "Fill opacity", "塗りつぶしの不透明度",
+        "채우기 불투명도", "Opacité du remplissage", "Fülldeckkraft",
+        "Opacidad de relleno",
+    ),
+
+    # -------------------------------------------------- v19 画布视图放缩
+    "视图(&V)": (
+        "视图(&V)", "檢視(&V)", "View(&V)", "表示(&V)", "보기(&V)",
+        "Affichage(&V)", "Ansicht(&V)", "Ver(&V)",
+    ),
+    "放大": ("放大", "放大", "Zoom In", "拡大", "확대", "Zoom avant", "Vergrößern", "Acercar"),
+    "缩小": ("缩小", "縮小", "Zoom Out", "縮小", "축소", "Zoom arrière", "Verkleinern", "Alejar"),
+    "实际大小 1:1": (
+        "实际大小 1:1", "實際大小 1:1", "Actual Size 1:1", "等倍 1:1",
+        "실제 크기 1:1", "Taille réelle 1:1", "Originalgröße 1:1", "Tamaño real 1:1",
+    ),
+    "适应窗口": (
+        "适应窗口", "配合視窗", "Fit to Window", "ウィンドウに合わせる",
+        "창에 맞춤", "Ajuster à la fenêtre", "An Fenster anpassen", "Ajustar a la ventana",
+    ),
+    "缩放 {pct}%": (
+        "缩放 {pct}%", "縮放 {pct}%", "Zoom {pct}%", "ズーム {pct}%",
+        "확대 {pct}%", "Zoom {pct}%", "Zoom {pct}%", "Zoom {pct}%",
+    ),
 })
 

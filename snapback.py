@@ -428,31 +428,34 @@ def find_vertical_overlap(
     frame: np.ndarray,
     search_rows: int = 400,
     template_rows: int = 120,
+    template_offset: int = 0,
 ) -> tuple[int, float]:
     """
     在已拼接图像 acc 中定位新帧 frame 顶部的匹配位置。
 
-    返回 (match_top_in_acc, score)。score 为归一化相关系数（0~1），越高越可信。
-    只有 frame 顶部 template_rows 行能在 acc 尾部 search_rows 行里找到匹配时才有意义。
+    返回 (frame 第 0 行在 acc 中的行号, score)。score 为归一化相关系数（0~1）。
+    template_offset 让模板从新帧中部开始取：网页常有固定顶栏 / 悬浮导航，
+    若总拿 frame[0:120] 当模板，这段每帧都长得一样，会把匹配位置带偏。
+    尺寸不足 / 无法匹配时返回 (-1, 0.0)。
     """
     import cv2
 
     if acc.shape[1] != frame.shape[1]:
         raise ValueError(_t("拼接帧宽度必须一致"))
-
-    if acc.shape[0] < template_rows or frame.shape[0] < template_rows:
+    if acc.shape[0] < template_rows or frame.shape[0] < template_offset + template_rows:
         return -1, 0.0
 
-    template = frame[0:template_rows]
+    template = frame[template_offset: template_offset + template_rows]
     search_top = max(0, acc.shape[0] - search_rows)
     search = acc[search_top:]
-
     if search.shape[0] < template_rows:
         return -1, 0.0
 
     res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(res)
-    return search_top + max_loc[1], float(max_val)
+    m = search_top + max_loc[1]
+    # m 对应 frame 第 template_offset 行；换算回 frame 第 0 行的位置
+    return m - template_offset, float(max_val)
 
 
 def stitch_scroll(
@@ -463,12 +466,16 @@ def stitch_scroll(
     match_threshold: float = 0.72,
     scroll_notches: int = -3,
     settle_seconds: float = 0.42,
-    max_frames: int = 120,
+    max_frames: int = 300,
     on_progress=None,
     should_stop=None,
     control: ScrollControl | None = None,
     on_before_grab=None,
     on_after_grab=None,
+    bottom_confirm_frames: int = 3,
+    retry_limit: int = 2,
+    retry_settle: float = 0.35,
+    adapt_scroll: bool = True,
 ) -> tuple[Image.Image, dict]:
     """
     自动滚动并拼接长截图（选中的窗口客户区即 rect）。
@@ -476,18 +483,21 @@ def stitch_scroll(
     做法：把光标移到选区中心 → 抓帧 → 滚轮向下 → 再抓帧 →
     用模板匹配算出两帧的重叠量 → 只保留新增的部分拼到画布上。
 
-    control 提供新的交互语义：左键暂停 / 再按继续、右键结束、点「确定」结束；
+    网页抗中断（v19）：
+      · 到底必须连续 bottom_confirm_frames 帧都几乎没有新增才结束；
+        单帧「没动」多半只是平滑滚动 / 惯性未稳定，或滚轮发给了别的窗口。
+      · 匹配失败先减小步长、多等一拍重试 retry_limit 次，不再一帧就放弃。
+      · 模板从 frame 中部取，避开网页固定顶栏；搜索窗随窗口高度放大。
+      · 每帧滚轮前重新把光标锁回选区中心，防止用户移动鼠标后滚错窗口。
+      · 步长按上一帧新增行数自适应，避免一次滚过头导致找不到重叠。
+
+    control 提供交互语义：左键暂停 / 再按继续、右键结束、点「确定」结束；
     拼接线程在等待期间高频 poll()，暂停时不抓帧也不滚轮。
     on_before_grab / on_after_grab 用于「控制条与选区重叠」时，在抓帧瞬间
     临时隐藏 / 恢复控制条，避免它自己被拍进长图。
 
-    停止条件（任一命中）：
-      - 连续两帧几乎没有新增内容（滚到底，自动结束）
-      - 匹配得分低于阈值（无法对齐，通常是内容重复或页面在动）
-      - 高度超过 max_height / 帧数超过 max_frames
-      - 用户右键 / 点确定 / 按 Esc（后两者由 should_stop 提供）
-
-    返回 (拼接结果图, 统计信息 dict)。
+    返回 (拼接结果图, 统计信息 dict)；stats.stop_reason 记录结束原因，
+    stats.retries / stats.score / stats.notches 便于诊断。
     """
     cx = rect.x + rect.w // 2
     cy = rect.y + rect.h // 2
@@ -495,14 +505,18 @@ def stitch_scroll(
     set_cursor_pos(cx, cy)
     time.sleep(0.12)
 
-    frames: list[np.ndarray] = []
     canvas: np.ndarray | None = None
+    notches = -abs(int(scroll_notches)) or -3
+    low_new_streak = 0
+    match_fail_streak = 0
     stats: dict = {
         "frames": 0,
         "stop_reason": "unknown",
         "score": 0.0,
         "height": 0,
         "cursor_restored": False,
+        "retries": 0,
+        "notches": notches,
     }
 
     def _stop_requested() -> bool:
@@ -514,6 +528,41 @@ def stitch_scroll(
         if control is not None and control.should_stop():
             return control.stop_reason or "user-confirm"
         return "user-interrupt"
+
+    def _scroll(extra: float = 0.0) -> None:
+        # 只在开头定位一次光标不够：用户一动鼠标，SendInput 的滚轮就会发给
+        # 光标下的其它窗口，页面不再滚动 → 下一帧被误判「到底」。
+        set_cursor_pos(cx, cy)
+        _send_mouse_wheel(notches)
+        wait = settle_seconds + extra
+        if control is not None:
+            control.wait(wait)
+        elif wait > 0:
+            time.sleep(wait)
+
+    def _progress() -> None:
+        if on_progress is not None and canvas is not None:
+            on_progress(stats["frames"], stats["height"], canvas, stats["score"])
+
+    def _adapt(new_rows: int, frame_h: int) -> None:
+        nonlocal notches
+        if not adapt_scroll:
+            return
+        # 每帧新增行最好不超过窗口高度的 70%（再大就快滚过一整屏，
+        # 相邻帧重叠太少容易失配）；太小则加大步长，避免长页面截不完。
+        hi = max(min_new_rows * 2, int(frame_h * 0.7))
+        lo = max(1, min_new_rows * 2)
+        if new_rows > hi and abs(notches) > 1:
+            notches = -max(1, abs(notches) - 1)
+        elif new_rows < lo and abs(notches) < 8:
+            notches = -min(8, abs(notches) + 1)
+        stats["notches"] = notches
+
+    def _retry() -> None:
+        """单帧异常：不放弃、不追加，再滚一次重新确认。"""
+        stats["retries"] += 1
+        _progress()
+        _scroll(retry_settle)
 
     try:
         for i in range(max_frames):
@@ -532,47 +581,61 @@ def stitch_scroll(
                 if on_after_grab is not None:
                     on_after_grab()
             frame = np.array(img)
-            frames.append(frame)
             stats["frames"] = i + 1
 
             if canvas is None:
                 canvas = frame.copy()
             else:
-                top, score = find_vertical_overlap(canvas, frame)
+                frame_h = frame.shape[0]
+                template_rows = min(120, max(24, frame_h // 4))
+                template_offset = min(96, max(0, frame_h // 6))
+                search_rows = max(400, frame_h * 2)
+                top, score = find_vertical_overlap(
+                    canvas, frame,
+                    search_rows=search_rows,
+                    template_rows=template_rows,
+                    template_offset=template_offset,
+                )
                 stats["score"] = round(score, 4)
 
-                if top < 0 or score < match_threshold:
-                    stats["stop_reason"] = (
-                        "match-failed" if score < match_threshold else "no-overlap"
-                    )
+                if top == -1 or score < match_threshold:
+                    match_fail_streak += 1
+                    if match_fail_streak <= retry_limit:
+                        # 懒加载 / 动画 / 平滑滚动中间态只影响一帧：
+                        # 减小步长、多等一会儿再抓，别整段长图就此收工。
+                        if adapt_scroll and abs(notches) > 1:
+                            notches = -max(1, abs(notches) - 1)
+                            stats["notches"] = notches
+                        _retry()
+                        continue
+                    stats["stop_reason"] = "no-overlap" if top == -1 else "match-failed"
                     break
+                match_fail_streak = 0
 
-                # 新帧顶部对应 canvas 的 top 行；新内容 = 新帧从 (canvas 底 - top) 行开始
                 new_start = canvas.shape[0] - top
-                if new_start <= 0:
-                    stats["stop_reason"] = "no-new-content"
-                    break
-                if new_start < min_new_rows:
-                    # 只多出极少像素，认为已到底（再滚也几乎不动）
+                if new_start <= 0 or new_start >= frame_h or new_start < min_new_rows:
+                    # 到底必须连续确认：单帧几乎没动不能直接判到底
+                    low_new_streak += 1
+                    if low_new_streak < bottom_confirm_frames:
+                        _retry()
+                        continue
                     stats["stop_reason"] = "reached-bottom"
                     break
+                low_new_streak = 0
 
                 new_part = frame[new_start:]
                 if canvas.shape[0] + new_part.shape[0] > max_height:
                     allow = max(0, max_height - canvas.shape[0])
-                    if allow <= 0:
-                        stats["stop_reason"] = "max-height"
-                        break
-                    new_part = new_part[:allow]
-                    canvas = np.vstack([canvas, new_part])
+                    if allow > 0:
+                        canvas = np.vstack([canvas, new_part[:allow]])
                     stats["stop_reason"] = "max-height"
                     break
 
                 canvas = np.vstack([canvas, new_part])
+                _adapt(new_start, frame_h)
 
             stats["height"] = int(canvas.shape[0])
-            if on_progress is not None:
-                on_progress(stats["frames"], stats["height"], canvas)
+            _progress()
 
             if canvas.shape[0] >= max_height:
                 stats["stop_reason"] = "max-height"
@@ -585,11 +648,7 @@ def stitch_scroll(
                 stats["stop_reason"] = _stop_reason()
                 break
 
-            _send_mouse_wheel(scroll_notches)
-            if control is not None:
-                control.wait(settle_seconds)
-            else:
-                time.sleep(settle_seconds)
+            _scroll()
         else:
             stats["stop_reason"] = "max-frames"
 
