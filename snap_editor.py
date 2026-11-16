@@ -64,6 +64,7 @@ from snapeditor import (
     Toolbar,
     _reading_order,
     _text_edit_color,
+    text_edit_baseline_offset,
     draw_shape,
     normalize_angle,
     paint_shape_corner_handles,
@@ -76,6 +77,7 @@ from snapeditor import (
     shape_resize_rect,
     shape_rotate_center,
     shape_rotate_handle_point,
+    shape_rotate_point,
     shape_rotate_rect,
     shape_text_box,
     shape_rotated_bbox,
@@ -674,15 +676,21 @@ class Canvas(QWidget):
         if existing is not None:
             e.setText(existing.text)
             self._editing_shape = existing
-            e.move(self._to_screen(existing.pos))
         else:
             self._editing_shape = None
-            e.move(self._to_screen(ipos))
         f = e.font()
         f.setPixelSize(max(9, int(round(fs * self.view_scale))))
         e.setFont(f)
         e.resize(300, max(20, int(round(fs * self.view_scale)) + 16))
         e.show()
+        # 输入框左上角 ≠ Shape.pos（基线）：编辑已有文字时把输入框反放到
+        # 原字上；旋转过的文字先将其基线点映射到旋转后坐标。
+        off = text_edit_baseline_offset(e)
+        if existing is not None:
+            base = shape_rotate_point(existing, existing.pos)
+            e.move(self._to_screen(base) - off)
+        else:
+            e.move(self._to_screen(ipos))
         e.setFocus()
         e.selectAll()
         e.returnPressed.connect(self._commit_text)
@@ -694,7 +702,9 @@ class Canvas(QWidget):
             return
         self._text_edit = None
         txt = e.text().strip()
-        ipos = self._to_image(e.pos())
+        # e.pos() 是输入框左上角；加上「左上角→文字基线」的偏移后才是
+        # Shape.pos。偏移按屏幕字号计算，_to_image 会随 view_scale 还原。
+        ipos = self._to_image(e.pos() + text_edit_baseline_offset(e))
         editing = self._editing_shape
         e.deleteLater()
         if editing is not None:

@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QStyle,
+    QStyleOptionFrame,
     QVBoxLayout,
     QWidget,
 )
@@ -996,6 +998,31 @@ PRESET_COLORS = [
 def _text_edit_color(c: QColor) -> str:
     """文字输入框的前景色：透明线条不能让正在输入的字也看不见。"""
     return c.name(QColor.HexRgb) if isinstance(c, QColor) and c.alpha() > 0 else "#ffffff"
+
+
+# QLineEdit 在 SE_LineEditContents 内容区内还会再留 2px 水平边距（Qt 内部
+# horizontalMargin，不计入 textMargins()）。像素自测 X2 会锁死这个常量。
+LINE_EDIT_INNER_MARGIN = 2
+
+
+def text_edit_baseline_offset(e: QLineEdit) -> QPoint:
+    """QLineEdit 左上角 → 框内文字基线（也就是 Shape.pos）的偏移。
+
+    Shape.pos 是 QPainter.drawText(QPoint, ...) 的基线起点，字形画在它上方；
+    QLineEdit 却由 QStyle 在 SE_LineEditContents 区域里按字体行高垂直居中，
+    字形画在输入框左上角下方。过去 _commit_text() 直接把 e.pos() 当作
+    Shape.pos，提交后文字就会整体上跳约一个 ascent，看起来「位置跑了」。
+
+    这里用同一套样式几何反算基线，让输入时看到的字与提交后绘制的字重合；
+    两个编辑器共用，保证缩放视图下也按屏幕字号换算。返回值是屏幕/控件像素。
+    """
+    fm = QFontMetrics(e.font())
+    opt = QStyleOptionFrame()
+    e.initStyleOption(opt)
+    cr = e.style().subElementRect(QStyle.SE_LineEditContents, opt, e)
+    dx = cr.left() + LINE_EDIT_INNER_MARGIN
+    dy = cr.top() + (cr.height() - fm.height()) / 2 + fm.ascent()
+    return QPoint(int(dx), int(round(dy)))
 
 
 class StylePanel(QWidget):
@@ -3462,6 +3489,7 @@ class Overlay(QWidget):
             "QLineEdit { background: rgba(0,0,0,140); color: %s; "
             "border: 1px dashed #0aaeff; padding: 2px; }" % _text_edit_color(self._color)
         )
+        fs = existing.font_size if existing else self._font_size
         if existing is not None:
             # 编辑已有文字：回填内容、字号、颜色，并记录被编辑对象
             e.setText(existing.text)
@@ -3470,15 +3498,20 @@ class Overlay(QWidget):
                 "border: 1px dashed #0aaeff; padding: 2px; }" % _text_edit_color(existing.color)
             )
             self._editing_shape = existing
-            e.move(existing.pos)
         else:
             self._editing_shape = None
-            e.move(pos)
         f = e.font()
-        f.setPixelSize(existing.font_size if existing else self._font_size)
+        f.setPixelSize(fs)
         e.setFont(f)
-        e.resize(300, (existing.font_size if existing else self._font_size) + 16)
+        e.resize(300, fs + 16)
         e.show()
+        # 输入框左上角 ≠ Shape.pos（基线）。先算出这段偏移，编辑已有文字时
+        # 把输入框反放到原字上；提交时再把 e.pos() 加回来，文字才不跳位。
+        off = text_edit_baseline_offset(e)
+        if existing is not None:
+            e.move(existing.pos - off)
+        else:
+            e.move(pos)
         e.setFocus()
         e.selectAll()
         e.returnPressed.connect(self._commit_text)
@@ -3490,7 +3523,9 @@ class Overlay(QWidget):
             return
         self._text_edit = None
         txt = e.text().strip()
-        pos = e.pos()
+        # 输入框左上角是「视觉起点」，Shape.pos 是文字基线，二者差一个
+        # ascent + 输入框内边距；直接沿用 e.pos() 会让提交后的文字上跳。
+        pos = e.pos() + text_edit_baseline_offset(e)
         editing = getattr(self, "_editing_shape", None)
         e.deleteLater()
         if editing is not None:

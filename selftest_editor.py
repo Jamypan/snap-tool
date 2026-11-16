@@ -214,6 +214,18 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     W14 克隆 / 撤销恢复边框全部字段
     W15 README / 中文帮助 / 7 语言帮助 / 8 语言词条同步
 
+  Stage X  v24：文字输入位置（输入框左上角与文字基线对齐）
+    X1  左上角→基线偏移随字号增长且非零
+    X2  各字号输入框文字与提交后绘制像素重合
+    X3  回归锁定：旧写法会让文字上跳 ≥15px
+    X4  双击编辑时输入框盖在原字上、提交后坐标不变
+    X5  窗口编辑器 1:1 视图：提交后文字像素不位移
+    X6  放大 / 缩小视图下按屏幕字号换算仍对齐
+    X7  双击编辑（含旋转文字）输入框落点正确、坐标不漂移
+    X8  高 DPI 遮罩逻辑 / 物理坐标换算不丢偏移
+    X9  连续输入互不干扰、撤销恢复正确位置
+    X10 README / 中文帮助 / 7 语言帮助同步
+
   Stage V  v22：矩形 / 椭圆 / 文字旋转
     V1  角度归一化与旋转变换往返
     V2  文字包围盒 / 旋转外接框 / 旋转中心
@@ -4030,6 +4042,253 @@ def test_v23_text_background() -> None:
         w.deleteLater()
 
 
+def test_v24_text_input_position() -> None:
+    """Stage X：文字提交后不跳位（QLineEdit 左上角 ≠ Shape.pos 基线）。"""
+    from pathlib import Path
+
+    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtGui import QPainter
+
+    from i18n_docs import help_html
+    from snapui import HELP_HTML
+    from snapeditor import (
+        Overlay, Shape, draw_shape, shape_rotate_point,
+        text_edit_baseline_offset,
+    )
+    from snap_editor import Canvas
+
+    def red_bbox(im: QImage):
+        xs, ys = [], []
+        for y in range(im.height()):
+            for x in range(im.width()):
+                c = im.pixelColor(x, y)
+                if c.red() > 150 and c.green() < 90 and c.blue() < 90:
+                    xs.append(x)
+                    ys.append(y)
+        return (min(xs), min(ys), max(xs), max(ys)) if xs else None
+
+    def edit_pixels(e, w, h):
+        im = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+        im.fill(QColor(255, 255, 255))
+        e.render(im, e.pos())
+        return red_bbox(im)
+
+    def shape_pixels(s, w, h, base):
+        im = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+        im.fill(QColor(255, 255, 255))
+        p = QPainter(im)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        draw_shape(p, s, base, 1.0)
+        p.end()
+        return red_bbox(im)
+
+    def shape_pixels_screen(cv, s, base):
+        """把图像坐标里的标注按视图变换画到屏幕坐标，便于和输入框比像素。"""
+        im = QImage(cv.width(), cv.height(), QImage.Format_ARGB32_Premultiplied)
+        im.fill(QColor(255, 255, 255))
+        p = QPainter(im)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.translate(cv.off_x, cv.off_y)
+        p.scale(cv.view_scale, cv.view_scale)
+        draw_shape(p, s, base, 1.0)
+        p.end()
+        return red_bbox(im)
+
+    def aligned(a, b, tol=2):
+        return (a is not None and b is not None
+                and all(abs(x - y) <= tol for x, y in zip(a, b)))
+
+    # ---------------- X1~X3 新建文字：像素对齐 / 旧写法确实跳位 ----------------
+    rows = []
+    for fs in (18, 28, 34, 48):
+        base = make_image(600, 400, (255, 255, 255))
+        ov = Overlay(base, dpr=1.0)
+        ov._font_size = fs
+        ov._begin_text(QPoint(100, 150))
+        e = ov._text_edit
+        e.setText("TEST")
+        off = text_edit_baseline_offset(e)
+        b_edit = edit_pixels(e, 600, 400)
+        ov._commit_text()
+        s = ov.shapes[-1]
+        b_new = shape_pixels(s, 600, 400, base)
+        # 旧实现：直接把输入框左上角当基线
+        old = Shape(kind="text", text="TEST", pos=QPoint(e.pos()),
+                    font_size=fs, color=QColor(s.color))
+        b_old = shape_pixels(old, 600, 400, base)
+        rows.append((fs, off, b_edit, b_new,
+                     b_edit[1] - b_old[1] if b_edit and b_old else 0))
+        ov.close()
+        ov.deleteLater()
+
+    dys = [r[1].y() for r in rows]
+    ok_x1 = (all(r[1].x() > 0 and r[1].y() >= r[0] * 0.6 for r in rows)
+             and dys == sorted(dys) and dys[0] < dys[-1])
+    record("X1 左上角→基线偏移随字号增长且非零", ok_x1,
+           f"offsets={[(r[0], r[1].x(), r[1].y()) for r in rows]}")
+
+    ok_x2 = all(aligned(r[2], r[3], 2) for r in rows)
+    record("X2 各字号输入框文字与提交后绘制像素重合", ok_x2,
+           f"pairs={[(r[0], r[2], r[3]) for r in rows]}")
+
+    ok_x3 = all(r[4] >= 15 for r in rows)
+    record("X3 回归锁定：旧写法会让文字上跳 ≥15px", ok_x3,
+           f"jumps={[(r[0], r[4]) for r in rows]}")
+
+    # ---------------- X4 Overlay 双击编辑：反放输入框、位置不漂移 ----------------
+    base = make_image(600, 400, (255, 255, 255))
+    ov = Overlay(base, dpr=1.0)
+    ov._font_size = 34
+    s = Shape(kind="text", text="HELLO", pos=QPoint(150, 220))
+    s.font_size = 34
+    s.color = QColor(255, 59, 48)
+    ov.shapes.append(s)
+    ov._selected = s
+    b_before = shape_pixels(s, 600, 400, base)
+    ov._begin_text(QPoint(0, 0), existing=s)
+    e = ov._text_edit
+    off = text_edit_baseline_offset(e)
+    # 双击编辑默认全选文本（蓝底白字），先取消选区才能比对字形颜色
+    e.deselect()
+    b_edit4 = edit_pixels(e, 600, 400)
+    placed = e.pos() == s.pos - off
+    e.setText("WORLD")
+    ov._commit_text()
+    ok_x4 = (placed and s.pos == QPoint(150, 220) and s.text == "WORLD"
+             and aligned(b_before, b_edit4, 2))
+    record("X4 双击编辑时输入框盖在原字上、提交后坐标不变", ok_x4,
+           f"placed={placed} pos={s.pos} bbox={b_before}/{b_edit4}")
+    ov.close()
+    ov.deleteLater()
+
+    # ---------------- X5 Canvas 新建（1:1）像素对齐 ----------------
+    base = make_image(900, 600, (255, 255, 255))
+    cv = Canvas(base, [], None)
+    cv.resize(1000, 700)
+    cv._fit()
+    cv._set_view_scale(1.0)
+    cv._font_size = 30
+    cv._set_tool("text")
+    cv._begin_text(QPoint(200, 240))
+    e = cv._text_edit
+    e.setText("TEST")
+    b_edit5 = edit_pixels(e, cv.width(), cv.height())
+    want5 = cv._to_image(e.pos() + text_edit_baseline_offset(e))
+    cv._commit_text()
+    s5 = cv.shapes[-1]
+    b_new5 = shape_pixels_screen(cv, s5, base)
+    ok_x5 = s5.pos == want5 and aligned(b_edit5, b_new5, 4)
+    record("X5 窗口编辑器 1:1 视图：提交后文字像素不位移", ok_x5,
+           f"pos={s5.pos} want={want5} bbox={b_edit5}/{b_new5}")
+
+    # ---------------- X6 Canvas 缩放视图 ----------------
+    zoom = []
+    for vs in (0.75, 1.5, 0.5):
+        c = Canvas(base, [], None)
+        c.resize(1000, 700)
+        c._fit()
+        c._set_view_scale(vs)
+        c._font_size = 30
+        c._set_tool("text")
+        c._begin_text(QPoint(200, 240))
+        ed = c._text_edit
+        ed.setText("TEST")
+        b_e = edit_pixels(ed, c.width(), c.height())
+        want = c._to_image(ed.pos() + text_edit_baseline_offset(ed))
+        c._commit_text()
+        sh = c.shapes[-1]
+        b_s = shape_pixels_screen(c, sh, base)
+        zoom.append((vs, sh.pos == want, aligned(b_e, b_s, 6)))
+        c.close()
+        c.deleteLater()
+    ok_x6 = all(a and b for _, a, b in zoom)
+    record("X6 放大 / 缩小视图下按屏幕字号换算仍对齐", ok_x6, f"scales={zoom}")
+
+    # ---------------- X7 Canvas 双击编辑（含旋转文字）往返 ----------------
+    cv7 = Canvas(base, [], None)
+    cv7.resize(1000, 700)
+    cv7._fit()
+    s7 = Shape(kind="text", text="HELLO", pos=QPoint(300, 260))
+    s7.font_size = 28
+    s7.color = QColor(255, 59, 48)
+    cv7.shapes = [s7]
+    cv7._selected = s7
+    roundtrip = []
+    for ang in (0.0, 90.0, -35.0):
+        s7.angle = ang
+        before = QPoint(s7.pos)
+        cv7._begin_text(QPoint(0, 0), existing=s7)
+        ed = cv7._text_edit
+        off = text_edit_baseline_offset(ed)
+        want = cv7._to_screen(shape_rotate_point(s7, before)) - off
+        placed7 = ed.pos() == want
+        ed.setText("EDIT")
+        cv7._commit_text()
+        roundtrip.append((ang, placed7, s7.pos == before))
+    ok_x7 = all(a and b for _, a, b in roundtrip)
+    record("X7 双击编辑（含旋转文字）输入框落点正确、坐标不漂移", ok_x7,
+           f"roundtrip={roundtrip}")
+    cv7.close()
+    cv7.deleteLater()
+
+    # ---------------- X8 高 DPI 遮罩 ----------------
+    ov8 = Overlay(make_image(600, 400, (255, 255, 255)), dpr=2.0)
+    ov8._font_size = 28
+    ov8._begin_text(QPoint(100, 150))
+    ed8 = ov8._text_edit
+    ed8.setText("TEST")
+    target8 = ed8.pos() + text_edit_baseline_offset(ed8)
+    ov8._commit_text()
+    s8 = ov8.shapes[-1]
+    phys = ov8.to_phys(QRect(s8.pos.x(), s8.pos.y(), 1, 1)).topLeft()
+    ok_x8 = (s8.pos == target8
+             and abs(phys.x() - target8.x() * 2) <= 1
+             and abs(phys.y() - target8.y() * 2) <= 1)
+    record("X8 高 DPI 遮罩逻辑坐标 / 物理坐标换算不丢偏移", ok_x8,
+           f"pos={s8.pos} phys={phys}")
+    ov8.close()
+    ov8.deleteLater()
+
+    # ---------------- X9 连续输入与撤销 ----------------
+    cv9 = Canvas(base, [], None)
+    cv9.resize(1000, 700)
+    cv9._fit()
+    cv9._set_tool("text")
+    want9 = []
+    for pt in (QPoint(120, 120), QPoint(360, 280)):
+        cv9._begin_text(pt)
+        ed = cv9._text_edit
+        ed.setText("AB")
+        want9.append(cv9._to_image(ed.pos() + text_edit_baseline_offset(ed)))
+        cv9._commit_text()
+    ok_before = len(cv9.shapes) == 2 and cv9.shapes[0].pos == want9[0] \
+        and cv9.shapes[1].pos == want9[1]
+    cv9.undo()
+    ok_x9 = (ok_before and len(cv9.shapes) == 1
+             and cv9.shapes[0].pos == want9[0])
+    record("X9 连续输入互不干扰、撤销恢复正确位置", ok_x9,
+           f"positions={want9} undo_count={len(cv9.shapes)}")
+    cv9.close()
+    cv9.deleteLater()
+    cv.close()
+    cv.deleteLater()
+
+    # ---------------- X10 文档同步 ----------------
+    readme = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
+    markers = {
+        "en": "where you typed", "ja": "入力した位置",
+        "ko": "입력한 위치", "fr": "position saisie",
+        "de": "eingegebenen Position", "es": "posición escrita",
+        "zh_TW": "輸入的位置",
+    }
+    missing = [code for code, mark in markers.items()
+               if mark not in help_html(code)]
+    ok_x10 = ("v24" in readme and "文字输入位置" in readme
+              and "输入位置" in HELP_HTML and not missing)
+    record("X10 README / 中文帮助 / 7 语言帮助同步输入位置修复", ok_x10,
+           f"missing={missing}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -4062,6 +4321,7 @@ if __name__ == "__main__":
     test_v21_shape_corner_resize()
     test_v22_shape_rotation()
     test_v23_text_background()
+    test_v24_text_input_position()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
