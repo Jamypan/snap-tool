@@ -197,6 +197,23 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     T10 README 已记录 v20 画质修复
     T11 滚到底后补抓完整画面，长图不缺尾
 
+  Stage W  v23：文字背景透明度 + 文字背景边框
+    W1  文字背景边框默认值齐全
+    W2  文字背景透明度 25% 与 100% 渲染不同
+    W3  填充透明度与背景透明度各自独立
+    W4  启用边框后出现描边像素
+    W5  边框颜色设为透明等于不描边
+    W6  边框线宽 1 与 8 像素量不同
+    W7  边框实线 / 虚线 / 点线各不相同
+    W8  无背景色时也能单独显示边框
+    W9  旋转文字时边框一起转且位置正确
+    W10 面板启用边框 / 预设色 / ∅ 透明信号正确
+    W11 面板状态回填颜色 / 透明度 / 线宽 / 线型
+    W12 Canvas 选中标注与新建默认值都写入新键
+    W13 Overlay 同样写入新键
+    W14 克隆 / 撤销恢复边框全部字段
+    W15 README / 中文帮助 / 7 语言帮助 / 8 语言词条同步
+
   Stage V  v22：矩形 / 椭圆 / 文字旋转
     V1  角度归一化与旋转变换往返
     V2  文字包围盒 / 旋转外接框 / 旋转中心
@@ -3739,6 +3756,280 @@ def test_v22_shape_rotation() -> None:
         w.deleteLater()
 
 
+def test_v23_text_background() -> None:
+    """Stage W：文字背景透明度 + 文字背景边框（颜色可透明 / 线宽 / 线型）。"""
+    from pathlib import Path
+
+    from PySide6.QtCore import QPoint, QRectF
+    from PySide6.QtGui import QPainter
+
+    from i18n_data import _ROWS as ROWS
+    from i18n_docs import help_html
+    from snapui import HELP_HTML
+    from snapeditor import Overlay, StylePanel, Shape, draw_shape, shape_text_box
+
+    def make_text() -> Shape:
+        s = Shape(kind="text", text="HELLO", pos=QPoint(40, 100))
+        s.font_size = 28
+        s.color = QColor(0, 0, 0)
+        return s
+
+    def render(s: Shape) -> QImage:
+        im = QImage(320, 200, QImage.Format_ARGB32_Premultiplied)
+        im.fill(QColor(255, 255, 255))
+        p = QPainter(im)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        draw_shape(p, s, im, 1.0)
+        p.end()
+        return im
+
+    def red_stats(im: QImage):
+        xs, ys = [], []
+        for y in range(im.height()):
+            for x in range(im.width()):
+                c = im.pixelColor(x, y)
+                if c.red() > 150 and c.green() < 90 and c.blue() < 90:
+                    xs.append(x)
+                    ys.append(y)
+        if not xs:
+            return 0, None
+        return len(xs), ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
+
+    # ---------------- W1 默认字段 ----------------
+    d = Shape(kind="text")
+    ok_w1 = (
+        d.bg_border is False
+        and isinstance(d.bg_border_color, QColor)
+        and d.bg_border_color.alpha() == 255
+        and d.bg_border_width == 2
+        and d.bg_border_style == "solid"
+    )
+    record("W1 文字背景边框默认值齐全", ok_w1,
+           f"border={d.bg_border} width={d.bg_border_width} style={d.bg_border_style}")
+
+    # ---------------- W2 背景透明度可调 ----------------
+    s = make_text()
+    s.bg_color = QColor(0, 0, 255, 64)
+    box = shape_text_box(s)
+    probe = (box.x() + 2, box.y() + box.height() // 2)
+    im25 = render(s)
+    c25 = im25.pixelColor(*probe)
+    s.bg_color = QColor(0, 0, 255, 255)
+    im100 = render(s)
+    c100 = im100.pixelColor(*probe)
+    ok_w2 = (c25.blue() - c25.red()) < (c100.blue() - c100.red()) - 80
+    record("W2 文字背景透明度 25% 与 100% 渲染不同", ok_w2,
+           f"diff25={c25.blue()-c25.red()} diff100={c100.blue()-c100.red()}")
+
+    # ---------------- W3 填充与背景透明度各自独立 ----------------
+    sp = StylePanel()
+    got: list[dict] = []
+    sp.style_changed.connect(lambda dct: got.append(dct))
+    sp._fill_alpha_slider.setValue(20)
+    sp._bg_alpha_slider.setValue(80)
+    fills = [d["fill_color"] for d in got if "fill_color" in d]
+    bgs = [d["bg_color"] for d in got if "bg_color" in d]
+    a_fill = QColor(fills[-1]).alpha() if fills else -1
+    a_bg = QColor(bgs[-1]).alpha() if bgs else -1
+    pick_fill = QColor(sp._picked("fill_color", "#ff0000")).alpha()
+    pick_bg = QColor(sp._picked("bg_color", "#00ff00")).alpha()
+    ok_w3 = (a_fill == 51 and a_bg == 204 and pick_fill == 51 and pick_bg == 204)
+    record("W3 填充透明度与背景透明度各自独立", ok_w3,
+           f"fill={a_fill}/{pick_fill} bg={a_bg}/{pick_bg}")
+
+    # ---------------- W4 边框开关 ----------------
+    s = make_text()
+    s.bg_color = QColor(0, 0, 255, 64)
+    s.bg_border_color = QColor(220, 0, 0)
+    n_off, _ = red_stats(render(s))
+    s.bg_border = True
+    n_on, _ = red_stats(render(s))
+    ok_w4 = n_off == 0 and n_on > 40
+    record("W4 启用边框后出现描边像素", ok_w4, f"off={n_off} on={n_on}")
+
+    # ---------------- W5 边框颜色透明 ----------------
+    s.bg_border_color = QColor(0, 0, 0, 0)
+    n_trans, _ = red_stats(render(s))
+    s.bg_border_color = QColor(220, 0, 0)
+    ok_w5 = n_trans == 0
+    record("W5 边框颜色设为透明等于不描边", ok_w5, f"transparent_pixels={n_trans}")
+
+    # ---------------- W6 边框线宽 ----------------
+    s.bg_border_width = 1
+    n1, _ = red_stats(render(s))
+    s.bg_border_width = 8
+    n8, _ = red_stats(render(s))
+    ok_w6 = n8 > n1 * 2
+    record("W6 边框线宽 1 与 8 像素量不同", ok_w6, f"w1={n1} w8={n8}")
+
+    # ---------------- W7 边框线型 ----------------
+    s.bg_border_width = 4
+    s.bg_border_style = "solid"
+    n_solid, _ = red_stats(render(s))
+    s.bg_border_style = "dash"
+    n_dash, _ = red_stats(render(s))
+    s.bg_border_style = "dot"
+    n_dot, _ = red_stats(render(s))
+    ok_w7 = n_solid > n_dash > 0 and n_solid > n_dot > 0 and n_dash != n_dot
+    record("W7 边框实线 / 虚线 / 点线各不相同", ok_w7,
+           f"solid={n_solid} dash={n_dash} dot={n_dot}")
+
+    # ---------------- W8 只描边不填背景 ----------------
+    s.bg_color = None
+    s.bg_border = True
+    s.bg_border_style = "solid"
+    n_only, _ = red_stats(render(s))
+    ok_w8 = n_only > 40
+    record("W8 无背景色时也能单独显示边框", ok_w8, f"pixels={n_only}")
+
+    # ---------------- W9 旋转文字时边框跟着转 ----------------
+    s.bg_color = QColor(0, 0, 255, 64)
+    s.angle = 90.0
+    n_rot, center_rot = red_stats(render(s))
+    want = QRectF(shape_text_box(s)).center()
+    ok_w9 = (
+        n_rot > 40 and center_rot is not None
+        and abs(center_rot[0] - want.x()) <= 8
+        and abs(center_rot[1] - want.y()) <= 8
+    )
+    record("W9 旋转文字时边框一起转且位置正确", ok_w9,
+           f"pixels={n_rot} center={center_rot} want=({want.x():.1f},{want.y():.1f})")
+
+    # ---------------- W10 面板边框信号 ----------------
+    got.clear()
+    sp._bg_border_check.setChecked(True)
+    sp._bg_border_btns[0].click()
+    sp._bg_border_transparent_btn.click()
+    keys = [list(d)[0] for d in got]
+    colors = [d["bg_border_color"] for d in got if "bg_border_color" in d]
+    ok_w10 = (
+        any(d.get("bg_border") is True for d in got)
+        and len(colors) >= 2
+        and QColor(colors[0]).alpha() == 255
+        and QColor(colors[-1]).alpha() == 0
+    )
+    record("W10 面板启用边框 / 预设色 / ∅ 透明信号正确", ok_w10,
+           f"keys={keys} alphas={[QColor(c).alpha() for c in colors]}")
+
+    # ---------------- W11 set_state 回填 ----------------
+    t = make_text()
+    t.bg_color = QColor(0, 0, 255, 64)
+    t.bg_border = True
+    t.bg_border_color = QColor(255, 0, 0)
+    t.bg_border_width = 7
+    t.bg_border_style = "dash"
+    sp.set_state(t, {})
+    ok_w11 = (
+        sp._bg_check.isChecked() and sp._bg_border_check.isChecked()
+        and sp._bg_alpha_slider.value() == 25
+        and sp._bg_border_width_slider.value() == 7
+        and sp._bg_border_style_combo.currentData() == "dash"
+        # 离屏下面板本身没 show()，子控件 isVisible() 恒 False，用 isHidden()
+        and not sp._bg_border_transparent_btn.isHidden()
+        and not sp._bg_border_width_slider.isHidden()
+    )
+    record("W11 面板状态回填颜色 / 透明度 / 线宽 / 线型", ok_w11,
+           f"alpha={sp._bg_alpha_slider.value()} width={sp._bg_border_width_slider.value()} "
+           f"style={sp._bg_border_style_combo.currentData()}")
+
+    # ---------------- W12 Canvas 应用新样式键 ----------------
+    cv = Canvas(make_image(400, 300), [], None)
+    cv.resize(900, 600)
+    cv._fit()
+    ct = make_text()
+    cv.shapes.append(ct)
+    cv._selected = ct
+    cv._apply_style({
+        "bg_color": "#40ff0000",
+        "bg_border": True,
+        "bg_border_color": "#ff00aa00",
+        "bg_border_width": 5,
+        "bg_border_style": "dot",
+    })
+    ok_cv = (
+        ct.bg_border is True and ct.bg_border_width == 5
+        and ct.bg_border_style == "dot"
+        and ct.bg_color.alpha() == 64
+        and ct.bg_border_color.green() == 170
+    )
+    cv._selected = None
+    cv._apply_style({"bg_border_width": 9, "bg_border_style": "dash"})
+    ok_cv = ok_cv and cv._bg_border_width == 9 and cv._bg_border_style == "dash"
+    record("W12 Canvas 选中标注与新建默认值都写入新键", ok_cv,
+           f"shape=({ct.bg_border},{ct.bg_border_width},{ct.bg_border_style}) "
+           f"default=({cv._bg_border_width},{cv._bg_border_style})")
+
+    # ---------------- W13 Overlay 应用新样式键 ----------------
+    ov = Overlay(make_image(400, 300), dpr=1.0)
+    ot = make_text()
+    ov.shapes.append(ot)
+    ov._selected = ot
+    ov._apply_style({
+        "bg_border": True,
+        "bg_border_color": "#ffff0000",
+        "bg_border_width": 6,
+        "bg_border_style": "dash",
+    })
+    ok_ov = (
+        ot.bg_border is True and ot.bg_border_width == 6
+        and ot.bg_border_style == "dash"
+        and ot.bg_border_color.red() == 255
+        and ov._bg_border_width == 6
+    )
+    record("W13 Overlay 同样写入新键", ok_ov,
+           f"shape=({ot.bg_border},{ot.bg_border_width},{ot.bg_border_style})")
+
+    # ---------------- W14 克隆与撤销保留边框字段 ----------------
+    cl = Canvas._clone(ct)
+    ok_cl = (
+        cl.bg_border == ct.bg_border
+        and cl.bg_border_width == ct.bg_border_width
+        and cl.bg_border_style == ct.bg_border_style
+        and QColor(cl.bg_border_color) == QColor(ct.bg_border_color)
+    )
+    cv2 = Canvas(make_image(400, 300), [], None)
+    cv2.resize(900, 600)
+    cv2._fit()
+    cv2.shapes = [make_text()]
+    cv2.shapes[0].bg_border = True
+    cv2.shapes[0].bg_border_width = 6
+    cv2.shapes[0].bg_border_style = "dash"
+    cv2.shapes[0].bg_border_color = QColor(255, 0, 0)
+    cv2.transform_image("cw")
+    cv2.undo()
+    u = cv2.shapes[0]
+    ok_w14 = (
+        ok_cl and u.bg_border is True and u.bg_border_width == 6
+        and u.bg_border_style == "dash" and u.bg_border_color.red() == 255
+    )
+    record("W14 克隆 / 撤销恢复边框全部字段", ok_w14,
+           f"clone={ok_cl} undo=({u.bg_border},{u.bg_border_width},{u.bg_border_style})")
+
+    # ---------------- W15 文档与 i18n 同步 ----------------
+    keys = ("背景透明度", "文字背景边框", "启用边框",
+            "边框颜色", "边框线宽", "边框线型")
+    ok_keys = all(k in ROWS and len(ROWS[k]) == 8 and all(ROWS[k]) for k in keys)
+    readme = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
+    markers = {
+        "en": "Background opacity", "ja": "背景の不透明度",
+        "ko": "배경 불투명도", "fr": "Opacité du fond",
+        "de": "Hintergrund-Deckkraft", "es": "Opacidad del fondo",
+        "zh_TW": "背景透明度",
+    }
+    missing = [code for code, mark in markers.items() if mark not in help_html(code)]
+    ok_w15 = (
+        "v23" in readme and "文字背景边框" in readme
+        and "文字背景透明度" in HELP_HTML and "文字背景边框" in HELP_HTML
+        and ok_keys and not missing
+    )
+    record("W15 README / 中文帮助 / 7 语言帮助 / 8 语言词条同步", ok_w15,
+           f"keys={ok_keys} missing={missing}")
+
+    for w in (sp, cv, ov, cv2):
+        w.close()
+        w.deleteLater()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -3770,6 +4061,7 @@ if __name__ == "__main__":
     test_v20_long_capture_quality()
     test_v21_shape_corner_resize()
     test_v22_shape_rotation()
+    test_v23_text_background()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

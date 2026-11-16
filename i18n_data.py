@@ -939,5 +939,37 @@ _ROWS.update({
         "Rotation sélection 90° antihoraire", "Auswahl 90° gegen den Uhrzeigersinn",
         "Rotar selección 90° antihoraria",
     ),
+
+    # -------------------------------------------------- v23 文字背景边框
+    "背景透明度": (
+        "背景透明度", "背景透明度", "Background opacity", "背景の不透明度",
+        "배경 불투명도", "Opacité du fond", "Hintergrund-Deckkraft",
+        "Opacidad del fondo",
+    ),
+    "文字背景边框": (
+        "文字背景边框", "文字背景框線", "Text background border", "文字背景の枠線",
+        "텍스트 배경 테두리", "Bordure du fond du texte",
+        "Rahmen des Texthintergrunds", "Borde del fondo del texto",
+    ),
+    "启用边框": (
+        "启用边框", "啟用框線", "Enable border", "枠線を有効にする",
+        "테두리 사용", "Activer la bordure", "Rahmen aktivieren",
+        "Activar borde",
+    ),
+    "边框颜色": (
+        "边框颜色", "框線顏色", "Border color", "枠線の色",
+        "테두리 색상", "Couleur de la bordure", "Rahmenfarbe",
+        "Color del borde",
+    ),
+    "边框线宽": (
+        "边框线宽", "框線粗細", "Border width", "枠線の太さ",
+        "테두리 두께", "Épaisseur de la bordure", "Rahmenstärke",
+        "Grosor del borde",
+    ),
+    "边框线型": (
+        "边框线型", "框線樣式", "Border line style", "枠線の種類",
+        "테두리 선 스타일", "Style de la bordure", "Rahmenlinienstil",
+        "Estilo del borde",
+    ),
 })
 

@@ -115,6 +115,10 @@ class Canvas(QWidget):
         self._width = PEN_WIDTH
         self._font_size = FONT_SIZE
         self._bg_color: QColor | None = None
+        self._bg_border = False
+        self._bg_border_color: QColor | None = QColor("#ff000000")
+        self._bg_border_width = 2
+        self._bg_border_style = "solid"
         self._line_style = "solid"
         # 新建画笔的默认端点箭头（也可在样式面板里对选中的画笔单独改）
         self._pen_arrow_start = False
@@ -289,6 +293,10 @@ class Canvas(QWidget):
         ns.font_size = s.font_size
         ns.bold = s.bold
         ns.bg_color = QColor(s.bg_color) if s.bg_color else None
+        ns.bg_border = bool(getattr(s, "bg_border", False))
+        ns.bg_border_color = (QColor(s.bg_border_color) if s.bg_border_color else None)
+        ns.bg_border_width = int(getattr(s, "bg_border_width", 2))
+        ns.bg_border_style = getattr(s, "bg_border_style", "solid")
         ns.fill_color = QColor(s.fill_color) if s.fill_color else None
         if s.rect is not None:
             ns.rect = QRect(s.rect)
@@ -338,6 +346,11 @@ class Canvas(QWidget):
             "line_style": self._line_style,
             "font_size": self._font_size,
             "bg_color": QColor(self._bg_color) if self._bg_color else None,
+            "bg_border": self._bg_border,
+            "bg_border_color": (QColor(self._bg_border_color)
+                                if self._bg_border_color else None),
+            "bg_border_width": self._bg_border_width,
+            "bg_border_style": self._bg_border_style,
             "fill_color": None,
             "pen_arrow_start": self._pen_arrow_start,
             "pen_arrow_end": self._pen_arrow_end,
@@ -369,6 +382,14 @@ class Canvas(QWidget):
                     target.bold = bool(value)
                 elif key == "bg_color":
                     target.bg_color = QColor(value) if value else None
+                elif key == "bg_border":
+                    target.bg_border = bool(value)
+                elif key == "bg_border_color":
+                    target.bg_border_color = QColor(value) if value else None
+                elif key == "bg_border_width":
+                    target.bg_border_width = int(value)
+                elif key == "bg_border_style":
+                    target.bg_border_style = value
                 elif key == "pen_arrow_start":
                     target.pen_arrow_start = bool(value)
                 elif key == "pen_arrow_end":
@@ -386,6 +407,14 @@ class Canvas(QWidget):
                     self._font_size = int(value)
                 elif key == "bg_color":
                     self._bg_color = QColor(value) if value else None
+                elif key == "bg_border":
+                    self._bg_border = bool(value)
+                elif key == "bg_border_color":
+                    self._bg_border_color = QColor(value) if value else None
+                elif key == "bg_border_width":
+                    self._bg_border_width = int(value)
+                elif key == "bg_border_style":
+                    self._bg_border_style = value
                 elif key == "pen_arrow_start":
                     self._pen_arrow_start = bool(value)
                 elif key == "pen_arrow_end":
@@ -684,6 +713,11 @@ class Canvas(QWidget):
                 font_size=self._font_size,
                 color=QColor(self._color),
                 bg_color=QColor(self._bg_color) if self._bg_color else None,
+                bg_border=bool(self._bg_border),
+                bg_border_color=(QColor(self._bg_border_color)
+                                 if self._bg_border_color else None),
+                bg_border_width=int(self._bg_border_width),
+                bg_border_style=self._bg_border_style,
                 line_style=self._line_style,
             )
             self.shapes.append(s)

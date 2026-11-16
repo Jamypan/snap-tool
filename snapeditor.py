@@ -599,7 +599,9 @@ class Shape:
 
     所有标注都支持：color（线条色/文字色）、width（粗细）、line_style（线型）。
     封闭图形（rect/ellipse/mosaic）的边框用 color，额外支持 fill_color（填充色）。
-    文字额外支持 font_size、bg_color（背景色）。
+    文字额外支持 font_size、bg_color（背景色，带 alpha 可调透明度）；
+    背景框还能描边：bg_border / bg_border_color / bg_border_width /
+    bg_border_style，边框色可设为全透明（等于不描边）。
     画笔（pen）额外支持 pen_arrow_start / pen_arrow_end：在路径起点 / 终点画箭头。
     矩形 / 椭圆 / 文字额外支持 angle：绕自身中心的旋转角度（度，顺时针为正）。
     """
@@ -616,7 +618,12 @@ class Shape:
     pos: QPoint | None = None                 # text
     font_size: int = FONT_SIZE
     bold: bool = False                        # text 加粗
-    bg_color: QColor | None = None            # text 背景色（None=透明背景）
+    bg_color: QColor | None = None            # text 背景色（None=透明背景，alpha 可调）
+    bg_border: bool = False                   # text 背景框是否描边
+    bg_border_color: QColor | None = field(   # text 背景框边框色（alpha=0 = 透明）
+        default_factory=lambda: QColor("#ff000000"))
+    bg_border_width: int = 2                  # text 背景框边框线宽
+    bg_border_style: str = "solid"            # text 背景框边框线型 solid/dash/dot
     fill_color: QColor | None = None          # 封闭图形填充色（None=不填充）
     pen_arrow_start: bool = False             # pen 路径起点箭头
     pen_arrow_end: bool = False               # pen 路径终点箭头
@@ -940,17 +947,30 @@ def _draw_shape_raw(p: QPainter, s: Shape, base_image: QImage, dpr: float,
         font.setPixelSize(s.font_size)
         font.setBold(s.bold)
         p.setFont(font)
-        # 背景色（若设置了）先画一个圆角底。
-        # drawText 的 pos 是文字基线起点（左上角），字形在 baseline 上方，
-        # 背景框需从 pos.y - ascent 开始，才能和文字对齐。
-        if s.bg_color is not None and s.bg_color.alpha() > 0:
-            fm = p.fontMetrics()
-            tw = fm.horizontalAdvance(s.text) + 8
-            th = fm.height() + 4
-            top = s.pos.y() - fm.ascent() - 2
-            p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(s.bg_color))
-            p.drawRoundedRect(QRect(s.pos.x() - 4, top, tw, th), 3, 3)
+        # 背景框用 shape_text_box() 计算，和旋转中心 / 命中框 / 旋转柄共用
+        # 同一份几何；不能在这里用 p.fontMetrics()，带旋转变换时它会与
+        # 局部坐标下的包围盒不一致。
+        box = shape_text_box(s)
+        want_bg = s.bg_color is not None and s.bg_color.alpha() > 0
+        bc = getattr(s, "bg_border_color", None)
+        want_border = (
+            bool(getattr(s, "bg_border", False))
+            and isinstance(bc, QColor) and bc.alpha() > 0
+        )
+        if not box.isNull() and (want_bg or want_border):
+            if want_bg:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QBrush(s.bg_color))
+                p.drawRoundedRect(box, 3, 3)
+            if want_border:
+                bpen = QPen(bc)
+                bpen.setWidth(max(1, int(getattr(s, "bg_border_width", 2))))
+                bpen.setJoinStyle(Qt.RoundJoin)
+                bpen.setStyle(LINE_STYLES.get(
+                    getattr(s, "bg_border_style", "solid"), Qt.SolidLine))
+                p.setPen(bpen)
+                p.setBrush(Qt.NoBrush)
+                p.drawRoundedRect(box, 3, 3)
         if rotated_text:
             path = QPainterPath()
             path.addText(QPointF(s.pos), font, s.text)
@@ -983,8 +1003,9 @@ class StylePanel(QWidget):
 
     根据「当前选中标注的类型」动态显示相关控件：
       - 所有标注：颜色、线宽、线型
-      - 封闭图形（rect/ellipse）：额外有填充色、边框色
-      - 文字（text）：额外有字号、背景色
+      - 封闭图形（rect/ellipse）：额外有填充色 + 填充透明度滑块
+      - 文字（text）：额外有字号、背景色 + 背景透明度滑块、背景边框
+        （启用开关、边框颜色含 ∅ 透明、独立线宽与线型）
 
     参数修改后实时通过 style_changed 信号通知宿主，宿主据此更新选中标注。
     """
@@ -997,6 +1018,8 @@ class StylePanel(QWidget):
         super().__init__(parent)
         self._show_pen_arrows = show_pen_arrows
         self._fill_rgb = "#0a84ff"       # 填充色 RGB（alpha 由滑块单独控制）
+        self._bg_rgb = "#000000"         # 文字背景色 RGB（alpha 由独立滑块控制）
+        self._bg_border_rgb = "#000000"  # 文字背景边框色 RGB（默认不透明）
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
         # 面板内默认用常规箭头光标（避免继承遮罩的十字光标），
@@ -1144,6 +1167,8 @@ class StylePanel(QWidget):
         root.addWidget(self._angle_box)
 
         # --- 文字背景色（文字）---
+        # 与封闭图形的「填充色」用同一套交互：预设色块 + 独立透明度滑块，
+        # 两者的颜色 / 透明度各自记忆，互不影响。
         self._bg_label = QLabel(t("文字背景色"))
         root.addWidget(self._bg_label)
         self._bg_row = QHBoxLayout()
@@ -1158,6 +1183,64 @@ class StylePanel(QWidget):
         for b in self._bg_btns:
             self._bg_grid.addWidget(b)
         root.addLayout(self._bg_grid)
+        self._bg_alpha_label = QLabel(t("背景透明度"))
+        root.addWidget(self._bg_alpha_label)
+        self._bg_alpha_slider = QSlider(Qt.Horizontal)
+        self._bg_alpha_slider.setRange(0, 100)
+        self._bg_alpha_slider.setValue(50)
+        self._bg_alpha_slider.setFocusPolicy(Qt.NoFocus)
+        self._bg_alpha_slider.setEnabled(False)
+        self._bg_alpha_slider.valueChanged.connect(self._on_bg_alpha)
+        root.addWidget(self._bg_alpha_slider)
+
+        # --- 文字背景边框（文字）---
+        self._bg_border_label = QLabel(t("文字背景边框"))
+        root.addWidget(self._bg_border_label)
+        self._bg_border_check = QCheckBox(t("启用边框"))
+        self._bg_border_check.setFocusPolicy(Qt.NoFocus)
+        self._bg_border_check.toggled.connect(self._on_bg_border_toggle)
+        root.addWidget(self._bg_border_check)
+        self._bg_border_color_label = QLabel(t("边框颜色"))
+        root.addWidget(self._bg_border_color_label)
+        self._bg_border_grid = QHBoxLayout()
+        self._bg_border_grid.setSpacing(4)
+        self._bg_border_btns = self._make_preset_color_buttons("bg_border_color")
+        for b in self._bg_border_btns:
+            self._bg_border_grid.addWidget(b)
+        # 边框色专属「∅ 透明」：与顶部文字颜色的透明按钮互不干扰
+        self._bg_border_transparent_btn = QPushButton("\u2205")
+        self._bg_border_transparent_btn.setFixedSize(22, 22)
+        self._bg_border_transparent_btn.setProperty("color", "#00000000")
+        self._bg_border_transparent_btn.setToolTip(t("透明（无边框）"))
+        self._bg_border_transparent_btn.setCursor(Qt.PointingHandCursor)
+        self._bg_border_transparent_btn.setFocusPolicy(Qt.NoFocus)
+        self._bg_border_transparent_btn.clicked.connect(
+            lambda _=False: self._emit("bg_border_color", "#00000000")
+        )
+        self._bg_border_grid.addWidget(self._bg_border_transparent_btn)
+        root.addLayout(self._bg_border_grid)
+        self._bg_border_width_label = QLabel(t("边框线宽"))
+        root.addWidget(self._bg_border_width_label)
+        self._bg_border_width_slider = QSlider(Qt.Horizontal)
+        self._bg_border_width_slider.setRange(1, 20)
+        self._bg_border_width_slider.setValue(2)
+        self._bg_border_width_slider.setFocusPolicy(Qt.NoFocus)
+        self._bg_border_width_slider.valueChanged.connect(
+            lambda v: self._emit("bg_border_width", int(v))
+        )
+        root.addWidget(self._bg_border_width_slider)
+        self._bg_border_style_label = QLabel(t("边框线型"))
+        root.addWidget(self._bg_border_style_label)
+        self._bg_border_style_combo = QComboBox()
+        self._bg_border_style_combo.setFocusPolicy(Qt.NoFocus)
+        for key, name in self._line_style_keys:
+            self._bg_border_style_combo.addItem(t(name), key)
+        self._bg_border_style_combo.currentIndexChanged.connect(
+            lambda i: self._emit(
+                "bg_border_style", self._bg_border_style_combo.itemData(i)
+            )
+        )
+        root.addWidget(self._bg_border_style_combo)
 
         # --- 端点箭头（画笔 / 直线：选中时改当前线条；无选中时设新建默认）---
         self._pen_arrow_label = QLabel(t("端点箭头"))
@@ -1184,7 +1267,18 @@ class StylePanel(QWidget):
             self._size_label, self._size_slider,
             self._bold_check,
             self._bg_label, self._bg_check,
-        ] + self._bg_btns
+            self._bg_alpha_label, self._bg_alpha_slider,
+            self._bg_border_label, self._bg_border_check,
+            self._bg_border_color_label,
+            self._bg_border_width_label, self._bg_border_width_slider,
+            self._bg_border_style_label, self._bg_border_style_combo,
+        ] + self._bg_btns + self._bg_border_btns + [self._bg_border_transparent_btn]
+        # 边框未启用时收起细节控件（仍要服从 _text_only 的整体显隐）
+        self._bg_border_detail = [
+            self._bg_border_color_label,
+            self._bg_border_width_label, self._bg_border_width_slider,
+            self._bg_border_style_label, self._bg_border_style_combo,
+        ] + self._bg_border_btns + [self._bg_border_transparent_btn]
         # 线宽/线型对文字无意义，仅在非文字时显示
         self._non_text = [
             self._width_label, self._width_slider,
@@ -1244,6 +1338,19 @@ class StylePanel(QWidget):
         self._angle_label.setText(t("旋转角度"))
         self._bg_label.setText(t("文字背景色"))
         self._bg_check.setText(t("启用"))
+        self._bg_alpha_label.setText(t("背景透明度"))
+        self._bg_border_label.setText(t("文字背景边框"))
+        self._bg_border_check.setText(t("启用边框"))
+        self._bg_border_color_label.setText(t("边框颜色"))
+        self._bg_border_transparent_btn.setToolTip(t("透明（无边框）"))
+        self._bg_border_width_label.setText(t("边框线宽"))
+        self._bg_border_style_label.setText(t("边框线型"))
+        idx_bg = self._bg_border_style_combo.currentIndex()
+        self._bg_border_style_combo.blockSignals(True)
+        for i, (_key, name) in enumerate(self._line_style_keys):
+            self._bg_border_style_combo.setItemText(i, t(name))
+        self._bg_border_style_combo.blockSignals(False)
+        self._bg_border_style_combo.setCurrentIndex(idx_bg)
         self._pen_arrow_label.setText(t("端点箭头"))
         self._pen_arrow_start.setText(t("起点加箭头"))
         self._pen_arrow_end.setText(t("终点加箭头"))
@@ -1281,23 +1388,45 @@ class StylePanel(QWidget):
             btns.append(b)
         return btns
 
-    def _alpha_byte(self) -> int:
+    @staticmethod
+    def _alpha_from(value: int) -> int:
         """滑块百分比 → QColor 的 0~255 alpha。"""
-        return int(round(max(0, min(100, self._fill_alpha_slider.value())) * 255 / 100))
+        return int(round(max(0, min(100, value)) * 255 / 100))
+
+    def _alpha_byte(self) -> int:
+        return self._alpha_from(self._fill_alpha_slider.value())
+
+    def _bg_alpha_byte(self) -> int:
+        return self._alpha_from(self._bg_alpha_slider.value())
 
     def _picked(self, key: str, col: str) -> str:
-        """预设色块点击：填充色用当前透明度，其它保持固定半透明。"""
+        """预设色块点击：填充色 / 文字背景色各用自己的透明度滑块，
+        边框色默认不透明（透明由专属 ∅ 按钮设置），其它保持固定半透明。
+        """
         if key == "fill_color":
             self._fill_rgb = col
             return self._with_alpha(col, self._alpha_byte())
+        if key == "bg_color":
+            self._bg_rgb = col
+            return self._with_alpha(col, self._bg_alpha_byte())
+        if key == "bg_border_color":
+            self._bg_border_rgb = col
+            return self._with_alpha(col, 255)
         return self._with_alpha(col)
 
     def _on_fill_alpha(self, value: int) -> None:
         if self._fill_alpha_slider.signalsBlocked():
             return
         c = QColor(self._fill_rgb)
-        c.setAlpha(int(round(max(0, min(100, value)) * 255 / 100)))
+        c.setAlpha(self._alpha_from(value))
         self._emit("fill_color", c.name(QColor.HexArgb))
+
+    def _on_bg_alpha(self, value: int) -> None:
+        if self._bg_alpha_slider.signalsBlocked():
+            return
+        c = QColor(self._bg_rgb)
+        c.setAlpha(self._alpha_from(value))
+        self._emit("bg_color", c.name(QColor.HexArgb))
 
     @staticmethod
     def _with_alpha(hex_color: str, alpha: int = 0x80) -> str:
@@ -1324,10 +1453,16 @@ class StylePanel(QWidget):
     def _on_bg_toggle(self, on: bool) -> None:
         for b in self._bg_btns:
             b.setVisible(on)
+        self._bg_alpha_slider.setEnabled(on)
         if on:
-            self._emit("bg_color", "#80000000")
+            self._emit("bg_color", self._picked("bg_color", self._bg_rgb))
         else:
             self._emit("bg_color", None)
+
+    def _on_bg_border_toggle(self, on: bool) -> None:
+        for w in self._bg_border_detail:
+            w.setVisible(on)
+        self._emit("bg_border", bool(on))
 
     # ---------------------------------------------------------- 状态回填
     def set_state(self, shape: Shape | None, defaults: dict) -> None:
@@ -1342,6 +1477,14 @@ class StylePanel(QWidget):
         font_size = shape.font_size if shape else defaults.get("font_size", FONT_SIZE)
         bg = shape.bg_color if shape else defaults.get("bg_color")
         fill = shape.fill_color if shape else None
+        bborder = (bool(getattr(shape, "bg_border", False)) if shape
+                   else bool(defaults.get("bg_border", False)))
+        bborder_color = (getattr(shape, "bg_border_color", None) if shape
+                         else defaults.get("bg_border_color"))
+        bborder_width = (int(getattr(shape, "bg_border_width", 2)) if shape
+                         else int(defaults.get("bg_border_width", 2)))
+        bborder_style = (getattr(shape, "bg_border_style", "solid") if shape
+                         else defaults.get("bg_border_style", "solid"))
 
         kind = shape.kind if shape else None
         is_shape = kind in ("rect", "ellipse", "mosaic")
@@ -1373,6 +1516,13 @@ class StylePanel(QWidget):
             w.setVisible(is_pen)
         for w in self._rotatable_only:
             w.setVisible(is_rotatable)
+        # 子组：先按类型整体显隐，再按「是否启用」显隐，避免选到非文字
+        # 标注时把文字控件单独放出来
+        for b in self._bg_btns:
+            b.setVisible(is_text and bg is not None)
+        self._bg_alpha_slider.setEnabled(bg is not None)
+        for w in self._bg_border_detail:
+            w.setVisible(is_text and bborder)
 
         # 线宽
         self._width_slider.blockSignals(True)
@@ -1419,7 +1569,7 @@ class StylePanel(QWidget):
         self._fill_check.setChecked(fill is not None)
         self._fill_check.blockSignals(False)
         for b in self._fill_btns:
-            b.setVisible(fill is not None)
+            b.setVisible(is_shape and fill is not None)
         self._fill_alpha_slider.setEnabled(fill is not None)
         if fill is not None and isinstance(fill, QColor):
             self._fill_rgb = fill.name(QColor.HexRgb)
@@ -1427,12 +1577,46 @@ class StylePanel(QWidget):
             self._fill_alpha_slider.setValue(int(round(fill.alpha() * 100 / 255)))
             self._fill_alpha_slider.blockSignals(False)
 
-        # 文字背景色
+        # 文字背景色（颜色 + 独立透明度）
         self._bg_check.blockSignals(True)
         self._bg_check.setChecked(bg is not None)
         self._bg_check.blockSignals(False)
-        for b in self._bg_btns:
-            b.setVisible(bg is not None)
+        if bg is not None and isinstance(bg, QColor):
+            self._bg_rgb = bg.name(QColor.HexRgb)
+            self._bg_alpha_slider.blockSignals(True)
+            self._bg_alpha_slider.setValue(int(round(bg.alpha() * 100 / 255)))
+            self._bg_alpha_slider.blockSignals(False)
+
+        # 文字背景边框
+        self._bg_border_check.blockSignals(True)
+        self._bg_border_check.setChecked(bborder)
+        self._bg_border_check.blockSignals(False)
+        self._bg_border_width_slider.blockSignals(True)
+        self._bg_border_width_slider.setValue(max(1, min(20, bborder_width)))
+        self._bg_border_width_slider.blockSignals(False)
+        self._bg_border_style_combo.blockSignals(True)
+        idx_b = self._bg_border_style_combo.findData(bborder_style)
+        self._bg_border_style_combo.setCurrentIndex(max(0, idx_b))
+        self._bg_border_style_combo.blockSignals(False)
+        bcur = (bborder_color.name(QColor.HexRgb).lower()
+                if isinstance(bborder_color, QColor) else "")
+        btrans = isinstance(bborder_color, QColor) and bborder_color.alpha() == 0
+        for b in self._bg_border_btns:
+            c = b.property("color").lower()
+            if c == bcur and not btrans:
+                b.setStyleSheet(
+                    f"background:{c}; border:2px solid #ffffff; border-radius:4px;"
+                )
+            else:
+                b.setStyleSheet(
+                    f"background:{c}; border:1px solid #555; border-radius:4px;"
+                )
+        self._bg_border_transparent_btn.setStyleSheet(
+            "color:#e8e8e8; background:#3c3c3c; border:2px solid #ffffff;"
+            "border-radius:4px; padding:0;" if btrans else
+            "color:#e8e8e8; background:#3c3c3c; border:1px dashed #888;"
+            "border-radius:4px; padding:0;"
+        )
 
         # 颜色块高亮当前色：当前色加白色描边，其余用灰描边
         cur_hex = color.name(QColor.HexRgb).lower() if isinstance(color, QColor) else str(color).lower()
@@ -2104,6 +2288,10 @@ class Overlay(QWidget):
         self._width = PEN_WIDTH
         self._font_size = FONT_SIZE
         self._bg_color: QColor | None = None
+        self._bg_border = False
+        self._bg_border_color: QColor | None = QColor("#ff000000")
+        self._bg_border_width = 2
+        self._bg_border_style = "solid"
         self._line_style = "solid"
         # 新建画笔 / 直线的默认端点箭头（也可在样式面板里对选中项单独改）
         self._pen_arrow_start = False
@@ -2371,6 +2559,10 @@ class Overlay(QWidget):
             "width": self._width,
             "font_size": self._font_size,
             "bg_color": self._bg_color,
+            "bg_border": self._bg_border,
+            "bg_border_color": self._bg_border_color,
+            "bg_border_width": self._bg_border_width,
+            "bg_border_style": self._bg_border_style,
             "line_style": self._line_style,
             "pen_arrow_start": self._pen_arrow_start,
             "pen_arrow_end": self._pen_arrow_end,
@@ -2518,6 +2710,15 @@ class Overlay(QWidget):
         if "bg_color" in changes:
             bg = changes["bg_color"]
             self._bg_color = QColor(bg) if bg else None
+        if "bg_border" in changes:
+            self._bg_border = bool(changes["bg_border"])
+        if "bg_border_color" in changes:
+            bc = changes["bg_border_color"]
+            self._bg_border_color = QColor(bc) if bc else None
+        if "bg_border_width" in changes:
+            self._bg_border_width = int(changes["bg_border_width"])
+        if "bg_border_style" in changes:
+            self._bg_border_style = changes["bg_border_style"]
         if "pen_arrow_start" in changes:
             self._pen_arrow_start = bool(changes["pen_arrow_start"])
         if "pen_arrow_end" in changes:
@@ -2538,6 +2739,15 @@ class Overlay(QWidget):
                 s.line_style = changes["line_style"]
             if "bg_color" in changes:
                 s.bg_color = QColor(changes["bg_color"]) if changes["bg_color"] else None
+            if "bg_border" in changes:
+                s.bg_border = bool(changes["bg_border"])
+            if "bg_border_color" in changes:
+                bc = changes["bg_border_color"]
+                s.bg_border_color = QColor(bc) if bc else None
+            if "bg_border_width" in changes:
+                s.bg_border_width = int(changes["bg_border_width"])
+            if "bg_border_style" in changes:
+                s.bg_border_style = changes["bg_border_style"]
             if "fill_color" in changes:
                 fc = changes["fill_color"]
                 s.fill_color = QColor(fc) if fc else None
@@ -3300,6 +3510,11 @@ class Overlay(QWidget):
                 font_size=self._font_size,
                 color=QColor(self._color),
                 bg_color=QColor(self._bg_color) if self._bg_color else None,
+                bg_border=bool(self._bg_border),
+                bg_border_color=(QColor(self._bg_border_color)
+                                 if self._bg_border_color else None),
+                bg_border_width=int(self._bg_border_width),
+                bg_border_style=self._bg_border_style,
                 line_style=self._line_style,
             )
             self.shapes.append(s)
