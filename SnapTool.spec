@@ -13,6 +13,9 @@ SnapTool.spec —— 截屏助手 Windows 绿色版构建配置
     PaddleOCR 降级分支是函数内懒加载，静态分析仍会把它拖进产物。
     排除后发行版实际链路是 RapidOCR → Windows 内置 OCR → Tesseract。
   * upx=False：onnxruntime / OpenCV 的 DLL 被 UPX 压缩后容易加载失败。
+  * v25 体积优化：collect_all 之后按路径过滤 Qt 冗余插件 / 示例模型 /
+    包元数据 / 未使用的扩展。3 个 OCR 模型、cv2.pyd、Qt6Core/Gui/Widgets、
+    OpenSSL 运行库一律保留，功能不变。optimize 保持 0（numpy 需要 docstring）。
 """
 from PyInstaller.utils.hooks import collect_all
 
@@ -69,28 +72,67 @@ a = Analysis(
     runtime_hooks=[],
     excludes=excludes,
     noarchive=False,
+    # 保持 optimize=0：试过 2（-OO 去掉 docstring），numpy 的
+    # _core/overrides.py 用 add_docstring 装饰函数，docstring 变 None 后
+    # 冻结版启动直接 TypeError: argument docstring should be a str。
+    # 源码自身没有 assert，但第三方库依赖 docstring，不能开 -OO。
     optimize=0,
 )
 
-# ---- 剔除用不到的大体积组件（约 80MB） -------------------------------------
-# 本工具只用 QtWidgets 做 2D 绘制、只用 cv2 做图像拼接，不碰视频编码 / QML /
-# PDF / 软件 OpenGL / Qt 语言包。静态分析会把它们一并收进来，这里显式过滤。
+# ---- 剔除用不到的大体积组件 -------------------------------------------------
+# 本工具只用 QtWidgets 做 2D 绘制、只用 cv2 做长截图模板匹配，不碰视频编码 /
+# QML / PDF / OpenGL / 虚拟键盘 / 网络 / SVG / AVIF，也不联网。静态分析会把
+# 整个 Qt 插件目录和几个间接依赖一起收进来，这里按路径显式过滤。
+# 刻意保留：Qt6Network.dll / QtNetwork.pyd（PySide6 包内可能引用）、
+# libcrypto / libssl（Python ssl 模块的 C 依赖）、LICENSE / ThirdPartyNotices
+# （第三方许可证文本，分发时应当随附）。
 def _norm(entry_name):
     return str(entry_name).replace('\\', '/').lower()
 
 
 _drop_binaries = (
+    # --- 既有：视频编码 / 软件 OpenGL ---
     'opencv_videoio_ffmpeg',     # cv2 的两份 ffmpeg DLL，约 56MB
     'opengl32sw.dll',            # Qt 软件 OpenGL 后备，约 20MB
-    'qt6quick.dll', 'qt6qml.dll', 'qt6pdf.dll',
+    # --- Qt 模块本体：只用 Core / Gui / Widgets ---
+    # 用短子串，避免 'qt6qml.dll' 漏掉 Qt6QmlMeta / Models / WorkerScript
+    'qt6quick', 'qt6qml', 'qt6pdf',
+    'qt6virtualkeyboard', 'qt6opengl', 'qt6svg',
+    # --- Qt 插件：平台只留 qwindows；图片只留 ico / jpeg / webp（PNG 内置）---
+    'plugins/platforms/qdirect2d', 'plugins/platforms/qminimal',
+    'plugins/platforms/qoffscreen',
+    'plugins/imageformats/qgif', 'plugins/imageformats/qicns',
+    'plugins/imageformats/qtga', 'plugins/imageformats/qtiff',
+    'plugins/imageformats/qwbmp', 'plugins/imageformats/qpdf',
+    'plugins/imageformats/qsvg', 'plugins/iconengines/qsvgicon',
+    'plugins/tls/', 'plugins/networkinformation/', 'plugins/generic/',
+    'qtvirtualkeyboardplugin',
+    # --- 间接依赖里用不到的大体积扩展 ---
+    'pil/_avif',                              # Pillow AVIF 插件，程序只读写 PNG/JPG/WEBP/ICO
+    'cryptography/hazmat/bindings/_rust',     # 离线程序不用 TLS / 证书
 )
 a.binaries = [
     entry for entry in a.binaries
     if not any(key in _norm(entry[0]) for key in _drop_binaries)
 ]
+
+# 数据文件：示例模型 / 包元数据 / 类型标注 / 编码检测语料都不是运行时需要。
+# rapidocr/models 下的 3 个 PP-OCR 模型、ocr_test.png、app.ico、头像一律保留。
+_drop_datas = (
+    'pyside6/translations/',
+    'onnxruntime/datasets/',       # 3 个 onnxruntime 自带示例模型，不是 OCR 模型
+    'onnxruntime/tools/',
+    'onnxruntime/transformers/',
+    'onnxruntime/quantization/',
+    '.dist-info/',
+    '/py.typed',
+    '.pyi',
+    'chardet/models/',             # requests 链的编码检测语料
+    'certifi/cacert.pem',          # 程序不联网
+)
 a.datas = [
     entry for entry in a.datas
-    if 'pyside6/translations/' not in _norm(entry[0])
+    if not any(key in _norm(entry[0]) for key in _drop_datas)
 ]
 
 pyz = PYZ(a.pure)

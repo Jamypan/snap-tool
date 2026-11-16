@@ -37,7 +37,8 @@
 
 | 版本 | 主要差异 | 存放位置 |
 |---|---|---|
-| **当前版本（v24）** | 上面全部功能 + **修正文字输入位置**（输入框与最终绘制像素级对齐，缩放 / 高 DPI / 双击编辑均不漂移）+ 10 项新增自测（合计 234 项） | 当前工作区源码，Git 最新提交 / 标签 `v24` |
+| **当前版本（v25）** | 上面全部功能 + **绿色版体积优化**（只改 `SnapTool.spec`，删 378 个冗余文件；294 MB → 265 MB、zip 130 MB → 117 MB，OCR / 截图 / 长截图功能不变）+ 4 项新增自测（合计 238 项） | 当前工作区源码，Git 最新提交 / 标签 `v25` |
+| v24 | **修正文字输入位置**（输入框与最终绘制像素级对齐，缩放 / 高 DPI / 双击编辑均不漂移）+ 10 项新增自测（合计 234 项） | 标签 `v24` |
 | v23 | **文字背景透明度滑块**（与椭圆填充色同套交互、各自独立）+ **文字背景边框**（颜色可透明 + 独立线宽 / 线型）+ 15 项新增自测（合计 224 项） | 标签 `v23` |
 | v22 | **矩形 / 椭圆 / 文字旋转**（旋转柄自由旋转 + Shift 吸附 + 样式面板角度 + 菜单 90° 步进）+ **整图旋转时文字跟着一起转**；修正 Qt6 旋转文字基线偏移（改用字形路径绘制）+ 17 项新增自测（合计 209 项） | 标签 `v22` |
 | v21 | **矩形 / 椭圆四角拖柄缩放**（Overlay 与窗口编辑器通用、对角固定 / 翻转 / 最小尺寸保护、放缩后手感一致）+ 15 项新增自测（合计 192 项） | 标签 `v21` |
@@ -63,7 +64,7 @@ git switch -c line-ocr v3-line-ocr      # 回到只改取字的那一版
 git switch -c panel-ocr v2-panel-ocr    # 回到整块面板那一版
 ```
 
-> 绿色版发行包 `dist/SnapTool-win-x64.zip` 每次发版都会重新打包，当前对应 **v24**；历次可执行文件按版本保留在 `dist/v16` ~ `dist/v24`，方便对比回滚。若要自己重建，运行 `build-exe.bat`。
+> 绿色版发行包 `dist/SnapTool-win-x64.zip` 每次发版都会重新打包，当前对应 **v25**；历次可执行文件按版本保留在 `dist/v16` ~ `dist/v25`，方便对比回滚。若要自己重建，运行 `build-exe.bat`。
 
 ## 快速开始
 
@@ -129,7 +130,7 @@ pip install PySide6 Pillow numpy opencv-python pyinstaller rapidocr onnxruntime
 pyinstaller --noconfirm --clean SnapTool.spec
 ```
 
-也可以直接双击 `build-exe.bat`（自动挑选装齐依赖的解释器）。产物是 `dist\SnapTool\` 里的 `SnapTool.exe` + `_internal\`，约 290 MB；压成 zip 后约 130 MB（本机已生成 `dist\SnapTool-win-x64.zip`；`build/` 与 `dist/` 按 `.gitignore` 不入库，随时可用 `build-exe.bat` 重建）。
+也可以直接双击 `build-exe.bat`（自动挑选装齐依赖的解释器）。产物是 `dist\SnapTool\` 里的 `SnapTool.exe` + `_internal\`，**v25 实测约 265 MB / 280 个文件**；压成 zip 后约 **117 MB**（v24 是 294 MB / 658 个文件、zip 130 MB）。本机已生成 `dist\SnapTool-win-x64.zip`；`build/` 与 `dist/` 按 `.gitignore` 不入库，随时可用 `build-exe.bat` 重建。
 
 **分发时把整个 `SnapTool` 目录压缩成 zip / 7z，不要只单独拷 exe。**
 
@@ -147,7 +148,9 @@ SnapTool.exe --selftest
 |---|---|
 | OCR 模型 | 3 个 `.onnx`（约 31 MB）随包自带，**不联网、不上传、不依赖系统中文语言包** |
 | 排除 Paddle | `SnapTool.spec` 显式排除 `paddle / paddleocr / paddlex / ppocr`，否则懒加载 import 会把 380 MB+ 框架拖进产物 |
-| 体积裁剪 | 剔除 cv2 的两份 ffmpeg 视频 DLL、Qt 的 QML/PDF/软件 OpenGL/翻译文件，省约 97 MB |
+| 体积裁剪 | 早期剔除 cv2 的两份 ffmpeg 视频 DLL、Qt 的 QML/PDF/软件 OpenGL/翻译文件（省约 97 MB）；**v25 再删 378 个冗余文件**：Qt 可选插件（只留 `qwindows` + ico/jpeg/webp + windows 样式）、onnxruntime 自带示例模型 / tools / transformers / quantization 源码副本、`*.dist-info` / `py.typed` / `.pyi`、chardet 语料、certifi 根证书，以及程序根本不用的 `cryptography/_rust.pyd`(9.44 MB) 与 `PIL/_avif.pyd`(7.53 MB)。目录 294 → 265 MB，zip 130 → 117 MB，功能不变 |
+| 刻意保留 | 3 个 PP-OCR 模型、`cv2.pyd`、Qt6Core/Gui/Widgets/Network、OpenSSL 运行库、LICENSE / ThirdPartyNotices（第三方许可证随附） |
+| 字节码优化 | 保持 `optimize=0`：试过 `optimize=2`（-OO 去 docstring），numpy 的 `add_docstring` 装饰器拿到 `None` 会直接 `TypeError`，冻结版启动即失败 |
 | UPX | 保持 `upx=False`：onnxruntime / OpenCV 的 DLL 压缩后容易加载失败 |
 | 无控制台 | `--windowed`，不会弹黑框；程序内异常不会打到 stderr（RapidOCR 日志已静默） |
 | 首次取字 | 加载模型约 1~5 秒，之后引擎常驻缓存 |

@@ -226,6 +226,12 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     X9  连续输入互不干扰、撤销恢复正确位置
     X10 README / 中文帮助 / 7 语言帮助同步
 
+  Stage Y  v25：绿色版体积优化（只改打包配置的回归）
+    Y1  spec 保留冗余文件过滤规则
+    Y2  过滤规则不误伤必需依赖
+    Y3  optimize=0（numpy docstring 回归锁定）
+    Y4  README 同步 v25 体积数字
+
   Stage V  v22：矩形 / 椭圆 / 文字旋转
     V1  角度归一化与旋转变换往返
     V2  文字包围盒 / 旋转外接框 / 旋转中心
@@ -4289,6 +4295,54 @@ def test_v24_text_input_position() -> None:
            f"missing={missing}")
 
 
+def test_v25_bundle_size() -> None:
+    """Stage Y：v25 绿色版瘦身只改打包配置，锁住过滤规则与 optimize 设置。"""
+    import re
+    from pathlib import Path
+
+    spec = Path(__file__).with_name("SnapTool.spec").read_text(encoding="utf-8")
+    readme = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
+
+    # ---------------- Y1 冗余文件过滤规则仍在 ----------------
+    must_drop = (
+        "opencv_videoio_ffmpeg", "opengl32sw.dll", "qt6qml",
+        "qt6virtualkeyboard", "qt6opengl", "qt6svg",
+        "plugins/platforms/qdirect2d", "plugins/imageformats/qgif",
+        "plugins/tls/", "pil/_avif", "cryptography/hazmat/bindings/_rust",
+        "onnxruntime/datasets/", "onnxruntime/tools/", ".dist-info/",
+        "chardet/models/", "certifi/cacert.pem",
+    )
+    missing = [k for k in must_drop if k not in spec]
+    record("Y1 spec 保留冗余文件过滤规则", not missing, f"missing={missing}")
+
+    # ---------------- Y2 过滤名单不能误伤必需文件 ----------------
+    def tuple_items(var: str) -> list[str]:
+        m = re.search(var + r"\s*=\s*\((.*?)\n\)", spec, re.S)
+        return re.findall(r"'([^']+)'", m.group(1)) if m else []
+
+    items = [x.lower() for x in tuple_items("_drop_binaries")
+             + tuple_items("_drop_datas")]
+    forbidden = (
+        "cv2/cv2", "pp-ocrv6", "onnxruntime/capi", "qt6core", "qt6gui",
+        "qt6widgets", "qt6network", "qwindows", "qico", "qjpeg", "qwebp",
+        "libcrypto", "libssl", "ocr_test", "app.ico", "avatar",
+    )
+    bad = [(k, f) for k in items for f in forbidden if f in k]
+    record("Y2 过滤规则不误伤必需依赖", bool(items) and not bad,
+           f"rules={len(items)} bad={bad}")
+
+    # ---------------- Y3 optimize 必须保持 0 ----------------
+    ok_y3 = (re.search(r"optimize\s*=\s*0\s*,", spec) is not None
+             and "numpy" in spec and "docstring" in spec)
+    record("Y3 optimize=0（numpy docstring 回归锁定）", ok_y3,
+           f"optimize0={bool(re.search(r'optimize\s*=\s*0\s*,', spec))}")
+
+    # ---------------- Y4 README 体积数字同步 ----------------
+    marks = ("v25", "265 MB", "117 MB", "238 项")
+    absent = [m for m in marks if m not in readme]
+    record("Y4 README 同步 v25 体积数字", not absent, f"absent={absent}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -4322,6 +4376,7 @@ if __name__ == "__main__":
     test_v22_shape_rotation()
     test_v23_text_background()
     test_v24_text_input_position()
+    test_v25_bundle_size()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
