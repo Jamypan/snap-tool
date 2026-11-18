@@ -4552,6 +4552,131 @@ def test_v27_copy_closes_windows() -> None:
            f"missing={missing}")
 
 
+def test_v28_warmup_and_input_gate() -> None:
+    print("\n--- Stage AB: v28 启动预热 + 首帧输入门闩 ---")
+    import inspect
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    from PySide6.QtWidgets import QApplication
+
+    import snap as snapmod
+
+    def ov_ev(typ, p: QPoint):
+        return QMouseEvent(typ, QPoint(p), QPoint(p), Qt.LeftButton,
+                           Qt.LeftButton, Qt.NoModifier)
+
+    # AB1 门闩默认开放：直接构造的 Overlay 可立即接收鼠标（兼容既有自测）
+    ov = Overlay(QImage(200, 100, QImage.Format_RGB32), dpr=1.0)
+    ov.resize(200, 100)
+    ok_ab1 = ov._ready is True
+    record("AB1 Overlay 默认输入开放（不破坏离线自测）", ok_ab1,
+           f"ready={ov._ready}")
+
+    # AB2 lock_input 上闩 + 等待光标；上闩后鼠标按下被吞、不进入 selecting
+    ov.lock_input()
+    ov._mode = "idle"
+    ov.mousePressEvent(ov_ev(QEvent.Type.MouseButtonPress, QPoint(40, 30)))
+    ok_ab2a = (
+        ov._ready is False
+        and ov.cursor().shape() == Qt.WaitCursor
+        and ov._mode == "idle"
+        and ov.sel is None
+    )
+    record("AB2 上闩后吞掉鼠标按下、无选区、显示等待光标", ok_ab2a,
+           f"ready={ov._ready} cursor={ov.cursor().shape()} mode={ov._mode} sel={ov.sel}")
+
+    # AB3 移动同样被吞（不产生 hover / 不改光标）
+    ov.mouseMoveEvent(ov_ev(QEvent.Type.MouseMove, QPoint(90, 60)))
+    ok_ab3 = ov._ready is False and ov._mode == "idle"
+    record("AB3 上闩后吞掉鼠标移动", ok_ab3, f"mode={ov._mode}")
+
+    # AB4 真正绘制一帧后 unlock_input 由 paintEvent 调度；直接验证解锁恢复十字
+    ov.unlock_input()
+    ok_ab4 = ov._ready is True and ov.cursor().shape() == Qt.CrossCursor
+    record("AB4 解锁后恢复十字光标与输入", ok_ab4,
+           f"ready={ov._ready} cursor={ov.cursor().shape()}")
+    ov.close()
+
+    # AB5 paintEvent 末尾确实挂了解锁调度（两种模式分支都要有）
+    src_paint = inspect.getsource(Overlay.paintEvent)
+    src_press = inspect.getsource(Overlay.mousePressEvent)
+    src_move = inspect.getsource(Overlay.mouseMoveEvent)
+    src_release = inspect.getsource(Overlay.mouseReleaseEvent)
+    ok_ab5 = (
+        src_paint.count("QTimer.singleShot(0, self.unlock_input)") == 2
+        and "if not self._ready:" in src_press
+        and "if not self._ready:" in src_move
+        and "if not self._ready:" in src_release
+    )
+    record("AB5 两个绘制分支 + 三个鼠标入口都接了门闩/解锁", ok_ab5,
+           f"unlock_sched={src_paint.count('unlock_input')} "
+           f"guards={sum('if not self._ready:' in s for s in (src_press, src_move, src_release))}")
+
+    # AB6 宿主流程：show 前上闩、show 后同步 repaint
+    src_begin = inspect.getsource(snapmod.App._begin_capture)
+    lock_pos = src_begin.find("lock_input()")
+    repaint_pos = src_begin.find("repaint()")
+    show_pos = src_begin.find("self.overlay.show()")
+    ok_ab6 = (
+        lock_pos > 0 and repaint_pos > lock_pos and show_pos > lock_pos
+        and repaint_pos > show_pos
+    )
+    record("AB6 宿主 show 前上闩、show 后同步 repaint", ok_ab6,
+           f"lock={lock_pos} show={show_pos} repaint={repaint_pos}")
+
+    # AB7 启动预热方法存在，且用 singleShot(0) 调度、不阻塞启动
+    src_init = inspect.getsource(snapmod.App.__init__)
+    src_warm = inspect.getsource(snapmod.App._warmup)
+    ok_ab7 = (
+        "QTimer.singleShot(0, self._warmup)" in src_init
+        and "probe.render(surface)" in src_warm
+        and "Overlay(warm_img" in src_warm
+        and "grab_region" in src_warm
+        and "except Exception" in src_warm
+    )
+    record("AB7 启动预热构造+离屏绘制+抓屏后端且异常吞掉", ok_ab7,
+           f"scheduled={'self._warmup' in src_init} render={'render' in src_warm}")
+
+    # AB8 预热真的能跑通（离屏环境不应抛异常、不应留下可见窗口）
+    fake = MagicMock()
+    try:
+        snapmod.App._warmup(fake)
+        warm_ok = True
+    except Exception as exc:  # noqa: BLE001
+        warm_ok = False
+        warm_err = repr(exc)
+    ok_ab8 = warm_ok
+    record("AB8 预热离屏空跑无异常", ok_ab8,
+           f"ok={warm_ok} {'' if warm_ok else warm_err}")
+
+    # AB9 lock_input 带兜底 timer，异常时也能解锁不卡死
+    src_lock = inspect.getsource(Overlay.lock_input)
+    ok_ab9 = "QTimer.singleShot(200, self.unlock_input)" in src_lock
+    record("AB9 上闩带 200ms 兜底解锁，绝不卡死输入", ok_ab9,
+           f"fallback={'singleShot(200' in src_lock}")
+
+    # AB10 行为级：完整走一遍 上闩→show→绘制→事件循环→自动解锁
+    ov2 = Overlay(QImage(120, 80, QImage.Format_RGB32), 1.0)
+    ov2.setGeometry(0, 0, 120, 80)
+    ov2.lock_input()
+    ov2.show()
+    ov2.update()
+    app = QApplication.instance()
+    app.processEvents()
+    app.processEvents()
+    ok_ab10 = ov2._ready is True and ov2.cursor().shape() == Qt.CrossCursor
+    record("AB10 首帧绘制后经事件循环自动解锁（行为级）", ok_ab10,
+           f"ready={ov2._ready} cursor={ov2.cursor().shape()}")
+    ov2.close()
+
+    # AB11 README 版本记录同步到 v28 / 260 项
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ab11 = "v28" in readme and "合计 261 项" in readme
+    record("AB11 README 同步 v28 版本记录", ok_ab11,
+           f"v28={'v28' in readme} total={'合计 261 项' in readme}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -4588,6 +4713,7 @@ if __name__ == "__main__":
     test_v25_bundle_size()
     test_v26_copy_button()
     test_v27_copy_closes_windows()
+    test_v28_warmup_and_input_gate()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

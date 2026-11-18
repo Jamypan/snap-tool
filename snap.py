@@ -577,6 +577,38 @@ class App:
         self._update_hotkey_texts()
         self.main_window.show()
 
+        # v28 启动预热：把首次截图才会触发的一次性开销（系统字体加载、工具条
+        # 图标生成、全屏 QPainter 光栅化、PIL/GDI 抓屏后端初始化）挪到启动后
+        # 的空闲时刻，避免第一次按热键时现做这些事、出现画面跟不上鼠标的卡顿。
+        # singleShot(0) 让主窗口先绘制显示，预热在事件循环空闲时跑，不挡启动。
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._warmup)
+
+    def _warmup(self) -> None:
+        """v28：离屏空跑一次 Overlay 构造 + 绘制 + 抓屏，预热一次性资源。
+
+        全程不 show 窗口、不影响用户；任何异常都吞掉，绝不让预热拖垮启动。
+        """
+        # 1) 构造隐藏 Overlay：触发 QFont/QFontMetrics、Toolbar/StylePanel/
+        #    OcrPanel/OcrLayer 子控件与图标的一次性初始化。
+        # 2) render 到离屏图：走一遍完整 paintEvent，预热 QPainter 光栅化管线、
+        #    首帧 blit 与字体度量缓存。
+        try:
+            warm_img = QImage(64, 48, QImage.Format_RGB32)
+            warm_img.fill(0xFF202020)
+            probe = Overlay(warm_img, 1.0)
+            probe.resize(64, 48)
+            surface = QImage(64, 48, QImage.Format_RGB32)
+            probe.render(surface)
+            probe.deleteLater()
+        except Exception:  # noqa: BLE001
+            pass
+        # 3) 抓 1×1 区域：初始化 PIL ImageGrab / GDI 后端，首次真截图不再现初始化
+        try:
+            snapback.grab_region(snapback.ScreenRect(0, 0, 1, 1))
+        except Exception:  # noqa: BLE001
+            pass
+
     # ------------------------------------------------------------ 热键
     def _try_register(self, hk: Hotkey) -> bool:
         """注销旧热键后注册 hk；失败时热键保持未注册状态，由调用方回滚。"""
@@ -871,12 +903,18 @@ class App:
         self.overlay.to_editor.connect(self._on_to_editor)
         self.overlay.copy_only.connect(self._on_copy_only)
 
+        # v28 输入门闩：show 之前先上闩，屏蔽鼠标并显示等待光标。
+        self.overlay.lock_input()
         # 用 setGeometry + show 而不是 showFullScreen：
         # 后者只覆盖主屏，多显示器下会漏掉其他屏幕。
         self.overlay.show()
         self.overlay.raise_()
         self.overlay.activateWindow()
         self.overlay.setFocus()
+        # v28 首帧同步绘制：show() 只把窗口排队等事件循环绘制，直接返回时
+        # 画面还没上屏，鼠标却能操作，导致「框选完了画面才跳出来」。
+        # repaint() 同步触发 paintEvent 立即画完首帧，其末尾会解锁输入。
+        self.overlay.repaint()
 
     def _pick_window(self, pos: QPoint, client: bool = False):
         """Overlay 局部逻辑坐标 → 物理坐标 → Win32 窗口枚举 → 逻辑矩形。

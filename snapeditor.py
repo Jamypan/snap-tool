@@ -2297,6 +2297,9 @@ class Overlay(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCursor(Qt.CrossCursor)
+        # v28 输入门闩：默认开放，不破坏「直接构造 Overlay」的离屏自测用法。
+        # 只有真实截图流程由宿主 lock_input() 上闩，首帧画面画完自动解锁。
+        self._ready = True
         # 关键：paintEvent 会完整覆盖整个窗口，禁止 Qt 先擦背景。
         # 否则顶层窗口拖动框选时会被反复清空，导致选区"不动态显示"/闪烁。
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
@@ -2463,6 +2466,30 @@ class Overlay(QWidget):
             self._window_picker = None
             self._mode = "idle"
         self.update()
+
+    def lock_input(self) -> None:
+        """v28：遮罩 show 之前上闩，暂时屏蔽鼠标输入与十字光标。
+
+        遮罩 show() 后窗口立即可收鼠标事件、光标立刻变十字，但首帧画面还在
+        事件循环里排队绘制。快速拖动时输入会跑在画面前面，出现「选区已完成、
+        画面才跳出来」的错位。上闩后等首帧真正画完（paintEvent 里调
+        unlock_input）再开放输入，保证「看到画面」先于「能操作画面」。
+        """
+        self._ready = False
+        # 准备阶段用等待光标，明确告诉用户画面还在加载
+        self.setCursor(Qt.WaitCursor)
+        self._cursor_cache = Qt.WaitCursor
+        # 兜底：万一 paintEvent 因异常未走到解锁分支，200ms 后强制解锁，
+        # 绝不让用户卡在「画面已出却不能操作」的状态。unlock_input 幂等。
+        QTimer.singleShot(200, self.unlock_input)
+
+    def unlock_input(self) -> None:
+        """首帧绘制完成后调用：恢复十字光标并开放鼠标输入（幂等）。"""
+        if self._ready:
+            return
+        self._ready = True
+        self.setCursor(Qt.CrossCursor)
+        self._cursor_cache = Qt.CrossCursor
 
     def set_capture_mode(self, mode: str, window_picker=None) -> None:
         """在 setGeometry 之后、show 之前调用。
@@ -3081,6 +3108,10 @@ class Overlay(QWidget):
             self._cursor_cache = cur
 
     def mousePressEvent(self, ev) -> None:
+        # v28 输入门闩：首帧画面还没画出来前，吞掉鼠标按下，避免用户框选
+        # 的画面还没渲染就已完成操作（表现为「窗口才跳出来」）。
+        if not self._ready:
+            return
         # 取字结果面板可见时，鼠标事件完全交给面板，不触发画标注/拖选区
         if self._ocr_active():
             return
@@ -3257,6 +3288,9 @@ class Overlay(QWidget):
             self._dirty = None
 
     def mouseMoveEvent(self, ev) -> None:
+        # v28 输入门闩：首帧未绘制前不处理移动，也不更新悬停高亮
+        if not self._ready:
+            return
         if self._ocr_active():
             # 面板期间截图区不可交互，光标统一为常规箭头
             if self._cursor_cache != Qt.ArrowCursor:
@@ -3379,6 +3413,9 @@ class Overlay(QWidget):
                 self._cursor_cache = cur
 
     def mouseReleaseEvent(self, ev) -> None:
+        # v28 输入门闩：首帧未绘制前忽略松开，避免与吞掉的 press 状态错配
+        if not self._ready:
+            return
         pos = ev.position().toPoint()
 
         if self._mode == "selecting":
@@ -3775,6 +3812,9 @@ class Overlay(QWidget):
             )
             self._last_painted_sel = None
             p.end()
+            # v28：窗口模式首帧也在这里画完，同样要解锁（见方法末尾说明）
+            if not self._ready:
+                QTimer.singleShot(0, self.unlock_input)
             return
 
         if sel and not sel.isEmpty():
@@ -3899,6 +3939,11 @@ class Overlay(QWidget):
         # 记录本次实际画出的选区，供下一次 _repaint 计算「擦残影」脏区
         self._last_painted_sel = QRect(sel) if sel and not sel.isEmpty() else None
         p.end()
+
+        # v28：首帧画面真正绘制完成，开放鼠标输入。用 singleShot(0) 再让出
+        # 一次事件循环，让这一帧先被合成器提交上屏，再接受用户的拖动。
+        if not self._ready:
+            QTimer.singleShot(0, self.unlock_input)
 
     @staticmethod
     def _handle_points(r: QRect) -> list[QPoint]:
