@@ -4452,6 +4452,106 @@ def test_v26_copy_button() -> None:
            f"bad={bad} readme={'v26' in readme}")
 
 
+def test_v27_copy_closes_windows() -> None:
+    print("\n--- Stage AA: v27 复制关两窗 / 打勾开编辑器 ---")
+    import inspect
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import snap as snapmod
+    from snap_editor import EditorWindow
+
+    # AA1 复制路径：复制原图 + 不恢复旧窗口 + 关编辑器 + 隐藏主窗口
+    fake = MagicMock()
+    fake._hidden_windows = ["stale"]
+    cimg = QImage(48, 24, QImage.Format_RGB32)
+    cimg.fill(QColor(5, 6, 7))
+    snapmod.App._on_copy_only(fake, cimg)
+    fake._close_overlay.assert_called_once_with(restore=False)
+    ok_aa1 = (
+        fake._copy_to_clipboard.called
+        and fake._close_editor_silently.called
+        and fake.main_window.hide.called
+        and fake._hidden_windows == []
+    )
+    record("AA1 复制关闭截图编辑与截屏助手、不恢复旧窗口", ok_aa1,
+           f"restore={fake._close_overlay.call_args} "
+           f"editor={fake._close_editor_silently.called} "
+           f"main_hide={fake.main_window.hide.called} hidden={fake._hidden_windows}")
+
+    # AA2 关闭旧编辑器先断开 closed 回调，避免主窗口被弹回来
+    ed = MagicMock()
+    fake2 = MagicMock()
+    fake2.editor = ed
+    snapmod.App._close_editor_silently(fake2)
+    ok_aa2 = (
+        fake2.editor is None
+        and ed.closed.disconnect.called
+        and ed.close.called
+        and ed.deleteLater.called
+        and not fake2._on_editor_closed.called
+    )
+    record("AA2 关闭编辑器先断开 closed 回调", ok_aa2,
+           f"editor={fake2.editor} disconnect={ed.closed.disconnect.called} "
+           f"close={ed.close.called}")
+
+    # AA3 真实编辑器：silent close 不触发回调且窗口隐藏
+    real_ed = EditorWindow(QImage(80, 60, QImage.Format_RGB32), [], Path("."))
+    holder = SimpleNamespace(editor=real_ed, calls=0)
+    def _on_closed() -> None:
+        holder.calls += 1
+    holder._on_editor_closed = _on_closed
+    real_ed.closed.connect(_on_closed)
+    real_ed.show()
+    snapmod.App._close_editor_silently(holder)
+    ok_aa3 = holder.editor is None and holder.calls == 0 and not real_ed.isVisible()
+    record("AA3 真实编辑器关闭后回调未触发且窗口隐藏", ok_aa3,
+           f"calls={holder.calls} visible={real_ed.isVisible()}")
+    real_ed.deleteLater()
+
+    # AA4 打勾路径：隐藏主窗口 + 打开编辑器
+    fake3 = MagicMock()
+    fake3.overlay = MagicMock()
+    fake3.editor = MagicMock()
+    fake3._hidden_windows = []
+    snapmod.App._on_to_editor(fake3, cimg, [])
+    ok_aa4 = fake3.main_window.hide.called and fake3._open_editor.called
+    record("AA4 打勾打开截图编辑窗口并保持主窗口隐藏", ok_aa4,
+           f"hide={fake3.main_window.hide.called} open={fake3._open_editor.called}")
+
+    # AA5 源码接线锁定
+    src_copy = inspect.getsource(snapmod.App._on_copy_only)
+    src_silent = inspect.getsource(snapmod.App._close_editor_silently)
+    src_open = inspect.getsource(snapmod.App._open_editor)
+    src_to = inspect.getsource(snapmod.App._on_to_editor)
+    ok_aa5 = (
+        "_close_overlay(restore=False)" in src_copy
+        and "self.main_window.hide()" in src_copy
+        and "self.editor = None" in src_silent
+        and "closed.disconnect" in src_silent
+        and "self._close_editor_silently()" in src_open
+        and "self.main_window.hide()" in src_to
+        and "self._open_editor(base_img, shapes)" in src_to
+    )
+    record("AA5 复制 / 打勾两条路径源码接线正确", ok_aa5,
+           f"copy_restore={src_copy.count('restore=False')} "
+           f"to_hide={src_to.count('main_window.hide')}")
+
+    # AA6 文档同步
+    readme = Path("README.md").read_text(encoding="utf-8")
+    help_zh = Path("snapui.py").read_text(encoding="utf-8")
+    marks = ("v27", "关闭截图编辑与截屏助手两个窗口", "合计 250 项", "dist/v16")
+    missing = [m for m in marks if m not in readme]
+    ok_aa6 = (
+        not missing
+        and "并关闭截图编辑与截屏助手两个窗口" in help_zh
+        and "点「确定」打开截图编辑窗口" in help_zh
+    )
+    record("AA6 README / 中文帮助同步 v27 窗口行为", ok_aa6,
+           f"missing={missing}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -4487,6 +4587,7 @@ if __name__ == "__main__":
     test_v24_text_input_position()
     test_v25_bundle_size()
     test_v26_copy_button()
+    test_v27_copy_closes_windows()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

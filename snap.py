@@ -918,8 +918,9 @@ class App:
     def _close_overlay(self, *, restore: bool = True) -> None:
         # 遮罩关闭时取字任务的结果已无处展示，同时解除 busy 锁，
         # 否则用户按 Esc 取消后下次取字会被永久挡住。
-        # restore=False 用于长截图：拼接期间主窗口等自有窗口必须保持隐藏，
-        # 否则每一帧都会把它们拍进长图，等拼接结束再统一恢复。
+        # restore=False 用于长截图（拼接期间主窗口等自有窗口必须保持隐藏，
+        # 否则每一帧都会把它们拍进长图）与 v27 复制路径（复制即收起全部窗口，
+        # 由调用方自行管理显隐，不能再把截图前隐藏的窗口恢复出来）。
         self._ocr_busy = False
         if self.overlay:
             self.overlay.deleteLater()
@@ -940,9 +941,17 @@ class App:
             pass
 
     def _on_copy_only(self, img: QImage) -> None:
-        """遮罩确认阶段点「复制」：只复制原图并收起遮罩，不打开编辑器。"""
+        """遮罩确认阶段点「复制」：复制原图，并关闭截图编辑 / 截屏助手两个窗口。
+
+        v27：复制 = 彻底收起界面，只留托盘常驻；需要标注时再用热键截图并
+        点「确定」打开编辑器。这里不能用默认的 _close_overlay(restore=True)，
+        否则截图前隐藏的主窗口 / 旧编辑器会被重新显示出来。
+        """
         self._copy_to_clipboard(img)
-        self._close_overlay()
+        self._close_overlay(restore=False)
+        self._close_editor_silently()
+        self.main_window.hide()
+        self._hidden_windows = []
         self._tray_message(
             app_name(),
             t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
@@ -1155,9 +1164,28 @@ class App:
         ]
         self._open_editor(base_img, shapes)
 
+    def _close_editor_silently(self) -> None:
+        """关闭当前编辑器，但不触发「编辑器关闭 → 恢复主窗口」流程。
+
+        v27 两条路径都用到：点复制要收起全部窗口；点打勾要直接开新编辑器。
+        若让旧编辑器的 closed 信号走 _on_editor_closed，主窗口会被弹回来。
+        """
+        editor = self.editor
+        self.editor = None
+        if editor is None:
+            return
+        try:
+            editor.closed.disconnect(self._on_editor_closed)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            editor.close()
+            editor.deleteLater()
+        except RuntimeError:
+            pass
+
     def _open_editor(self, base_img: QImage, shapes: list) -> None:
-        if self.editor is not None:
-            self.editor.close()
+        self._close_editor_silently()
         editor = EditorWindow(base_img, shapes, self.save_dir)
         self.editor = editor
         editor.copy_requested.connect(self._on_editor_copy)
