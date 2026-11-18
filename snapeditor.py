@@ -2249,15 +2249,19 @@ class Toolbar(QWidget):
         self.tool_changed.emit(key)
 
     def set_confirm_mode(self, on: bool) -> None:
-        """选择阶段（确认前）：只保留「确定 / 取消」，隐藏全部标注工具与
-        其它动作（撤销 / 长截图 / 取字 / 保存 / 复制）。on=False 时恢复
-        （被排除的项保持隐藏）。"""
+        """选择阶段（确认前）：保留「复制 / 确定 / 取消」，隐藏全部标注工具与
+        其它动作（撤销 / 长截图 / 取字 / 保存）。on=False 时恢复
+        （被排除的项保持隐藏）。
+
+        v26：「复制」按钮排在「确定 / ✕」最左侧，点击只复制原图并关闭遮罩，
+        不会打开程序窗口编辑器。
+        """
         for b in self._buttons.values():
             b.setVisible(not on)
         for s in self._separators:
             s.setVisible(not on)
         for key, b in self._actions.items():
-            if key in ("确定", "✕"):
+            if key in ("复制", "确定", "✕"):
                 b.setVisible(on)
             else:
                 b.setVisible((not on) and key not in self._excluded)
@@ -2281,6 +2285,8 @@ class Overlay(QWidget):
     long_shot = Signal(QRect)
     ocr = Signal(QImage)
     save_requested = Signal(QImage)
+    # 确认阶段点「复制」：只把原图交给宿主放进剪贴板并关闭遮罩，不打开编辑器
+    copy_only = Signal(QImage)
     # 全屏模式双击：把整张截图（物理图 + 已转物理坐标的标注）交给窗口化编辑器
     to_editor = Signal(QImage, list)
 
@@ -2373,7 +2379,7 @@ class Overlay(QWidget):
         self.toolbar.tool_changed.connect(self._set_tool)
         self.toolbar.undo_clicked.connect(self.undo)
         self.toolbar.close_clicked.connect(self.cancel)
-        self.toolbar.copy_clicked.connect(self._confirm)
+        self.toolbar.copy_clicked.connect(self._copy_only)
         self.toolbar.save_clicked.connect(lambda: self.save_requested.emit(self.compose()))
         # 旧工具条「长截图」按钮：确认模式下被 set_confirm_mode(True) 隐藏，
         # 现已由主窗口 / 托盘的独立命令取代。保留作兼容入口：它同样发
@@ -2942,6 +2948,19 @@ class Overlay(QWidget):
         if self._ocr_active():
             return
         # 选择阶段双击无任何编辑动作（拖动选区 / 拖控制点 / 确定 才是该阶段功能）
+
+    def _copy_only(self) -> None:
+        """确认阶段点「复制」：取选区原图（不含标注）交给宿主放进剪贴板，
+        随后直接收起遮罩，不打开程序窗口编辑器。"""
+        self._commit_text()
+        if not self.sel:
+            self.cancel()
+            return
+        img = self.raw_crop()
+        if img.isNull():
+            return
+        self._teardown()
+        self.copy_only.emit(img)
 
     def _confirm(self) -> None:
         """选择阶段点「确定」/ 回车。

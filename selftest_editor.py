@@ -232,6 +232,14 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     Y3  optimize=0（numpy docstring 回归锁定）
     Y4  README 同步 v25 体积数字
 
+  Stage Z  v26：确认阶段「复制」按钮（只复制原图，不进编辑器）
+    Z1  确认模式显示复制按钮，且排在确定 / ✕ 最左
+    Z2  点复制发出的是原图（不含标注），尺寸 / 像素正确
+    Z3  点复制不发 to_editor、遮罩确认态已复位
+    Z4  App 收到信号后写剪贴板并关闭遮罩
+    Z5  全屏直截 / 长截图完成路径也自动复制原图
+    Z6  README / 中文帮助 / 7 语言帮助同步
+
   Stage V  v22：矩形 / 椭圆 / 文字旋转
     V1  角度归一化与旋转变换往返
     V2  文字包围盒 / 旋转外接框 / 旋转中心
@@ -498,13 +506,14 @@ def test_overlay() -> None:
     )
 
     # B4c 选择完成时 _apply_selection(near) 直接把按钮放到鼠标处并进入确认模式
-    #     near=(70,40)：右下方都有足够空间，不会触发贴边收缩
+    #     v26 起确认模式多一个「复制」按钮、工具条更宽，near 改到 (40,40)
+    #     仍保证右下方有余量，不触发贴边收缩
     ov4.sel = QRect(50, 40, 60, 30)
-    ov4._apply_selection(QRect(50, 40, 60, 30), near=QPoint(70, 40))
+    ov4._apply_selection(QRect(50, 40, 60, 30), near=QPoint(40, 40))
     g3 = ov4.toolbar.geometry()
     ok_b4c = (
         ov4._confirm_mode is True
-        and g3.x() == 70 + 14
+        and g3.x() == 40 + 14
         and g3.y() == 40 + 14
         and (g3.x() + g3.width()) <= 200
         and (g3.y() + g3.height()) <= 100
@@ -4343,6 +4352,106 @@ def test_v25_bundle_size() -> None:
     record("Y4 README 同步 v25 体积数字", not absent, f"absent={absent}")
 
 
+def test_v26_copy_button() -> None:
+    print("\n--- Stage Z: v26 确认阶段复制按钮 ---")
+    import inspect
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    import snap as snapmod
+    import i18n
+    import i18n_docs
+    from snapeditor import Shape
+
+    # Z1 确认模式：复制按钮可见，且排在「确定 / ✕」最左侧
+    base = QImage(400, 200, QImage.Format_RGB32)
+    base.fill(QColor(30, 120, 220))
+    ov = Overlay(base, dpr=2.0)
+    ov.resize(200, 100)
+    ov.toolbar.set_confirm_mode(True)
+    shown = [k for k in ov.toolbar._actions if not ov.toolbar._actions[k].isHidden()]
+    ok_z1 = (
+        "复制" in shown
+        and shown.index("复制") < shown.index("确定") < shown.index("✕")
+        and all(k not in shown for k in ("撤销", "取字", "保存", "长截图"))
+    )
+    record("Z1 确认模式显示复制按钮且排最左", ok_z1, f"shown={shown}")
+    ov.toolbar.set_confirm_mode(False)
+
+    # Z2/Z3 点复制：发原图（不含标注），不进编辑器
+    ov2 = Overlay(base, dpr=2.0)
+    ov2.resize(200, 100)
+    ov2.sel = QRect(50, 40, 60, 30)
+    ov2._mode = "editing"
+    ov2.shapes = [Shape(kind="rect", rect=QRect(50, 40, 30, 20), color=QColor(255, 0, 0))]
+    got: dict = {}
+    ov2.copy_only.connect(lambda im: got.setdefault("img", im.copy()))
+    ov2.to_editor.connect(lambda *_: got.setdefault("editor", True))
+    ov2._copy_only()
+    expect = base.copy(QRect(100, 80, 120, 60))
+    im = got.get("img")
+    ok_z2 = (
+        im is not None
+        and im.size() == expect.size()
+        and im.pixelColor(0, 0) == expect.pixelColor(0, 0)
+    )
+    record("Z2 复制按钮发出原图（不含标注）", ok_z2,
+           f"size={im.size() if im else None} expect={expect.size()}")
+    ok_z3 = not got.get("editor", False) and ov2._confirm_mode is False
+    record("Z3 点复制不进编辑器、遮罩确认态复位", ok_z3,
+           f"editor={got.get('editor', False)} confirm={ov2._confirm_mode}")
+
+    # Z4 App 收到信号：写剪贴板 + 关闭遮罩
+    fake = MagicMock()
+    cimg = QImage(64, 32, QImage.Format_RGB32)
+    cimg.fill(QColor(9, 8, 7))
+    snapmod.App._on_copy_only(fake, cimg)
+    snapmod.App._copy_to_clipboard(cimg)
+    clip = QApplication.clipboard().image()
+    ok_z4 = (
+        fake._copy_to_clipboard.called
+        and fake._copy_to_clipboard.call_args[0][0].size() == cimg.size()
+        and fake._close_overlay.called
+        and clip.size() == cimg.size()
+        and clip.pixelColor(1, 1) == cimg.pixelColor(1, 1)
+    )
+    record("Z4 App 复制并关闭遮罩、剪贴板内容正确", ok_z4,
+           f"clip={clip.size()} close={fake._close_overlay.called}")
+
+    # Z5 全屏直截 / 长截图完成路径也自动复制
+    src_init = inspect.getsource(snapmod.App._begin_capture)
+    src_long = inspect.getsource(snapmod.App._on_long_shot)
+    src_overlay_init = inspect.getsource(snapmod.Overlay.__init__)
+    src_copy = inspect.getsource(snapmod.Overlay._copy_only)
+    ok_z5 = (
+        "self.overlay.copy_only.connect(self._on_copy_only)" in src_init
+        and "self.toolbar.copy_clicked.connect(self._copy_only)" in src_overlay_init
+        and "self.raw_crop()" in src_copy
+        and "self._copy_to_clipboard(qimg)" in src_long
+        and "copied=True" in src_long
+    )
+    record("Z5 全屏/长截图完成自动复制接线", ok_z5,
+           f"init={src_init.count('copy_only')} long={src_long.count('_copy_to_clipboard')}")
+
+    # Z6 文档同步
+    readme = Path("README.md").read_text(encoding="utf-8")
+    help_zh = Path("snapui.py").read_text(encoding="utf-8")
+    marks = {
+        "en": "far left of the toolbar", "ja": "ツールバー左端",
+        "ko": "도구 모음 맨 왼쪽", "fr": "tout à gauche",
+        "de": "ganz links", "es": "a la izquierda",
+        "zh_TW": "工具條最左側",
+    }
+    bad = [c for c, m in marks.items() if m not in i18n_docs.help_html(c)]
+    ok_z6 = (
+        not bad
+        and "v26" in readme and "不打开程序窗口" in readme
+        and "不打开编辑器" in help_zh
+    )
+    record("Z6 README / 中文帮助 / 7 语言帮助同步", ok_z6,
+           f"bad={bad} readme={'v26' in readme}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -4377,6 +4486,7 @@ if __name__ == "__main__":
     test_v23_text_background()
     test_v24_text_input_position()
     test_v25_bundle_size()
+    test_v26_copy_button()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

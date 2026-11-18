@@ -397,9 +397,9 @@ class BusyBar(QWidget):
 class PreviewWindow(QWidget):
     """长截图结果的预览与导出窗口。"""
 
-    def __init__(self, img: QImage, save_dir: Path) -> None:
+    def __init__(self, img: QImage, save_dir: Path, copied: bool = False) -> None:
         super().__init__(None, Qt.Window)
-        self._copied = False
+        self._copied = copied
         self._saved_path: str | None = None
         self.setWindowTitle(t("{app} - 长截图预览", app=app_name()))
         self.img = img
@@ -869,6 +869,7 @@ class App:
         self.overlay.ocr.connect(self._on_ocr)
         self.overlay.save_requested.connect(self._save_image)
         self.overlay.to_editor.connect(self._on_to_editor)
+        self.overlay.copy_only.connect(self._on_copy_only)
 
         # 用 setGeometry + show 而不是 showFullScreen：
         # 后者只覆盖主屏，多显示器下会漏掉其他屏幕。
@@ -929,8 +930,28 @@ class App:
     def _on_cancel(self) -> None:
         self._close_overlay()
 
+    @staticmethod
+    def _copy_to_clipboard(img: QImage) -> None:
+        """把图像放进系统剪贴板。剪贴板被别的程序锁住时静默跳过，
+        不让一次复制失败拖垮截图主流程。"""
+        try:
+            QApplication.clipboard().setImage(img)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_copy_only(self, img: QImage) -> None:
+        """遮罩确认阶段点「复制」：只复制原图并收起遮罩，不打开编辑器。"""
+        self._copy_to_clipboard(img)
+        self._close_overlay()
+        self._tray_message(
+            app_name(),
+            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
+            QSystemTrayIcon.Information,
+            1800,
+        )
+
     def _on_done(self, img: QImage) -> None:
-        QApplication.clipboard().setImage(img)
+        self._copy_to_clipboard(img)
         self._close_overlay()
         self._tray_message(
             app_name(),
@@ -1021,7 +1042,9 @@ class App:
             self._close_busy()
             self._restore_own_windows()
             qimg = pil_to_qimage(pil_img)
-            self.preview = PreviewWindow(qimg, self.save_dir)
+            # v26：长截图完成也自动进剪贴板，预览窗口标题同步显示已复制
+            self._copy_to_clipboard(qimg)
+            self.preview = PreviewWindow(qimg, self.save_dir, copied=True)
             self.preview.show()
             self.preview.raise_()
             self.preview.activateWindow()
@@ -1108,7 +1131,17 @@ class App:
         """选定截图（框选/窗口确认，或全屏直截）→ 打开窗口化编辑器继续编辑。
 
         不在这里恢复自身窗口：它们应保持隐藏，直到编辑器关闭。
+        v26：完成瞬间先把原图放进剪贴板，用户可直接 Ctrl+V；若之后在编辑器
+        里加了标注，再用 Ctrl+Enter / 「复制到剪贴板」按钮更新成最终图。
         """
+        # v26 自动复制：此处拿到的是刚截下的原图，不含后续标注
+        self._copy_to_clipboard(base_img)
+        self._tray_message(
+            app_name(),
+            t("已复制到剪贴板  {w}×{h}", w=base_img.width(), h=base_img.height()),
+            QSystemTrayIcon.Information,
+            1800,
+        )
         self._ocr_busy = False
         if self.overlay is not None:
             self.overlay.deleteLater()
