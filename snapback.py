@@ -36,8 +36,13 @@ VK_ESCAPE = 0x1B
 
 SW_HIDE = 0
 SW_SHOWNOACTIVATE = 4
+SW_RESTORE = 9
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WS_EX_TOPMOST = 0x00000008
+HWND_TOP = 0
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_SHOWWINDOW = 0x0040
 
 user32 = ctypes.windll.user32 if sys.platform == "win32" else None
 
@@ -122,6 +127,122 @@ class WindowInfo:
     title: str
     hwnd: int
     client: ScreenRect | None = None   # 客户区（去掉标题栏/边框），滚动拼接用它更准
+    z: int = 0                         # Z 序序号（EnumWindows 枚举顺序，越小越靠前）
+    dpi: int = 96                      # 窗口所属显示器的 DPI（96 = 100% 缩放）
+
+    @property
+    def dpr(self) -> float:
+        """该窗口的逻辑→物理缩放比（96 DPI = 1.0）。"""
+        return (self.dpi or 96) / 96.0
+
+
+# ---------------------------------------------------------------------------
+# 窗口选择：类名黑名单 + Z 序优先（v35）
+# ---------------------------------------------------------------------------
+# 这些窗口不该成为「窗口截图」的目标：菜单、工具提示、任务栏、桌面等。
+# 它们的共同点是宽度/高度很小或铺满屏幕，却盖在真正的内容窗口之上，
+# 旧逻辑「取包含鼠标点的最小窗口」极易误选它们。
+_PICK_CLASS_DENY_EXACT = frozenset({
+    "#32768",                  # 菜单（Windows 标准菜单类）
+    "tooltips_class32",        # 工具提示
+    "shell_traywnd",           # 任务栏
+    "shell_secondarytraywnd",  # 副屏任务栏
+    "progman",                 # 桌面
+    "workerw",                 # 桌面工作区
+    "windowsofrealtimedisplay",  # 壁纸渲染层
+})
+_PICK_CLASS_DENY_SUBSTR = (
+    "tooltip", "candidate", "ime", "inputmethod",
+    "输入法", "候选", "suggestion", "autocomplete",
+)
+
+
+def is_pickable_window_class(cls: str) -> bool:
+    """纯判定函数：窗口类名是否允许作为「窗口截图」目标。
+
+    取不到类名（空串）时放行，避免误伤；测试在非 Windows 平台也能覆盖。
+    """
+    c = (cls or "").strip()
+    if not c:
+        return True
+    if c.lower() in _PICK_CLASS_DENY_EXACT:
+        return False
+    low = c.lower()
+    return not any(s in low for s in _PICK_CLASS_DENY_SUBSTR)
+
+
+def pick_top_window(candidates: list[WindowInfo]) -> WindowInfo | None:
+    """候选按 EnumWindows 的 Z 序（顶 → 底）传入，返回最靠前的一个。
+
+    旧逻辑取「面积最小」会在鼠标压到通知/悬浮球时误选小浮窗。Windows 的
+    EnumWindows 本身就是自顶向下的 Z 序，黑名单过滤之后第一个就是用户
+    在该点真正看到的窗口。
+    """
+    if not candidates:
+        return None
+    return min(candidates, key=lambda w: w.z)
+
+
+def dpi_for_window(hwnd: int) -> int:
+    """取窗口所属显示器的 DPI；失败回退 96（100% 缩放）。"""
+    if sys.platform != "win32" or not hwnd or user32 is None:
+        return 96
+    try:
+        v = int(user32.GetDpiForWindow(wintypes.HWND(hwnd)))
+        return v if v > 0 else 96
+    except Exception:  # noqa: BLE001
+        return 96
+
+
+def monitor_physical_rects() -> list[ScreenRect]:
+    """枚举所有显示器的物理像素矩形（用于混合 DPI 坐标换算）。"""
+    if user32 is None:
+        return []
+    out: list[ScreenRect] = []
+    MONITORENUMPROC = ctypes.WINFUNCTYPE(
+        wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
+        ctypes.POINTER(_RECT), wintypes.LPARAM,
+    )
+
+    def _cb(_hmon, _hdc, lprc, _data) -> bool:
+        try:
+            r = lprc.contents
+            out.append(ScreenRect(r.left, r.top, r.right - r.left, r.bottom - r.top))
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    try:
+        user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(_cb), 0)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def foreground_window(hwnd: int) -> bool:
+    """尽力把目标窗口提到前台（选中窗口后重抓底图前调用）。
+
+    Windows 的前台锁可能让 SetForegroundWindow 失败；SetWindowPos(HWND_TOP)
+    不激活窗口、只提高 Z 序，通常更可靠。两者都试，任何异常都吞掉。
+    """
+    if sys.platform != "win32" or not hwnd or user32 is None:
+        return False
+    h = wintypes.HWND(hwnd)
+    ok = False
+    try:
+        if user32.IsIconic(h):
+            user32.ShowWindow(h, SW_RESTORE)
+        ok = bool(user32.SetWindowPos(
+            h, wintypes.HWND(HWND_TOP), 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        ))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        ok = bool(user32.SetForegroundWindow(h)) or ok
+    except Exception:  # noqa: BLE001
+        pass
+    return ok
 
 
 def _client_rect(hwnd: int) -> ScreenRect | None:
@@ -199,6 +320,19 @@ def window_rect_at(x: int, y: int, exclude_pid: int | None = None) -> WindowInfo
                     return True
             except Exception:  # noqa: BLE001
                 pass
+            # v35：菜单 / 工具提示 / 任务栏 / 桌面 / 输入法候选窗一律排除，
+            # 否则「取最小窗口」会把它们当成目标（截出来只有一条小横条）。
+            cls_buf = ctypes.create_unicode_buffer(256)
+            try:
+                user32.GetClassNameW(wintypes.HWND(h), cls_buf, len(cls_buf))
+            except Exception:  # noqa: BLE001
+                pass
+            cls = cls_buf.value
+            if not is_pickable_window_class(cls):
+                return True
+            proc = _process_name(pid.value) if pid.value else ""
+            if any(k in cls.lower() or k in proc for k in _FLOATING_HINTS):
+                return True
             if user32.GetWindowLongW(wintypes.HWND(h), GWL_EXSTYLE) & WS_EX_TOOLWINDOW:
                 return True
             r = _visible_frame(h)
@@ -209,7 +343,11 @@ def window_rect_at(x: int, y: int, exclude_pid: int | None = None) -> WindowInfo
             n = user32.GetWindowTextLengthW(wintypes.HWND(h))
             buf = ctypes.create_unicode_buffer(max(1, n + 1))
             user32.GetWindowTextW(wintypes.HWND(h), buf, len(buf))
-            found.append(WindowInfo(r, buf.value, h, _client_rect(h)))
+            # EnumWindows 自顶向下枚举，len(found) 即 Z 序序号（越小越靠前）
+            found.append(WindowInfo(
+                r, buf.value, h, _client_rect(h),
+                z=len(found), dpi=dpi_for_window(h),
+            ))
         except Exception:  # noqa: BLE001
             pass
         return True
@@ -217,7 +355,8 @@ def window_rect_at(x: int, y: int, exclude_pid: int | None = None) -> WindowInfo
     user32.EnumWindows(WNDENUMPROC(_cb), 0)
     if not found:
         return None
-    return min(found, key=lambda w: w.rect.w * w.rect.h)
+    # v35：改用 Z 序优先（用户在该点真正看到的窗口），不再取面积最小。
+    return pick_top_window(found)
 
 
 # ---------------------------------------------------------------------------

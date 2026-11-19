@@ -5263,6 +5263,227 @@ def test_v34_pin_to_desktop() -> None:
            f"v34={'v34' in readme} pin={'贴图钉在桌面' in readme}")
 
 
+def test_v35_window_capture_accuracy() -> None:
+    print("\n--- Stage AG: v35 窗口截图准确性修复 ---")
+    import inspect
+    from pathlib import Path
+
+    from PySide6.QtCore import QEvent, QPoint, QPointF, QRect
+    from PySide6.QtGui import QImage, QMouseEvent
+    from PIL import Image
+
+    import snapback as sb
+    import snap as snapmod
+    from snapeditor import Overlay
+
+    base = make_image(320, 240)
+
+    # AG1 类名黑名单：正常窗口放行，菜单/提示/任务栏/桌面/输入法一律拒绝
+    deny_exact = [
+        sb.is_pickable_window_class(c)
+        for c in ("#32768", "tooltips_class32", "Shell_TrayWnd",
+                  "Progman", "WorkerW")
+    ]
+    deny_sub = [
+        sb.is_pickable_window_class(c)
+        for c in ("IMEUI", "SogouIME", "CandidateList", "输入法窗口")
+    ]
+    ok_ag1 = (
+        sb.is_pickable_window_class("Chrome_WidgetWin_1")
+        and sb.is_pickable_window_class("")
+        and not any(deny_exact) and not any(deny_sub)
+    )
+    record("AG1 窗口类名黑名单过滤", ok_ag1,
+           f"allow={sb.is_pickable_window_class('Chrome_WidgetWin_1')} "
+           f"deny_exact={deny_exact} deny_sub={deny_sub}")
+
+    # AG2 Z 序优先：最前面的大窗口胜过被点中的小窗口（旧逻辑会选小的）
+    big_top = sb.WindowInfo(sb.ScreenRect(0, 0, 1000, 800), "Top", 1, z=0)
+    small_bottom = sb.WindowInfo(sb.ScreenRect(100, 100, 200, 200), "Bottom", 2, z=5)
+    picked = sb.pick_top_window([big_top, small_bottom])
+    ok_ag2 = picked is big_top and sb.pick_top_window([]) is None
+    record("AG2 窗口选择改为 Z 序优先（不再取最小面积）", ok_ag2,
+           f"picked={picked.title if picked else None}")
+
+    # AG3 WindowInfo.dpr：DPI → 缩放比
+    ok_ag3 = (
+        abs(sb.WindowInfo(sb.ScreenRect(0, 0, 1, 1), "", 0, dpi=96).dpr - 1.0) < 1e-9
+        and abs(sb.WindowInfo(sb.ScreenRect(0, 0, 1, 1), "", 0, dpi=144).dpr - 1.5) < 1e-9
+        and abs(sb.WindowInfo(sb.ScreenRect(0, 0, 1, 1), "", 0, dpi=0).dpr - 1.0) < 1e-9
+    )
+    record("AG3 WindowInfo.dpr 换算（含损坏回退）", ok_ag3, "96->1.0 144->1.5 0->1.0")
+
+    # AG4 Win32 辅助函数在无有效句柄 / 无显示器信息时安全降级
+    ok_ag4 = (
+        sb.foreground_window(0) is False
+        and isinstance(sb.monitor_physical_rects(), list)
+    )
+    record("AG4 foreground_window / 显示器枚举安全降级", ok_ag4,
+           f"fg0={sb.foreground_window(0)} monitors={sb.monitor_physical_rects()}")
+
+    # AG5 混合 DPI 纯换算：主屏 150%、副屏物理原点偏移、无显示器信息回退
+    mons = [sb.ScreenRect(0, 0, 1920, 1080), sb.ScreenRect(1920, 0, 1024, 768)]
+    p_main = snapmod.physical_from_screen(QPoint(100, 50), QRect(0, 0, 1280, 720),
+                                          1.5, mons, 1.0)
+    p_second = snapmod.physical_from_screen(QPoint(1300, 100), QRect(1280, 0, 683, 384),
+                                            1.5, mons, 1.0)
+    p_fallback = snapmod.physical_from_screen(QPoint(100, 50), QRect(0, 0, 800, 800),
+                                              2.0, [], 1.0)
+    ok_ag5 = p_main == (150, 75) and p_second == (1950, 150) and p_fallback == (200, 100)
+    record("AG5 混合 DPI 物理坐标换算", ok_ag5,
+           f"main={p_main} second={p_second} fallback={p_fallback}")
+
+    # AG6 _pick_window 附带 hwnd，并走新的坐标换算
+    holder = snapmod.App.__new__(snapmod.App)
+    ov_pick = Overlay(base, dpr=1.0)
+    ov_pick.resize(400, 200)
+    ov_pick.move(-100, -20)
+    holder.overlay = ov_pick
+    orig_win = sb.window_rect_at
+    sb.window_rect_at = lambda x, y: sb.WindowInfo(
+        sb.ScreenRect(0, 0, 400, 300), "T", 777, sb.ScreenRect(10, 30, 380, 260)
+    )
+    try:
+        picked = holder._pick_window(QPoint(50, 50))
+    finally:
+        sb.window_rect_at = orig_win
+    src_pick = inspect.getsource(snapmod.App._pick_window)
+    ok_ag6 = (
+        picked is not None and len(picked) == 3 and picked[2] == 777
+        and "global_logical_to_physical" in src_pick
+    )
+    record("AG6 _pick_window 返回 hwnd 且用新坐标换算", ok_ag6,
+           f"len={len(picked) if picked else 0} hwnd={picked[2] if picked else None}")
+
+    # AG7 update_base 原子替换底图与预生成图；空图拒绝
+    ov_base = Overlay(base, dpr=2.0)
+    fresh = make_image(80, 60)
+    changed = ov_base.update_base(fresh)
+    ok_ag7 = (
+        changed is True and ov_base.base is fresh
+        and ov_base.base_logical.width() == 40 and ov_base.base_logical.height() == 30
+        and ov_base.dim_logical.width() == 40
+        and ov_base.update_base(QImage()) is False
+    )
+    record("AG7 Overlay.update_base 原子替换底图", ok_ag7,
+           f"changed={changed} logical={ov_base.base_logical.width()}x{ov_base.base_logical.height()}")
+
+    # AG8 重抓回调：正常调用 + 未设置回调 + 异常降级（保留旧底图）
+    fired: list[int] = []
+    ov_rg = Overlay(base, dpr=1.0)
+    ov_rg.set_window_regrab(lambda h: fired.append(h) or make_image(60, 40))
+    ok_rg1 = ov_rg._regrab_for_window(999) is True and fired == [999] and ov_rg.base.width() == 60
+    ov_no = Overlay(base, dpr=1.0)
+    ok_rg2 = ov_no._regrab_for_window(1) is False
+    ov_err = Overlay(base, dpr=1.0)
+
+    def _boom(_h):
+        raise RuntimeError("grab failed")
+    ov_err.set_window_regrab(_boom)
+    ok_rg3 = ov_err._regrab_for_window(1) is False and ov_err.base is base
+    record("AG8 重抓回调调用与异常降级", ok_rg1 and ok_rg2 and ok_rg3,
+           f"fired={fired} no_cb={ok_rg2} fallback={ok_rg3}")
+
+    # AG9 _update_hover 保存 hwnd（新 3 元组 + 旧 2 元组兼容）
+    ov_hover = Overlay(base, dpr=1.0)
+    ov_hover.resize(300, 200)
+    ov_hover.set_capture_mode("window", lambda p: (QRect(10, 10, 100, 80), "Title", 321))
+    ov_hover._update_hover(QPoint(50, 50), force=True)
+    ok_h1 = ov_hover._hover_hwnd == 321 and ov_hover._hover_rect == QRect(10, 10, 100, 80)
+    ov_hover._window_picker = lambda p: (QRect(20, 20, 50, 50), "Old")
+    ov_hover._update_hover(QPoint(30, 30), force=True)
+    ok_h2 = ov_hover._hover_hwnd == 0 and ov_hover._hover_rect == QRect(20, 20, 50, 50)
+    record("AG9 _update_hover 记录 hwnd 且兼容旧签名", ok_h1 and ok_h2,
+           f"new={ov_hover._hover_hwnd} legacy_ok={ok_h2}")
+
+    # AG10 行为级：picking 点击 → 先重抓底图 → 再进入确认态
+    ov_click = Overlay(base, dpr=1.0)
+    ov_click.resize(400, 300)
+    ov_click.set_capture_mode("window", lambda p: (QRect(20, 20, 200, 150), "W", 555))
+    click_fired: list[int] = []
+    ov_click.set_window_regrab(lambda h: click_fired.append(h) or make_image(120, 90))
+    ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(50, 50),
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                     Qt.KeyboardModifier.NoModifier)
+    ov_click.mousePressEvent(ev)
+    ok_ag10 = (
+        click_fired == [555] and ov_click._mode == "editing"
+        and ov_click.base.width() == 120
+    )
+    record("AG10 点击窗口先重抓再确认（所见即所得）", ok_ag10,
+           f"fired={click_fired} mode={ov_click._mode} base_w={ov_click.base.width()}")
+
+    # AG11 App._regrab_window_base 端到端（mock 抓屏 / 前置 / 遮罩）
+    q = snapmod.App.__new__(snapmod.App)
+    q.app = QApplication.instance()
+
+    class _FakeOverlay:
+        def __init__(self):
+            self.visible = True
+            self.calls: list[str] = []
+
+        def isVisible(self):
+            return self.visible
+
+        def hide(self):
+            self.visible = False
+            self.calls.append("hide")
+
+        def show(self):
+            self.visible = True
+            self.calls.append("show")
+
+        def raise_(self):
+            self.calls.append("raise")
+
+        def activateWindow(self):
+            self.calls.append("activate")
+
+    fake_ov = _FakeOverlay()
+    q.overlay = fake_ov
+    orig_grab, orig_fg = sb.grab_all_screens, sb.foreground_window
+    fg_calls: list[int] = []
+    sb.grab_all_screens = lambda: Image.new("RGB", (33, 22), (10, 20, 30))
+    sb.foreground_window = lambda h: fg_calls.append(h) or True
+    try:
+        grabbed = q._regrab_window_base(888)
+    finally:
+        sb.grab_all_screens, sb.foreground_window = orig_grab, orig_fg
+    ok_ag11 = (
+        grabbed is not None and grabbed.width() == 33
+        and fg_calls == [888]
+        and fake_ov.calls == ["hide", "show", "raise", "activate"]
+        and fake_ov.visible is True
+    )
+    record("AG11 App 重抓流程：前置/隐藏/抓屏/恢复", ok_ag11,
+           f"size={grabbed.width()}x{grabbed.height()} fg={fg_calls} calls={fake_ov.calls}")
+
+    # AG12 各入口接线（静态源码检查，防回归）
+    src_begin = inspect.getsource(snapmod.App._begin_capture)
+    src_mouse = inspect.getsource(Overlay.mousePressEvent)
+    src_key = inspect.getsource(Overlay.keyPressEvent)
+    ok_ag12 = (
+        "set_window_regrab(self._regrab_window_base)" in src_begin
+        and "_regrab_for_window(self._hover_hwnd)" in src_mouse
+        and "_regrab_for_window(self._hover_hwnd)" in src_key
+    )
+    record("AG12 重抓回调四处接线", ok_ag12,
+           f"begin={'set_window_regrab' in src_begin} "
+           f"mouse={'_regrab_for_window' in src_mouse} key={'_regrab_for_window' in src_key}")
+
+    # AG13 长截图不走重抓（它自行逐帧抓图）
+    ov_long = Overlay(base, dpr=1.0)
+    ov_long.set_long_mode(True, lambda p: QRect(0, 0, 10, 10))
+    record("AG13 长截图模式不启用重抓", ov_long._window_regrab is None,
+           f"regrab={ov_long._window_regrab}")
+
+    # AG14 README 同步 v35
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ag14 = "v35" in readme and "窗口截图" in readme
+    record("AG14 README 同步 v35 窗口截图修复", ok_ag14,
+           f"v35={'v35' in readme} window={'窗口截图' in readme}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -5304,6 +5525,7 @@ if __name__ == "__main__":
     test_v32_pen_smoothing()
     test_v33_pen_smooth_levels()
     test_v34_pin_to_desktop()
+    test_v35_window_capture_accuracy()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

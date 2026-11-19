@@ -170,6 +170,47 @@ def overlay_rect_to_screen(
     )
 
 
+def physical_from_screen(
+    gp: QPoint, geo: QRect, d: float, monitors: list, fallback_dpr: float
+) -> tuple[int, int]:
+    """纯换算：Qt 屏幕逻辑几何 + dpr + 显示器物理矩形 → 物理像素点。
+
+    拆成纯函数便于混合 DPI 场景自测（无需真的接两块不同缩放的显示器）。
+    """
+    d = d or fallback_dpr
+    if monitors:
+        # Qt 屏幕逻辑尺寸 × dpr ≈ 物理尺寸，据此匹配对应的物理显示器
+        want_w, want_h = geo.width() * d, geo.height() * d
+        mon = min(monitors, key=lambda m: abs(m.w - want_w) + abs(m.h - want_h))
+        top = geo.topLeft()
+        return (
+            int(round(mon.x + (gp.x() - top.x()) * d)),
+            int(round(mon.y + (gp.y() - top.y()) * d)),
+        )
+    # 没有 Win32 显示器信息（非 Windows / 离屏测试）：按所在屏 dpr 换算
+    return int(round(gp.x() * d)), int(round(gp.y() * d))
+
+
+def global_logical_to_physical(gp: QPoint, fallback_dpr: float) -> tuple[int, int]:
+    """Qt 全局逻辑坐标 → 屏幕物理像素（多显示器混合 DPI 下按光标所在屏换算）。
+
+    旧代码统一乘主屏 dpr，副屏缩放不同时物理点会算偏，窗口探测于是命中
+    错误的窗口。这里用光标所在 QScreen 的 dpr 与几何原点，配合 Win32 枚举
+    出的显示器物理矩形做换算；拿不到就退回原来的统一 dpr 算法。
+    """
+    try:
+        from PySide6.QtGui import QGuiApplication
+        scr = QGuiApplication.screenAt(QPoint(gp))
+        if scr is None:
+            raise ValueError("no screen")
+        return physical_from_screen(
+            gp, scr.geometry(), float(scr.devicePixelRatio()),
+            snapback.monitor_physical_rects(), fallback_dpr,
+        )
+    except Exception:  # noqa: BLE001
+        return int(round(gp.x() * fallback_dpr)), int(round(gp.y() * fallback_dpr))
+
+
 def place_bar_outside(
     sel: QRect, screen: QRect, bw: int, bh: int, margin: int = 8
 ) -> QRect | None:
@@ -985,6 +1026,9 @@ class App:
             )
         else:
             self.overlay.set_capture_mode(mode, self._pick_window)
+            if mode == "window":
+                # v35：普通窗口截图选中窗口时，前置目标并重抓一帧最新底图
+                self.overlay.set_window_regrab(self._regrab_window_base)
         self.overlay.done.connect(self._on_done)
         self.overlay.cancelled.connect(self._on_cancel)
         self.overlay.long_shot.connect(self._on_long_shot)
@@ -1020,9 +1064,9 @@ class App:
         dpr = ov.dpr or 1.0
         gp = ov.mapToGlobal(pos)
         origin = ov.mapToGlobal(QPoint(0, 0))
-        info = snapback.window_rect_at(
-            int(round(gp.x() * dpr)), int(round(gp.y() * dpr))
-        )
+        # v35：按光标所在屏的 dpr 换算物理点，混合 DPI 多屏不再命中错窗口
+        px, py = global_logical_to_physical(gp, dpr)
+        info = snapback.window_rect_at(px, py)
         if info is None:
             return None
         frame = info.rect
@@ -1042,7 +1086,42 @@ class App:
         ).intersected(ov.rect())
         if q.width() < 8 or q.height() < 8:
             return None
-        return (q, info.title)
+        # v35：附带 hwnd，供「点击窗口时前置目标并重抓底图」使用
+        return (q, info.title, info.hwnd)
+
+    def _regrab_window_base(self, hwnd: int = 0):
+        """v35：选中窗口后重抓一帧底图（解决截到旧画面 / 遮挡物）。
+
+        流程：尽力前置目标窗口 → 临时隐藏遮罩 → 等合成稳定 → 重新抓屏 →
+        恢复遮罩。返回的 QImage 交给 Overlay.update_base 原子替换底图。
+        任何异常都降级为「保留旧底图」，不影响截图主流程。
+        """
+        ov = getattr(self, "overlay", None)
+        if ov is None:
+            return None
+        if hwnd:
+            snapback.foreground_window(int(hwnd))
+        was_visible = False
+        try:
+            was_visible = bool(ov.isVisible())
+            if was_visible:
+                ov.hide()
+            self.app.processEvents()
+            time.sleep(0.10)   # 给 Windows 合成器与目标窗口重绘一点时间
+            self.app.processEvents()
+            fresh = snapback.grab_all_screens()
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            if was_visible:
+                try:
+                    ov.show()
+                    ov.raise_()
+                    ov.activateWindow()
+                    self.app.processEvents()
+                except Exception:  # noqa: BLE001
+                    pass
+        return pil_to_qimage(fresh)
 
     def _close_overlay(self, *, restore: bool = True) -> None:
         # 遮罩关闭时取字任务的结果已无处展示，同时解除 busy 锁，

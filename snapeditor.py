@@ -2440,7 +2440,9 @@ class Overlay(QWidget):
         self.long_mode = False            # 独立「滚动长截图」命令：框选→确定→直接拼接
         # 遮罩上的提示文字在 paintEvent 里现取 t()，语言切换后需触发重绘
         LANG.changed.connect(self.update)
-        self._window_picker = None        # callable(pos) -> (QRect, title) | QRect | None
+        self._window_picker = None        # callable(pos) -> (QRect, title[, hwnd]) | QRect | None
+        self._window_regrab = None        # v35: callable(hwnd) -> QImage | None，选中窗口后重抓底图
+        self._hover_hwnd: int = 0         # v35: 当前悬停窗口句柄
         self._hover_rect: QRect | None = None
         self._confirm_mode = False        # 选择完成、仅显示「确定/取消」的阶段
         self._hover_title = ""
@@ -2550,6 +2552,8 @@ class Overlay(QWidget):
         self.sel = None
         self.shapes.clear()
         self._selected = None
+        self._window_regrab = None       # 长截图自行逐帧抓图，不需要重抓底图
+        self._hover_hwnd = 0
         self._hover_rect = None
         self._hover_title = ""
         self._last_pick_time = 0.0
@@ -2591,6 +2595,25 @@ class Overlay(QWidget):
         self.setCursor(Qt.CrossCursor)
         self._cursor_cache = Qt.CrossCursor
 
+    def set_window_regrab(self, regrab=None) -> None:
+        """v35：设置「选中窗口后重抓底图」回调。
+
+        regrab(hwnd:int) -> QImage | None。返回新的物理像素底图时，Overlay
+        会原子替换 base / base_logical / dim_logical，使后续裁剪取到点击
+        瞬间的最新画面（而不是进入截图模式时的旧快照）。
+        """
+        self._window_regrab = regrab
+
+    def update_base(self, img: QImage) -> bool:
+        """v35：替换截图底图并同步预生成图（纯逻辑方法，便于自测）。"""
+        if img is None or img.isNull():
+            return False
+        self.base = img
+        self.base_logical = self._scale_to_logical(img)
+        self.dim_logical = self._make_dim(self.base_logical)
+        self.update()
+        return True
+
     def set_capture_mode(self, mode: str, window_picker=None) -> None:
         """在 setGeometry 之后、show 之前调用。
 
@@ -2600,6 +2623,8 @@ class Overlay(QWidget):
         """
         self.capture_mode = mode if mode in ("rect", "window", "fullscreen") else "rect"
         self._window_picker = window_picker
+        self._window_regrab = None       # 切换到新模式：清掉上次的回调
+        self._hover_hwnd = 0
         self.sel = None
         self.shapes.clear()
         self._selected = None
@@ -2658,17 +2683,40 @@ class Overlay(QWidget):
         self._last_pick_time = now
         self._last_pick_pos = QPoint(pos)
         result = self._window_picker(pos)
+        hwnd = 0
         if isinstance(result, tuple):
-            rect, title = result
+            rect = result[0] if result else None
+            title = result[1] if len(result) > 1 else ""
+            hwnd = result[2] if len(result) > 2 else 0
         else:
             rect, title = result, ""
         if rect is not None:
             rect = self._clamp_to_widget(QRect(rect).normalized())
-        if rect == self._hover_rect and (title or "") == self._hover_title:
+        if (
+            rect == self._hover_rect
+            and (title or "") == self._hover_title
+            and hwnd == self._hover_hwnd
+        ):
             return
         self._hover_rect = rect
         self._hover_title = title or ""
+        self._hover_hwnd = hwnd
         self.update()
+
+    def _regrab_for_window(self, hwnd: int = 0) -> bool:
+        """v35：选中窗口瞬间重抓一帧底图，避免截到进入截图模式时的旧画面。
+
+        回调由宿主提供（负责前置目标窗口、临时隐藏遮罩、重新抓屏）。任何
+        异常都吞掉并保留旧底图，保证功能降级后截图仍可用。
+        """
+        cb = getattr(self, "_window_regrab", None)
+        if cb is None:
+            return False
+        try:
+            fresh = cb(hwnd)
+        except Exception:  # noqa: BLE001
+            return False
+        return self.update_base(fresh)
 
     def _set_tool(self, key: str) -> None:
         self._tool = key
@@ -3246,6 +3294,9 @@ class Overlay(QWidget):
                         self._teardown()
                         self.long_shot.emit(r)
                     else:
+                        # v35：先重抓最新画面（宿主会前置目标窗口），再进入确认，
+                        # 保证「所见即所得」——高亮框里看到的正是将要截到的内容。
+                        self._regrab_for_window(self._hover_hwnd)
                         self._apply_selection(self._hover_rect, near=pos)
                 else:
                     # 该位置没有可用窗口 → 退回手动框选
@@ -3766,6 +3817,8 @@ class Overlay(QWidget):
                     self._teardown()
                     self.long_shot.emit(r)
                 else:
+                    # v35：与鼠标点击路径一致，回车确认也重抓最新底图
+                    self._regrab_for_window(self._hover_hwnd)
                     self._apply_selection(self._hover_rect, near=self._last_pick_pos)
             return
         if k == Qt.Key_Escape:
