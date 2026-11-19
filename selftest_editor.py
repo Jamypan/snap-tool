@@ -4848,9 +4848,83 @@ def test_v29_sticky_commands() -> None:
 
     # AC12 README 版本记录同步
     readme = Path("README.md").read_text(encoding="utf-8")
-    ok_ac12 = "v29" in readme and "合计 273 项" in readme
-    record("AC12 README 同步 v29 版本记录", ok_ac12,
-           f"v29={'v29' in readme} total={'合计 273 项' in readme}")
+    ok_ac12 = "粘滞命令" in readme and "v29" in readme
+    record("AC12 README 同步 v29 粘滞命令功能", ok_ac12,
+           f"feature={'粘滞命令' in readme} v29={'v29' in readme}")
+
+
+def test_v30_app_init_and_relaunch() -> None:
+    print("\n--- Stage AD: v30 App 真实构造 + 重复启动唤醒 ---")
+    import inspect
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    from PySide6.QtWidgets import QApplication
+
+    import snap as snapmod
+
+    # AD1 真实构造 App（v29 自测盲点：之前全用 App.__new__ 绕过 __init__，
+    # 漏掉了 QTimer 局部变量遮蔽 / parent 类型错误导致的一启动就崩）
+    qapp = QApplication.instance()
+    ctrl = None
+    err = ""
+    try:
+        ctrl = snapmod.App(qapp)
+        qapp._ctrl = ctrl
+    except Exception as exc:  # noqa: BLE001
+        err = repr(exc)
+    ok_ad1 = (
+        ctrl is not None
+        and ctrl._sticky is None
+        and type(ctrl._sticky_timer).__name__ == "QTimer"
+        and ctrl._sticky_timer.parent() is qapp
+    )
+    record("AD1 真实构造 App 不崩溃且粘滞定时器就绪", ok_ad1,
+           f"err={err} timer={type(ctrl._sticky_timer).__name__ if ctrl else None}")
+    if ctrl is not None:
+        # 释放全局热键 / 单实例锁，避免污染同进程后续测试
+        ctrl.quit()
+
+    # AD2 __init__ 里不得有局部 import QTimer 遮蔽模块级导入
+    src_init = inspect.getsource(snapmod.App.__init__)
+    ok_ad2 = (
+        "from PySide6.QtCore import QTimer" not in src_init
+        and "QTimer(self.app)" in src_init
+    )
+    record("AD2 __init__ 无局部 QTimer 遮蔽且 parent 正确", ok_ad2,
+           f"local_import={'from PySide6.QtCore import QTimer' in src_init}")
+
+    # AD3 已有实例收到唤醒请求 → 弹出主窗口（真实逻辑，MagicMock 替身）
+    h = snapmod.App.__new__(snapmod.App)
+    h._quitting = False
+    h.tray = MagicMock()
+    h.show_main_window = MagicMock()
+    h._on_activate_request()
+    ok_ad3 = (
+        h.tray.setVisible.called
+        and h.show_main_window.called
+    )
+    record("AD3 唤醒请求使已有实例显示主窗口", ok_ad3,
+           f"tray={h.tray.setVisible.called} show={h.show_main_window.called}")
+
+    # AD4 main 流程：先探测已有实例并唤醒，再构造新 App（顺序不能反）
+    src_main = inspect.getsource(snapmod.main)
+    probe_at = src_main.find("singleinstance.probe()")
+    resolve_at = src_main.find("_resolve_existing_instance")
+    app_at = src_main.find("ctrl = App(app)")
+    src_resolve = inspect.getsource(snapmod._resolve_existing_instance)
+    ok_ad4 = (
+        -1 < probe_at < resolve_at < app_at
+        and "singleinstance.signal_existing()" in src_resolve
+    )
+    record("AD4 重复启动走唤醒而非再开实例", ok_ad4,
+           f"probe={probe_at} resolve={resolve_at} app={app_at}")
+
+    # AD5 README 版本记录同步
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ad5 = "v30" in readme and "合计 278 项" in readme
+    record("AD5 README 同步 v30 版本记录", ok_ad5,
+           f"v30={'v30' in readme} total={'合计 278 项' in readme}")
 
 
 if __name__ == "__main__":
@@ -4891,6 +4965,7 @@ if __name__ == "__main__":
     test_v27_copy_closes_windows()
     test_v28_warmup_and_input_gate()
     test_v29_sticky_commands()
+    test_v30_app_init_and_relaunch()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

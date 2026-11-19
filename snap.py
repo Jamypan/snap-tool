@@ -520,7 +520,8 @@ class App:
         self._sticky_pending: tuple | None = None
         self._stitch_control = None
         self._suppress_result = False
-        self._sticky_timer = QTimer(self)
+        # App 不是 QObject，不能当 parent；用 QApplication 作 parent 保证生命周期
+        self._sticky_timer = QTimer(self.app)
         self._sticky_timer.setSingleShot(True)
         self._sticky_timer.timeout.connect(self._on_sticky_restart)
 
@@ -613,7 +614,9 @@ class App:
         # 图标生成、全屏 QPainter 光栅化、PIL/GDI 抓屏后端初始化）挪到启动后
         # 的空闲时刻，避免第一次按热键时现做这些事、出现画面跟不上鼠标的卡顿。
         # singleShot(0) 让主窗口先绘制显示，预热在事件循环空闲时跑，不挡启动。
-        from PySide6.QtCore import QTimer
+        # 注意：QTimer 已在模块顶部导入，这里绝不能再写局部 import——
+        # 局部导入会让整个 __init__ 里的 QTimer 变成局部变量，导致上方
+        # self._sticky_timer = QTimer(self) 抛 UnboundLocalError（v29 曾踩此坑）。
         QTimer.singleShot(0, self._warmup)
 
     def _warmup(self) -> None:
@@ -1672,8 +1675,6 @@ def main() -> int:
     app._ctrl = ctrl  # 防止被回收
 
     if "--shot" in sys.argv:
-        from PySide6.QtCore import QTimer
-
         QTimer.singleShot(120, ctrl.start_capture)
     elif not ctrl._hotkey_ok:
         ctrl.tray.showMessage(
