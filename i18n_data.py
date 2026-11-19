@@ -87,6 +87,11 @@ _ROWS: dict[str, tuple[str, ...]] = {
     ),
     "截图热键": ("截图热键", "截圖熱鍵", "Capture Hotkey", "キャプチャのショートカット", "캡처 단축키", "Raccourci de capture", "Aufnahme-Tastenkürzel", "Atajo de captura"),
     "默认模式": ("默认模式", "預設模式", "Default Mode", "既定のモード", "기본 모드", "Mode par défaut", "Standardmodus", "Modo predeterminado"),
+    "画笔平滑度": ("画笔平滑度", "畫筆平滑度", "Pen Smoothness", "ペンの平滑化", "펜 부드럽기", "Lissage du crayon", "Stiftglättung", "Suavidad del lápiz"),
+    "关闭（原始线条）": ("关闭（原始线条）", "關閉（原始線條）", "Off (raw lines)", "オフ（元の線）", "끄기 (원래 선)", "Désactivé (lignes brutes)", "Aus (ursprüngliche Linien)", "Desactivado (líneas originales)"),
+    "轻度": ("轻度", "輕度", "Light", "軽度", "약함", "Léger", "Leicht", "Suave"),
+    "中等": ("中等", "中等", "Medium", "中程度", "보통", "Moyen", "Mittel", "Medio"),
+    "强": ("强", "強", "Strong", "強", "강함", "Fort", "Stark", "Fuerte"),
     "热键与托盘「截图」使用此模式": (
         "热键与托盘「截图」使用此模式", "熱鍵與系統匣「截圖」使用此模式",
         "Used by the hotkey and tray capture", "ショートカットとトレイのキャプチャで使用",
@@ -320,6 +325,12 @@ _ROWS: dict[str, tuple[str, ...]] = {
         "キャプチャのショートカットを {label} に変更しました", "캡처 단축키가 {label}(으)로 변경되었습니다",
         "Raccourci de capture modifié : {label}", "Aufnahme-Tastenkürzel geändert: {label}",
         "Atajo de captura cambiado a {label}",
+    ),
+    "画笔平滑度已设为：{level}": (
+        "画笔平滑度已设为：{level}", "畫筆平滑度已設為：{level}",
+        "Pen smoothness set to: {level}", "ペンの平滑化を {level} に設定しました",
+        "펜 부드럽기를 {level}(으)로 설정했습니다", "Lissage du crayon : {level}",
+        "Stiftglättung: {level}", "Suavidad del lápiz: {level}",
     ),
     "（配置未能写入磁盘，重启后会恢复旧设置）": (
         "（配置未能写入磁盘，重启后会恢复旧设置）", "（設定未能寫入磁碟，重啟後會還原舊設定）",

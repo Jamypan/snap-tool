@@ -777,15 +777,70 @@ def _draw_line_arrows(p, a, b, color, width, line_style, with_start, with_end) -
         _arrow_head(p, a.x(), a.y(), -ux, -uy, color, width, head * scale)
 
 
-def _smooth_polyline(anchor_start, mid_points, anchor_end) -> QPainterPath:
-    """把折线转成平滑曲线：采样点作二次贝塞尔控制点，相邻点中点作锚点。
+# 画笔平滑档位：off 原始折线 / low 轻度 / medium 中等（默认）/ high 强。
+# 数字是绘制前对每个采样点做移动平均的半径（0=不平均），越大越平滑。
+PEN_SMOOTH_LEVELS = ("off", "low", "medium", "high")
+PEN_SMOOTH_LABELS = {
+    "off": "关闭（原始线条）", "low": "轻度", "medium": "中等", "high": "强",
+}
+PEN_SMOOTH_RADIUS = {"off": 0, "low": 0, "medium": 1, "high": 2}
+PEN_SMOOTH_DEFAULT = "medium"
+_pen_smooth = PEN_SMOOTH_DEFAULT   # 模块级当前档位，由设置菜单在启动时载入
 
-    逐点 lineTo 的折线会把鼠标手抖造成的 1~2px 偏移原样画成锯齿；这里改用
-    中点平滑——曲线经过每对相邻采样点的中点、以采样点为控制点，既削掉小
-    尖角，又基本贴合原始轨迹（偏差不超过半个采样间距）。首尾锚点会被精确
-    经过，保证截取端点与箭头位置准确。
+
+def get_pen_smooth() -> str:
+    """当前画笔平滑档位。"""
+    return _pen_smooth
+
+
+def set_pen_smooth(level: str) -> bool:
+    """设置画笔平滑档位；非法值回退到默认并返回 False。"""
+    global _pen_smooth
+    if level not in PEN_SMOOTH_LEVELS:
+        _pen_smooth = PEN_SMOOTH_DEFAULT
+        return False
+    _pen_smooth = level
+    return True
+
+
+def pen_smooth_min_step() -> int:
+    """采集端丢弃重合点的最小曼哈顿距离；关闭档=1（不丢点，保留原始线条）。"""
+    return 1 if _pen_smooth == "off" else 2
+
+
+def _moving_average(points, radius: int) -> list[QPointF]:
+    """对采样点做移动平均去抖；首尾点强制保留，曲线端点不内缩。"""
+    pts = [QPointF(p) for p in points]
+    if radius <= 0 or len(pts) < 3:
+        return pts
+    out = []
+    n = len(pts)
+    for i in range(n):
+        lo, hi = max(0, i - radius), min(n, i + radius + 1)
+        sx = sum(pts[j].x() for j in range(lo, hi))
+        sy = sum(pts[j].y() for j in range(lo, hi))
+        out.append(QPointF(sx / (hi - lo), sy / (hi - lo)))
+    out[0], out[-1] = QPointF(pts[0]), QPointF(pts[-1])
+    return out
+
+
+def _smooth_polyline(anchor_start, mid_points, anchor_end,
+                     radius: int | None = None) -> QPainterPath:
+    """把采样点连成平滑曲线：先按需移动平均去抖，再用二次贝塞尔连接。
+
+    二次贝塞尔以采样点为控制点、相邻点中点为锚点，曲线经过中点，既削掉小
+    尖角又贴合原始轨迹。radius 越大先做的移动平均越强（低档=0 直接贝塞尔，
+    中/高档=1/2），首尾锚点始终精确保留，保证截取端点与箭头位置准确。
+    radius=None 时按当前全局平滑档位取默认值。
     """
+    if radius is None:
+        radius = PEN_SMOOTH_RADIUS.get(_pen_smooth, PEN_SMOOTH_RADIUS[PEN_SMOOTH_DEFAULT])
     path = QPainterPath(QPointF(anchor_start))
+    if radius > 0 and len(mid_points) >= 3:
+        mid_points = _moving_average(
+            [QPointF(anchor_start)] + [QPointF(p) for p in mid_points] + [QPointF(anchor_end)],
+            radius,
+        )[1:-1]
     pts = ([QPointF(anchor_start)] + [QPointF(pt) for pt in mid_points]
            + [QPointF(anchor_end)])
     if len(pts) <= 2:
@@ -856,8 +911,15 @@ def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) 
     lo = hs if with_start else 0.0
     hi = (total - he) if with_end else total
     mid = [points[i] for i in range(1, n - 1) if lo < cum[i] < hi]
-    # 中点平滑：把采样点连成平顺曲线，消除手抖带来的小锯齿
-    path = _smooth_polyline(s0, mid, e0)
+    if _pen_smooth == "off":
+        # 关闭档：原始折线，不去抖也不平滑（保留旧版行为供对比）
+        path = QPainterPath(QPointF(points[0]))
+        for pt in mid:
+            path.lineTo(QPointF(pt))
+        path.lineTo(e0)
+    else:
+        # 中点平滑 + 按档位移动平均，消除手抖带来的小锯齿
+        path = _smooth_polyline(s0, mid, e0)
     p.setPen(lp)
     p.setBrush(Qt.NoBrush)
     p.drawPath(path)
@@ -3413,9 +3475,10 @@ class Overlay(QWidget):
         if self._mode == "drawing" and self._draft:
             d = self._draft
             if d.kind == "pen":
-                # 丢弃几乎重合的采样点：鼠标停住/微抖时相邻事件只差 1px，
-                # 全存下来会变成锯齿；保留首尾点由 _smooth_polyline 负责平滑。
-                if not d.points or (pos - d.points[-1]).manhattanLength() >= 2:
+                # 丢弃几乎重合的采样点；关闭平滑档时阈值为 1（不丢点），
+                # 其余档配合 _smooth_polyline 的中点平滑消除锯齿
+                if (not d.points
+                        or (pos - d.points[-1]).manhattanLength() >= pen_smooth_min_step()):
                     d.points.append(pos)
             elif d.kind in ("arrow", "line"):
                 d.end = pos

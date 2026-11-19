@@ -66,19 +66,22 @@ from hotkeys import (  # noqa: E402
     HotkeyDialog,
     load_hotkey,
     load_mode,
+    load_pen_smooth,
     mode_label,
     save_hotkey,
     save_mode,
+    save_pen_smooth,
 )
 from i18n import LANG, app_name, t  # noqa: E402
 from i18n_docs import cli_help  # noqa: E402
-from snapeditor import Overlay  # noqa: E402
+from snapeditor import Overlay, set_pen_smooth  # noqa: E402
 from snap_editor import EditorWindow  # noqa: E402
 from snapui import (  # noqa: E402
     AboutDialog,
     HelpWindow,
     LanguageDialog,
     MainWindow,
+    PEN_SMOOTH_LABELS,
     make_icon,
 )
 
@@ -495,11 +498,14 @@ class App:
 
         self.hotkey: Hotkey = load_hotkey()
         self.capture_mode = load_mode()
+        self.pen_smooth = load_pen_smooth()
+        set_pen_smooth(self.pen_smooth)   # 应用画笔平滑档位到绘制模块
         self._hotkey_registered = False
         self._hk_error = ""
 
         icon = make_icon()
-        self.main_window = MainWindow(icon, self.hotkey, self.capture_mode, self.save_dir)
+        self.main_window = MainWindow(icon, self.hotkey, self.capture_mode, self.save_dir,
+                                      self.pen_smooth)
         self.main_window.capture_requested.connect(self.start_capture)
         self.main_window.long_capture_requested.connect(self.start_long_capture)
         self.main_window.mode_changed.connect(self._on_mode_changed)
@@ -510,6 +516,7 @@ class App:
         self.main_window.minimize_requested.connect(self._on_minimized)
         self.main_window.quit_requested.connect(self.quit)
         self.main_window.language_requested.connect(self.open_language_settings)
+        self.main_window.pen_smooth_changed.connect(self._on_pen_smooth_changed)
 
         self.tray = QSystemTrayIcon(icon)
         self.menu = QMenu()
@@ -654,6 +661,19 @@ class App:
             return  # 截图进行中不弹设置窗口
         dlg = LanguageDialog(self.main_window)
         dlg.exec()
+
+    def _on_pen_smooth_changed(self, level: str) -> None:
+        """主窗口「设置 → 画笔平滑度」：即时应用并持久化。"""
+        if not set_pen_smooth(level):
+            return
+        self.pen_smooth = level
+        save_pen_smooth(level)
+        self._tray_message(
+            app_name(),
+            t("画笔平滑度已设为：{level}", level=t(PEN_SMOOTH_LABELS[level])),
+            QSystemTrayIcon.Information,
+            1500,
+        )
 
     # ------------------------------------------------------------ 主窗口 / 帮助
     def show_main_window(self) -> None:

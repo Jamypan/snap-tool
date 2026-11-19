@@ -214,6 +214,27 @@ def save_mode(mode: str) -> bool:
     return _save_raw(raw)
 
 
+# 画笔平滑度档位：与 snapeditor.PEN_SMOOTH_LEVELS 保持一致（此处只做字符串
+# 存取，不 import snapeditor，避免打破分层；两处一致性由自测锁定）。
+PEN_SMOOTH_LEVELS = ("off", "low", "medium", "high")
+PEN_SMOOTH_DEFAULT = "medium"
+
+
+def load_pen_smooth() -> str:
+    """读取画笔平滑档位；缺失/非法时回退到默认（中等）。"""
+    level = _load_raw().get("pen_smooth", PEN_SMOOTH_DEFAULT)
+    return level if level in PEN_SMOOTH_LEVELS else PEN_SMOOTH_DEFAULT
+
+
+def save_pen_smooth(level: str) -> bool:
+    """保存画笔平滑档位（同时保留热键 / 模式等其它配置）。"""
+    if level not in PEN_SMOOTH_LEVELS:
+        return False
+    raw = _load_raw()
+    raw["pen_smooth"] = level
+    return _save_raw(raw)
+
+
 # ---------------------------------------------------------------------------
 # Qt 按键 → Win32 虚拟键
 # ---------------------------------------------------------------------------

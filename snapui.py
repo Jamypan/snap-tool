@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap, QTextCursor
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -34,6 +34,12 @@ from i18n_docs import about_html, cli_help, cli_help_html, help_html
 # 界面上显示的程序名统一用随语言变化的 app_name()。
 APP_NAME = "截屏助手"
 CONTACT_EMAIL = "283096251@qq.com"
+
+# 画笔平滑度档位显示文案（key 用中文原文，走 i18n 翻译）
+PEN_SMOOTH_LABELS = {
+    "off": "关闭（原始线条）", "low": "轻度", "medium": "中等", "high": "强",
+}
+PEN_SMOOTH_LEVELS = ("off", "low", "medium", "high")
 
 # 随程序分发的资源：源码运行时在 snapui.py 同目录，PyInstaller 打包后在 _MEIPASS。
 # SnapTool.spec 的 datas 里必须同步列出这两个文件，否则绿色版会缺图标 / 头像。
@@ -298,6 +304,7 @@ class MainWindow(QMainWindow):
     minimize_requested = Signal()
     quit_requested = Signal()
     language_requested = Signal()
+    pen_smooth_changed = Signal(str)     # 画笔平滑档位 off/low/medium/high
 
     STYLE = (
         "QMainWindow, QWidget#central { background:#f7f8fa; }"
@@ -315,13 +322,16 @@ class MainWindow(QMainWindow):
         "QLabel#sub, QLabel#hint { color:#6b7280; }"
     )
 
-    def __init__(self, icon: QIcon, hotkey: Hotkey, mode: str, save_dir: Path) -> None:
+    def __init__(self, icon: QIcon, hotkey: Hotkey, mode: str, save_dir: Path,
+                 pen_smooth: str = "medium") -> None:
         super().__init__()
         # 程序真正退出时由 App 置 True：closeEvent 直接放行关闭，
         # 不再走「最小化到托盘」并弹出「程序仍在运行」之类的提示。
         self._allow_close = False
         self._save_dir = Path(save_dir)
         self._actions: dict[str, QAction] = {}
+        self._pen_smooth_actions: dict[str, QAction] = {}
+        self._pen_smooth = pen_smooth
         self.setWindowTitle(app_name())
         self.setWindowIcon(icon)
         self.setMinimumWidth(540)
@@ -331,6 +341,7 @@ class MainWindow(QMainWindow):
         self._build_body(save_dir)
         self.set_hotkey(hotkey)
         self.set_mode(mode)
+        self.set_pen_smooth(pen_smooth)
         LANG.changed.connect(self.retranslate_ui)
 
     def _build_menu(self) -> None:
@@ -376,6 +387,19 @@ class MainWindow(QMainWindow):
         )
         a_lang.triggered.connect(lambda _checked=False: self.language_requested.emit())
         m_set.addAction(a_lang)
+        # 画笔平滑度子菜单：单选，改动即时生效并持久化
+        m_smooth = m_set.addMenu(t("画笔平滑度"))
+        self._menus["pen_smooth"] = m_smooth
+        smooth_group = QActionGroup(self)
+        smooth_group.setExclusive(True)
+        for level in ("off", "low", "medium", "high"):
+            a = QAction(t(PEN_SMOOTH_LABELS[level]), self, checkable=True)
+            a.setActionGroup(smooth_group)
+            a.triggered.connect(
+                lambda _checked=False, lv=level: self._on_pen_smooth(lv)
+            )
+            m_smooth.addAction(a)
+            self._pen_smooth_actions[level] = a
         self._actions.update(hotkey=a_hk, language=a_lang)
 
         m_help = mb.addMenu(t("帮助(&H)"))
@@ -480,6 +504,21 @@ class MainWindow(QMainWindow):
         if isinstance(mode, str):
             self.mode_changed.emit(mode)
 
+    # ------------------------------------------------------------ 画笔平滑度
+    def set_pen_smooth(self, level: str) -> None:
+        """更新平滑度菜单勾选状态（不发出变更信号）。"""
+        if level not in PEN_SMOOTH_LEVELS:
+            level = "medium"
+        self._pen_smooth = level
+        a = self._pen_smooth_actions.get(level)
+        if a is not None:
+            a.setChecked(True)
+
+    def _on_pen_smooth(self, level: str) -> None:
+        """用户在菜单里选了档位：更新勾选并发信号给 App 持久化 + 应用。"""
+        self._pen_smooth = level
+        self.pen_smooth_changed.emit(level)
+
     # ------------------------------------------------------------ 语言刷新
     def retranslate_ui(self, _code: str = "") -> None:
         """LANG.changed 触发：已在界面上的所有文案立即换语言。"""
@@ -501,6 +540,10 @@ class MainWindow(QMainWindow):
         self._actions["language"].setText(
             f"{t('语言…')}  [{language_label(LANG.preference)}]"
         )
+        if "pen_smooth" in self._menus:
+            self._menus["pen_smooth"].setTitle(t("画笔平滑度"))
+            for level, a in self._pen_smooth_actions.items():
+                a.setText(t(PEN_SMOOTH_LABELS[level]))
 
         self._title.setText(app_name())
         self._sub.setText(t("程序已启动 · 托盘常驻 · 关闭本窗口只会最小化到托盘，不会退出程序"))

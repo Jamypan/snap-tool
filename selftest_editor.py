@@ -4875,10 +4875,11 @@ def test_v32_pen_smoothing() -> None:
     src_ov = inspect.getsource(Ovl.mouseMoveEvent)
     src_cv = inspect.getsource(Cvs.mouseMoveEvent)
     ok_ad4 = (
-        "manhattanLength() >= 2" in src_ov and "manhattanLength() >= 2" in src_cv
+        "manhattanLength() >= pen_smooth_min_step()" in src_ov
+        and "manhattanLength() >= pen_smooth_min_step()" in src_cv
     )
     record("AD4 两编辑器采集端都过滤重合抖动点", ok_ad4,
-           f"overlay={'manhattanLength' in src_ov} canvas={'manhattanLength' in src_cv}")
+           f"overlay={'pen_smooth_min_step' in src_ov} canvas={'pen_smooth_min_step' in src_cv}")
 
     # AD5 行为级：密集微抖点被真实丢弃（1px 步进只保留间隔>=2的点）
     cv = Canvas(make_image(200, 120), [], None)
@@ -4915,6 +4916,150 @@ def test_v32_pen_smoothing() -> None:
     ok_ad7 = "v32" in readme and "平滑" in readme and "锯齿" in readme
     record("AD7 README 同步 v32 画笔平滑", ok_ad7,
            f"v32={'v32' in readme} smooth={'平滑' in readme}")
+
+
+# ---------------------------------------------------------------------------
+def test_v33_pen_smooth_levels() -> None:
+    print("\n--- Stage AE: v33 画笔平滑档位可调 ---")
+    import inspect
+    import os
+    import random
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtCore import QPointF
+
+    import hotkeys
+    import snapeditor
+    from snapeditor import (
+        PEN_SMOOTH_LEVELS, PEN_SMOOTH_DEFAULT,
+        get_pen_smooth, set_pen_smooth, pen_smooth_min_step,
+        _smooth_polyline,
+    )
+
+    # AE1 四档齐全，默认中等
+    ok_ae1 = (
+        tuple(PEN_SMOOTH_LEVELS) == ("off", "low", "medium", "high")
+        and PEN_SMOOTH_DEFAULT == "medium"
+        and hotkeys.PEN_SMOOTH_LEVELS == PEN_SMOOTH_LEVELS
+    )
+    record("AE1 四档齐全且两模块档位一致，默认中等", ok_ae1,
+           f"levels={PEN_SMOOTH_LEVELS} default={PEN_SMOOTH_DEFAULT}")
+
+    # AE2 非法档位回退默认，且不崩溃
+    before = get_pen_smooth()
+    ok_ae2 = set_pen_smooth("bogus") is False and get_pen_smooth() == PEN_SMOOTH_DEFAULT
+    set_pen_smooth(before)   # 还原，避免影响后续测试
+    record("AE2 非法档位回退默认", ok_ae2, f"now={get_pen_smooth()}")
+
+    # AE3 采集端最小间距随档位：关闭=1（不丢点），其它=2
+    set_pen_smooth("off")
+    step_off = pen_smooth_min_step()
+    set_pen_smooth("high")
+    step_high = pen_smooth_min_step()
+    set_pen_smooth(PEN_SMOOTH_DEFAULT)
+    ok_ae3 = step_off == 1 and step_high == 2
+    record("AE3 关闭档不丢采样点，其它档去抖", ok_ae3,
+           f"off={step_off} high={step_high}")
+
+    # AE4 行为级：四档平滑强度递增（曲率单调下降）
+    random.seed(7)
+    pts = [QPointF(0, 100)]
+    x = 0
+    for _ in range(30):
+        x += 3
+        pts.append(QPointF(x, 100 + random.choice([-2, -1, -1, 0, 0, 0, 1, 1, 2])))
+
+    def curvature(seq):
+        return sum(abs(seq[i + 1].y() - 2 * seq[i].y() + seq[i - 1].y())
+                   for i in range(1, len(seq) - 1))
+
+    curv = {}
+    for lv, radius in (("off", 0), ("low", 0), ("medium", 1), ("high", 2)):
+        if lv == "off":
+            seq = [QPointF(p) for p in pts]           # 原始折线
+        else:
+            path = _smooth_polyline(pts[0], pts[1:-1], pts[-1], radius=radius)
+            seq = [path.pointAtPercent(i / 90) for i in range(91)]
+        curv[lv] = curvature(seq)
+    ok_ae4 = (
+        curv["off"] > curv["low"] > curv["medium"] > curv["high"]
+        and curv["medium"] < curv["low"] * 0.6   # 默认明显比旧版(low)平滑
+    )
+    record("AE4 四档曲率递减，默认比旧版明显更平滑", ok_ae4,
+           f"off={curv['off']:.1f} low={curv['low']:.1f} "
+           f"med={curv['medium']:.1f} high={curv['high']:.1f}")
+
+    # AE5 持久化往返（临时配置目录，不污染真实配置）
+    with tempfile.TemporaryDirectory() as td:
+        os.environ["SNAPTOOL_HOME"] = td
+        try:
+            defaults = hotkeys.load_pen_smooth()
+            roundtrip = {}
+            for lv in PEN_SMOOTH_LEVELS:
+                hotkeys.save_pen_smooth(lv)
+                roundtrip[lv] = hotkeys.load_pen_smooth()
+            # 损坏值回退
+            (Path(td) / "settings.json").write_text(
+                '{"pen_smooth":"garbage"}', encoding="utf-8")
+            fallback = hotkeys.load_pen_smooth()
+        finally:
+            os.environ.pop("SNAPTOOL_HOME", None)
+    ok_ae5 = (
+        defaults == PEN_SMOOTH_DEFAULT
+        and all(roundtrip[lv] == lv for lv in PEN_SMOOTH_LEVELS)
+        and fallback == PEN_SMOOTH_DEFAULT
+    )
+    record("AE5 平滑档位持久化往返与损坏回退", ok_ae5,
+           f"defaults={defaults} roundtrip={roundtrip} fallback={fallback}")
+
+    # AE6 菜单接线：主窗口有子菜单、四档 action、点击发信号
+    from snapui import MainWindow, make_icon, PEN_SMOOTH_LABELS
+    mw = MainWindow(make_icon(), __import__("hotkeys").Hotkey(),
+                    "rect", Path("."), "medium")
+    fired = []
+    mw.pen_smooth_changed.connect(lambda lv: fired.append(lv))
+    ok_ae6a = (
+        "pen_smooth" in mw._menus
+        and set(mw._pen_smooth_actions) == set(PEN_SMOOTH_LEVELS)
+        and mw._pen_smooth_actions["medium"].isChecked()
+    )
+    mw._on_pen_smooth("high")
+    ok_ae6b = fired == ["high"] and mw._pen_smooth == "high"
+    record("AE6 设置菜单四档勾选与信号", ok_ae6a and ok_ae6b,
+           f"menu={ok_ae6a} signal={fired}")
+    mw.close()
+
+    # AE7 App 启动时读取配置并应用；菜单改动即时生效
+    import snap as snapmod
+    ok_ae7 = (
+        "set_pen_smooth(self.pen_smooth)" in inspect.getsource(snapmod.App.__init__)
+        and "pen_smooth_changed.connect(self._on_pen_smooth_changed)"
+        in inspect.getsource(snapmod.App.__init__)
+        and "save_pen_smooth(level)" in inspect.getsource(snapmod.App._on_pen_smooth_changed)
+    )
+    record("AE7 App 启动应用+菜单改动持久化的接线", ok_ae7,
+           f"apply={'set_pen_smooth(self.pen_smooth)' in inspect.getsource(snapmod.App.__init__)}")
+
+    # AE8 i18n：新增文案 8 语言齐全，占位符一致
+    from i18n_data import _ROWS, LANGS
+    need_keys = ("画笔平滑度", "关闭（原始线条）", "轻度", "中等", "强",
+                 "画笔平滑度已设为：{level}")
+    bad = []
+    for k in need_keys:
+        row = _ROWS.get(k)
+        if not row or len(row) != len(LANGS) or any(not s for s in row):
+            bad.append(k)
+    row = _ROWS.get("画笔平滑度已设为：{level}", ())
+    if any("{level}" not in s for s in row):
+        bad.append("占位符{level}")
+    record("AE8 平滑度相关文案 8 语言齐全且占位符一致", not bad, f"bad={bad}")
+
+    # AE9 README 同步到 v33
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ae9 = "v33" in readme and "平滑度" in readme and "档" in readme
+    record("AE9 README 同步 v33 可调平滑度", ok_ae9,
+           f"v33={'v33' in readme} level={'平滑度' in readme}")
 
 
 if __name__ == "__main__":
@@ -4956,6 +5101,7 @@ if __name__ == "__main__":
     test_v28_warmup_and_input_gate()
     test_v31_sticky_tools_and_single_instance()
     test_v32_pen_smoothing()
+    test_v33_pen_smooth_levels()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
