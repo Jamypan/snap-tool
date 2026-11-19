@@ -5675,6 +5675,177 @@ def test_v36_ocr_multiline_and_cursor() -> None:
     ed.close()
 
 
+# ---------------------------------------------------------------------------
+# Stage AI — v37 画笔箭头与曲线衔接处不再露白缝
+# ---------------------------------------------------------------------------
+def test_v37_pen_arrow_joint() -> None:
+    print("\n--- Stage AI: v37 画笔端点箭头与曲线无缝衔接 ---")
+    import math
+    from pathlib import Path
+
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    import snapeditor as se
+
+    W = 16
+    # 一段紧迫弧：切线方向与末端局部走向差得多，最容易在衔接处露缝
+    pts = [QPointF(150 + 38 * math.cos(math.radians(d)),
+                   150 - 38 * math.sin(math.radians(d)))
+           for d in range(150, 16, -3)]
+
+    def render(draw, bite=None, barb=None, width=W):
+        old_bite, old_barb = se.PEN_ARROW_BITE, se.PEN_ARROW_BARB
+        if bite is not None:
+            se.PEN_ARROW_BITE = bite
+        if barb is not None:
+            se.PEN_ARROW_BARB = barb
+        img = QImage(300, 300, QImage.Format_RGB32)
+        img.fill(QColor("#ffffff"))
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        draw(p, pts, QColor("#e01b1b"), width, "solid", False, True)
+        p.end()
+        se.PEN_ARROW_BITE, se.PEN_ARROW_BARB = old_bite, old_barb
+        return img
+
+    def red_mask(img):
+        return [[img.pixelColor(x, y).red() > 150
+                 and img.pixelColor(x, y).green() < 120 for x in range(img.width())]
+                for y in range(img.height())]
+
+    # AI1 探入比例是合法比例值，且足以让末端越过底边
+    ok_ai1 = 0.15 <= se.PEN_ARROW_BITE <= 0.6 and 0 < se.PEN_ARROW_BARB < 1.5
+    record("AI1 箭头衔接参数在合理区间", ok_ai1,
+           f"bite={se.PEN_ARROW_BITE} barb={se.PEN_ARROW_BARB}")
+
+    # AI2 笔画末端落在箭头三角形内部（越过底边），这是「不可能露缝」的几何保证
+    cap = {}
+    orig_smooth, orig_head = se._smooth_polyline, se._arrow_head
+
+    def fake_smooth(a0, mid, a1, radius=None):
+        path = orig_smooth(a0, mid, a1, radius)
+        cap["end"] = path.pointAtPercent(1.0)
+        return path
+
+    def fake_head(p, tx, ty, ux, uy, color, width, head=None, barb=0.0):
+        cap["head"] = (tx, ty, ux, uy, head or 0.0, barb)
+        return orig_head(p, tx, ty, ux, uy, color, width, head, barb)
+
+    se._smooth_polyline, se._arrow_head = fake_smooth, fake_head
+    try:
+        render(se._draw_pen_arrows)
+    finally:
+        se._smooth_polyline, se._arrow_head = orig_smooth, orig_head
+
+    ok_ai2 = False
+    detail = "未捕获"
+    if "end" in cap and "head" in cap:
+        tx, ty, ux, uy, head, barb = cap["head"]
+        end = cap["end"]
+        # 沿箭头轴线看：末端到箭尖的距离必须小于箭头长度（= 已进入三角形）
+        back = -((end.x() - tx) * ux + (end.y() - ty) * uy)
+        tip_dist = math.hypot(end.x() - tx, end.y() - ty)
+        wing = max(head * 0.42, W * 0.62)
+        # 该位置三角形半宽：箭尖处为 0，底边处为 wing
+        lateral = wing * max(0.0, min(1.0, back / head)) if head else 0.0
+        ok_ai2 = 0 < tip_dist < head and lateral > W * 0.3
+        detail = (f"末端距箭尖={tip_dist:.1f} < 箭头长={head:.1f} "
+                  f"该处三角半宽={lateral:.1f} > 线宽半={W/2:.1f}")
+    record("AI2 笔画末端探入箭头三角形内部", ok_ai2, detail)
+
+    # AI3 画笔箭头不用燕尾（接缝靠探入解决；粗笔画上燕尾会在外侧多出台阶）
+    se._arrow_head = fake_head
+    try:
+        cap.clear()
+        render(se._draw_pen_arrows)
+    finally:
+        se._arrow_head = orig_head
+    pen_barb = cap.get("head", (0, 0, 0, 0, 0, 0))[5]
+    ok_ai3 = pen_barb == 0.0
+    record("AI3 画笔箭头不加燕尾（避免粗笔画外侧凸起）", ok_ai3,
+           f"pen barb={pen_barb}")
+
+    # AI4 燕尾深度受 0.3×箭头长度上限约束：极短箭头不会变成一团
+    got = se.effective_barb(10, 12.0, 10 * se.PEN_ARROW_BARB)
+    want = 12.0 * 0.30
+    ok_ai4 = abs(got - want) < 1e-6 and se.effective_barb(10, 48.0, 8.0) == 8.0
+    record("AI4 燕尾深度受箭头长度上限约束", ok_ai4,
+           f"短箭头={got:.2f}（上限 {want:.2f}）长箭头={se.effective_barb(10, 48.0, 8.0):.2f}")
+
+    # AI5 关闭平滑档：起点有箭头时笔画不再从箭尖冒出去（旧版从 points[0] 起笔）
+    old_off = se._pen_smooth
+    se._pen_smooth = "off"
+    try:
+        flat = [QPointF(x, 100) for x in range(60, 161, 2)]
+        img3 = QImage(200, 160, QImage.Format_RGB32)
+        img3.fill(QColor("#ffffff"))
+        pp = QPainter(img3)
+        pp.setRenderHint(QPainter.Antialiasing, True)
+        se._draw_pen_arrows(pp, flat, QColor("#e01b1b"), 12, "solid", True, False)
+        pp.end()
+    finally:
+        se._pen_smooth = old_off
+    m3 = red_mask(img3)
+    left = min(x for y in range(img3.height()) for x in range(img3.width()) if m3[y][x])
+    ok_ai5 = left >= 58
+    record("AI5 关闭平滑档起点笔画不再冒出箭尖", ok_ai5,
+           f"最左红像素 x={left}（箭尖 x=60）")
+
+    # AI6 接缝核心区（半径 0.6×线宽）内不得有白色像素：旧版在急弯处会露出白缝
+    bite0 = render(se._draw_pen_arrows, bite=0.0)
+    bite1 = render(se._draw_pen_arrows, bite=0.35)
+    head = max(12.0, W * 3.0)
+    cum = se._path_arclengths(pts)
+    ue = se._pen_tangent(pts, cum, False, min(max(head, 12.0), cum[-1] * 0.5))
+    tip = pts[-1]
+
+    def joint_white(img, bite):
+        cx = tip.x() - ue[0] * head * (1 - bite)
+        cy = tip.y() - ue[1] * head * (1 - bite)
+        r = W * 0.6
+        n = 0
+        for y in range(int(cy - r) - 1, int(cy + r) + 2):
+            for x in range(int(cx - r) - 1, int(cx + r) + 2):
+                if (x - cx) ** 2 + (y - cy) ** 2 > r * r:
+                    continue
+                c = img.pixelColor(x, y)
+                if not (c.red() > 150 and c.green() < 120):
+                    n += 1
+        return n
+
+    w_old = joint_white(bite0, 0.0)
+    w_new = joint_white(bite1, 0.35)
+    ok_ai6 = w_new == 0 and w_new <= w_old
+    record("AI6 接缝核心区没有白色像素", ok_ai6,
+           f"接缝白像素 旧(停在底边)={w_old} 新(探入)={w_new}")
+
+    # AI7 直线 / 箭头工具同样带燕尾（单独拉的箭头贴到笔画上也不露缝）
+    def line_area(barb_ratio):
+        old = se.PEN_ARROW_BARB
+        se.PEN_ARROW_BARB = barb_ratio
+        img = QImage(240, 120, QImage.Format_RGB32)
+        img.fill(QColor("#ffffff"))
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        se._draw_line_arrows(p, QPointF(40, 60), QPointF(200, 60),
+                             QColor("#e01b1b"), 10, "solid", False, True)
+        p.end()
+        se.PEN_ARROW_BARB = old
+        m = red_mask(img)
+        return sum(sum(r) for r in m)
+
+    a0, a1 = line_area(0.0001), line_area(se.PEN_ARROW_BARB)
+    ok_ai7 = a1 > a0
+    record("AI7 直线/箭头工具也带燕尾", ok_ai7, f"无={a0}px 有={a1}px")
+
+    # AI8 README 同步 v37
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ai8 = "v37" in readme and "箭头" in readme
+    record("AI8 README 同步 v37", ok_ai8,
+           f"v37={'v37' in readme} arrow={'箭头' in readme}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -5719,6 +5890,7 @@ if __name__ == "__main__":
     test_v34_pin_to_desktop()
     test_v35_window_capture_accuracy()
     test_v36_ocr_multiline_and_cursor()
+    test_v37_pen_arrow_joint()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

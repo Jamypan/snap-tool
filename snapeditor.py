@@ -728,13 +728,30 @@ def _pen_tangent(points, cum, at_start: bool, span: float) -> tuple[float, float
     return _unit_dir(ref, tip, (-1.0, 0.0) if at_start else (1.0, 0.0))
 
 
+def effective_barb(width: int, head: float, barb: float) -> float:
+    """实际使用的燕尾深度：不超过箭头长度的 30%。
+
+    极短线段时箭头本身会被收缩，燕尾必须跟着收，否则底边会比箭头还大、
+    变成一个歪团。单独抽出来便于自测直接校验这个上限。
+    """
+    if barb <= 0 or head <= 0:
+        return 0.0
+    return min(barb, head * 0.30)
+
+
 def _arrow_head(p: QPainter, tipx: float, tipy: float, ux: float, uy: float,
-                color: QColor, width: int, head_override: float | None = None) -> None:
+                color: QColor, width: int, head_override: float | None = None,
+                barb: float = 0.0) -> None:
     """在 (tipx,tipy) 处画一个指向 (ux,uy) 方向的实心箭头。
 
     大小随线宽合理缩放（head≈线宽×3，并设下限），半张角固定约 22.8°，
     且底边不小于线宽，保证粗线时依然尖锐、不露圆头。head_override 用于
     极短线段时按已收缩后的长度绘制，避免箭头盖住整条线。
+
+    barb>0 时底边中心再沿反方向退出 barb 像素，把底边做成向后凸的「燕尾」，
+    让两条翼的内侧斜边贴着笔画两侧包过去——画笔曲线与箭头交接处那种白色
+    凹缝就是「笔画边缘」与「翼边」相交的夹角，燕尾正好把这块填掉。直线/
+    箭头工具不传 barb，保持原来的平底三角。
     """
     head = head_override if head_override is not None else max(12.0, width * 3.0)
     wing = max(head * 0.42, width * 0.62)
@@ -744,6 +761,14 @@ def _arrow_head(p: QPainter, tipx: float, tipy: float, ux: float, uy: float,
     rx, ry = bx + uy * wing, by - ux * wing
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(color))
+    if barb > 0:
+        # 极短线段时箭头本身会被收缩，燕尾也跟着收，避免底边比箭头还长
+        barb = effective_barb(width, head, barb)
+        # 底边中点向后退出 barb，多边形变成燕尾（仍然是实心的，尖角不变）
+        cx, cy = bx - ux * barb, by - uy * barb
+        p.drawPolygon(QPolygonF(
+            [t, QPointF(lx, ly), QPointF(cx, cy), QPointF(rx, ry)]))
+        return
     p.drawPolygon(QPolygonF([t, QPointF(lx, ly), QPointF(rx, ry)]))
 
 
@@ -782,9 +807,11 @@ def _draw_line_arrows(p, a, b, color, width, line_style, with_start, with_end) -
     bx, by = b.x() - ux * he, b.y() - uy * he
     _stroke_seg(p, ax, ay, bx, by, color, width, line_style, Qt.FlatCap)
     if with_end:
-        _arrow_head(p, b.x(), b.y(), ux, uy, color, width, head * scale)
+        _arrow_head(p, b.x(), b.y(), ux, uy, color, width, head * scale,
+                    barb=width * PEN_ARROW_BARB)
     if with_start:
-        _arrow_head(p, a.x(), a.y(), -ux, -uy, color, width, head * scale)
+        _arrow_head(p, a.x(), a.y(), -ux, -uy, color, width, head * scale,
+                    barb=width * PEN_ARROW_BARB)
 
 
 # 画笔平滑档位：off 原始折线 / low 轻度 / medium 中等（默认）/ high 强。
@@ -796,6 +823,19 @@ PEN_SMOOTH_LABELS = {
 PEN_SMOOTH_RADIUS = {"off": 0, "low": 0, "medium": 1, "high": 2}
 PEN_SMOOTH_DEFAULT = "medium"
 _pen_smooth = PEN_SMOOTH_DEFAULT   # 模块级当前档位，由设置菜单在启动时载入
+
+# 画笔端点箭头与笔画的衔接深度（占箭头长度的比例）。
+# 笔画末端不是停在箭头底边上，而是再往三角形里探进这个比例：箭头方向取自
+# 「平均切线」、笔画末端取自「实际局部走向」，急弯处两者有夹角，正好停在底边
+# 上会在夹角一侧露出白色楔形空档；探进去就必然穿过底边，缺口被封住。
+PEN_ARROW_BITE = 0.35
+
+# 直线 / 箭头工具箭头底边向后微凸的深度（× 线宽）：让箭头的两条翼内边贴住
+# 线的两侧，把「单独拉一个箭头贴着笔画末端」时那一小块白色接缝吃掉。直杆在场
+# 时这块凸起被同色线条盖住，看不出形态变化。
+# 画笔（pen）不用燕尾：它的接缝由 PEN_ARROW_BITE 探入解决，粗笔画上再加燕尾
+# 会在笔画边缘外多出一个台阶，反而更难看。
+PEN_ARROW_BARB = 0.5
 
 
 def get_pen_smooth() -> str:
@@ -891,7 +931,6 @@ def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) 
         p.drawPoint(QPointF(points[0]))
         return
 
-    need_trim = with_start or with_end
     head = max(12.0, width * 3.0)
     # 两端箭头加起来不超过路径的 80%，极短曲线时按比例收缩
     max_total = total * 0.8
@@ -905,17 +944,30 @@ def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) 
     us = _pen_tangent(points, cum, True, span) if with_start else None
     ue = _pen_tangent(points, cum, False, span) if with_end else None
 
-    # 截断端点 = 端点沿「朝外方向」回退箭头长度，正好落在箭头底边中心
-    s0 = (QPointF(points[0].x() - us[0] * hs, points[0].y() - us[1] * hs)
+    # 截断端点：从端点沿「朝外方向」回退，越过箭头底边再往三角形里探进
+    # PEN_ARROW_BITE（占箭头长度的比例）。
+    #
+    # 为什么不能正好停在底边中心：箭头方向是「回溯一段弧长的平均切线」，
+    # 笔画末端的走向是「路径的实际局部走向」，急弯处两者能差二三十度。于是
+    # 笔画的平头切口与三角底边像两把刀斜着交叉，夹角一侧必然露出一块白色
+    # 楔形空档——这就是「箭头和曲线衔接处断开」的成因。
+    # 让笔画末端探到三角形内部，笔画就必然穿过底边，缺口被封住；多出来的
+    # 一小段落在实心箭头里，看不见（探入深度按线宽与三角半宽核算过，不侧漏）。
+    keep = max(0.0, min(1.0, 1.0 - PEN_ARROW_BITE))
+    s0 = (QPointF(points[0].x() - us[0] * hs * keep,
+                  points[0].y() - us[1] * hs * keep)
           if with_start else QPointF(points[0]))
-    e0 = (QPointF(points[-1].x() - ue[0] * he, points[-1].y() - ue[1] * he)
+    e0 = (QPointF(points[-1].x() - ue[0] * he * keep,
+                  points[-1].y() - ue[1] * he * keep)
           if with_end else QPointF(points[-1]))
 
     lp = QPen(color)
     lp.setWidth(width)
     lp.setJoinStyle(Qt.RoundJoin)
     lp.setStyle(LINE_STYLES.get(line_style, Qt.SolidLine))
-    lp.setCapStyle(Qt.FlatCap if need_trim else Qt.RoundCap)
+    # 有箭头时用圆头：末端藏在实心箭头内部，圆头即使因夹角略微侧偏也不会
+    # 从三角形侧边戳出尖角；无箭头仍是圆头自由笔触。
+    lp.setCapStyle(Qt.RoundCap)
     # 只保留落在两个截断点之间的原始采样点；被裁掉的尾部不再画，
     # 避免「最后一段很短、却要从它硬连到截断点」造成方向突然折一下
     lo = hs if with_start else 0.0
@@ -923,7 +975,9 @@ def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) 
     mid = [points[i] for i in range(1, n - 1) if lo < cum[i] < hi]
     if _pen_smooth == "off":
         # 关闭档：原始折线，不去抖也不平滑（保留旧版行为供对比）
-        path = QPainterPath(QPointF(points[0]))
+        # 起点用 s0 而不是 points[0]：起点有箭头时笔画不能从箭尖开始，
+        # 否则圆头会从箭头尖端探出去，同样接不上。
+        path = QPainterPath(QPointF(s0))
         for pt in mid:
             path.lineTo(QPointF(pt))
         path.lineTo(e0)
