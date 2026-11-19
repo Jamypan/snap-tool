@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>E-03 框选遮罩</title>
+<link rel="stylesheet" href="_style.css">
+<style>
+  .bgwin{border-radius:10px;background:#fff;overflow:hidden;box-shadow:0 14px 34px rgba(0,0,0,.18);opacity:.9}
+  .bgwin .b-bar{height:30px;background:#f7f6f3;border-bottom:1px solid #ece8e1;display:flex;align-items:center;gap:6px;padding:0 11px}
+  .bgwin .b-bar i{width:8px;height:8px;border-radius:50%;background:#dcd6cc;display:block}
+  .bgwin .b-body{padding:16px 20px}
+  .bgwin .b-body i{display:block;height:9px;border-radius:4px;background:#efeae2;margin-bottom:10px}
+  .bgwin .b-body i.h{height:13px;width:52%;background:#e0d9cd}
+  .bgwin .b-body i.w80{width:80%}.bgwin .b-body i.w64{width:64%}
+  .sel{z-index:3}.hnd{z-index:5}.sizehint{z-index:5}.modestrip{z-index:6}.ctools{z-index:6}
+</style></head>
+<body>
+<div class="mask">
+  <div class="bg"></div>
+
+  <div class="bgwin" style="position:absolute;left:70px;top:70px;width:420px;height:280px">
+    <div class="b-bar"><i></i><i></i><i></i></div>
+    <div class="b-body"><i class="h"></i><i class="w80"></i><i class="w64"></i><i></i><i class="w80"></i></div>
+  </div>
+
+  <!-- 被选中的窗口（真实内容区，未压暗） -->
+  <div class="bgwin" style="position:absolute;left:300px;top:180px;width:620px;height:360px;opacity:1;border-radius:4px;box-shadow:none;z-index:2">
+    <div class="b-bar" style="height:34px"><i></i><i></i><i></i></div>
+    <div style="display:flex;height:326px">
+      <div style="width:140px;background:#faf9f7;border-right:1px solid #f2eee8;padding:16px 14px">
+        <div style="font-size:10.5px;color:#9a9187;font-weight:700;letter-spacing:.06em;margin-bottom:11px">目录</div>
+        <i style="display:block;height:9px;border-radius:4px;background:#ffdfc4;width:84%;margin-bottom:10px"></i>
+        <i style="display:block;height:9px;border-radius:4px;background:#ece7df;width:70%;margin-bottom:10px"></i>
+        <i style="display:block;height:9px;border-radius:4px;background:#ece7df;width:78%;margin-bottom:10px"></i>
+        <i style="display:block;height:9px;border-radius:4px;background:#ece7df;width:62%;margin-bottom:10px"></i>
+      </div>
+      <div style="flex:1;padding:20px 24px">
+        <div style="font-size:18px;font-weight:700;color:#2b2620">2026 年第三季度项目复盘</div>
+        <div style="font-size:11px;color:#a89e92;margin:6px 0 14px">更新于 11 月 18 日 · 共 12 页</div>
+        <div style="font-size:11.5px;line-height:1.9;color:#7d7468">本季度整体交付节奏平稳，测试阶段发现的问题集中在边界场景。下表是各模块的完成度对比。</div>
+        <div style="margin-top:14px;border:1px solid #f0ebe4;border-radius:8px;overflow:hidden">
+          <div style="display:flex;border-bottom:1px solid #f4f0ea;background:#faf8f4">
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#6b6257;font-weight:700">模块</div>
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#6b6257;font-weight:700">完成度</div>
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#6b6257;font-weight:700">备注</div>
+          </div>
+          <div style="display:flex;border-bottom:1px solid #f4f0ea">
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">截图内核</div>
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">100%</div>
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">已冻结</div>
+          </div>
+          <div style="display:flex">
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">标注编辑器</div>
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">92%</div>
+            <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">缺撤销栈</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bgwin" style="position:absolute;left:60px;top:470px;width:300px;height:180px">
+    <div class="b-bar"><i></i><i></i><i></i></div>
+    <div class="b-body"><i class="h"></i><i class="w80"></i><i class="w64"></i></div>
+  </div>
+
+  <!-- 选区 -->
+  <div class="sel" style="left:300px;top:180px;width:620px;height:360px"></div>
+  <div class="hnd" style="left:295px;top:175px"></div>
+  <div class="hnd" style="left:915px;top:175px"></div>
+  <div class="hnd" style="left:295px;top:535px"></div>
+  <div class="hnd" style="left:915px;top:535px"></div>
+  <div class="hnd" style="left:605px;top:175px"></div>
+  <div class="hnd" style="left:605px;top:535px"></div>
+  <div class="hnd" style="left:295px;top:355px"></div>
+  <div class="hnd" style="left:915px;top:355px"></div>
+
+  <div class="sizehint" style="left:300px;top:148px">620 × 360</div>
+
+  <!-- 顶部模式条 -->
+  <div class="modestrip" style="left:50%;transform:translateX(-50%);top:22px">
+    <div class="mb on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></div>
+    <div class="mb"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></div>
+    <div class="mb"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+    <div style="padding:0 10px 0 6px;font-size:11px;color:#8c8378">框选模式 · 拖动选区或控制点微调 · Esc 取消</div>
+  </div>
+
+  <!-- 确认条 -->
+  <div class="ctools" style="left:300px;top:554px">
+    <div class="mb"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></div>
+    <div class="mb" style="color:#8c8378"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+    <div class="mb" style="color:#8c8378"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+    <div class="mbv"></div>
+    <div class="mb"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+    <div class="dkbtn" style="height:34px;padding:0 15px;font-size:12.5px">确定
+      <svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+    </div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>E-06 取字</title>
+<link rel="stylesheet" href="_style.css">
+<style>
+  .gt{position:absolute;left:52px;font-size:12.5px;color:#efe7d9;white-space:nowrap;font-family:"Microsoft YaHei UI"}
+  .ocrline{height:22px;line-height:22px}
+</style></head>
+<body>
+<div class="desk" style="background:#e7e3dc">
+  <div class="edwin" style="left:20px;top:20px;width:1240px;height:720px">
+
+    <div class="cap" style="position:absolute;left:16px;top:16px;width:34px;height:34px;padding:0;justify-content:center;border-radius:12px">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </div>
+    <div class="cap" style="position:absolute;left:58px;top:16px;height:34px;border-radius:12px">缩放 100%</div>
+    <div style="position:absolute;right:16px;top:16px;display:flex;gap:8px">
+      <div class="cap" style="height:34px;border-radius:12px;background:#1c1c1e;color:#fff;border-color:#1c1c1e">
+        <svg viewBox="0 0 24 24" style="stroke:#fff"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>取字中
+      </div>
+      <div class="cap" style="height:34px;border-radius:12px"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>返回</div>
+    </div>
+
+    <div class="edcanvas">
+      <div class="shot" style="width:820px;height:480px;background:#fffdf9">
+        <!-- 识别结果逐行盖回图片文字位置 -->
+        <!-- 识别结果逐行盖回原文位置 -->
+        <div class="ocrline" style="left:48px;top:110px;height:26px;line-height:26px;font-size:16px;font-weight:700">2026 年第三季度项目复盘</div>
+        <div class="ocrline" style="left:48px;top:142px">更新于 11 月 18 日 · 共 12 页 · 负责人：产品组</div>
+        <div class="ocrline picked" style="left:48px;top:176px">本季度整体交付节奏平稳，测试阶段发现的问题集中在边界场景。</div>
+        <div class="ocrline picked" style="left:48px;top:203px">下表是各模块的完成度对比，标红项为本季度新增的待办。</div>
+        <div class="ocrline" style="left:48px;top:239px">截图内核　　　　100%　　已冻结，不再改动</div>
+        <div class="ocrline" style="left:48px;top:266px">标注编辑器　　　 92%　　缺撤销栈，下季度补齐</div>
+        <div class="ocrline" style="left:48px;top:293px">OCR 取字　　　 88%　　跨行选择已上线</div>
+        <div class="ocrline" style="left:48px;top:320px">滚动长截图　　　95%　　网页场景待优化</div>
+        <div class="ocrline" style="left:48px;top:356px">贴图浮窗　　　　100%　支持透明度与缩放</div>
+        <div class="ocrline" style="left:48px;top:383px">多语言　　　　　100%　8 种语言已同步</div>
+        <div class="ocrline" style="left:48px;top:419px">结论：整体进度符合预期，重点补齐编辑器撤销栈与网页长图。</div>
+      </div>
+    </div>
+
+    <!-- 取字工具条 -->
+    <div class="ocrbar" style="bottom:92px;white-space:nowrap">
+      <span class="cnt">识别到 11 行</span>
+      <span class="be">RapidOCR · 离线 · 0.8s</span>
+      <div style="width:1px;height:22px;background:rgba(255,255,255,.18);margin:0 2px"></div>
+      <span style="font-size:11px;color:#b7ada0">已选 2 行 · 可跨行拖选</span>
+      <div class="ob">复制选中</div>
+      <div class="ob pri">复制全部</div>
+      <div class="ob">返回 Esc</div>
+    </div>
+
+    <div class="dock" style="bottom:16px;opacity:.45">
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M15 4h5v5"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+    </div>
+  </div>
+</div>
+</body></html>

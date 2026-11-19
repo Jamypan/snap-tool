@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案 C · 侧栏工作台 — 截屏助手 UI 设计</title>
+<style>
+  :root{
+    --bg:#f5f7f9;
+    --panel:#ffffff;
+    --ink:#16202b;
+    --ink-2:#5a6b7d;
+    --ink-3:#93a3b3;
+    --line:#e4e9ee;
+    --nav:#12202e;
+    --nav-2:#1d3044;
+    --nav-ink:#a9bccd;
+    --teal:#00a389;
+    --teal-soft:#e2f5f1;
+    --amber:#f0a020;
+    --shadow:0 20px 50px rgba(18,32,46,.14), 0 2px 6px rgba(18,32,46,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:linear-gradient(180deg,#f7f9fb,#eef2f6);
+    color:var(--ink);font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:44px 28px 80px;
+  }
+  .page{max-width:1080px;margin:0 auto}
+  .page-head{margin-bottom:38px}
+  .tag{display:inline-block;background:var(--teal);color:#fff;font-size:12px;font-weight:700;letter-spacing:.08em;
+    padding:5px 11px;border-radius:999px;margin-bottom:14px}
+  h1{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .lede{margin-top:10px;color:var(--ink-2);font-size:15px;line-height:1.75;max-width:780px}
+  .chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;color:var(--ink-2)}
+
+  .block{margin-top:44px}
+  .block h2{font-size:19px;font-weight:700;display:flex;align-items:center;gap:10px}
+  .block h2 .no{width:24px;height:24px;border-radius:7px;background:var(--teal-soft);color:var(--teal);font-size:12.5px;
+    display:grid;place-items:center;font-weight:800}
+  .desc{margin-top:8px;color:var(--ink-2);font-size:14px;line-height:1.8;max-width:800px}
+  .desc b{color:var(--ink)}
+
+  .stage{margin-top:18px;padding:26px;border-radius:18px;background:#e6ebf0;border:1px solid #dbe2e9;
+    display:flex;justify-content:center}
+
+  .win{width:980px;max-width:100%;background:var(--panel);border-radius:12px;overflow:hidden;
+    box-shadow:var(--shadow);border:1px solid rgba(18,32,46,.08)}
+  .titlebar{height:36px;display:flex;align-items:center;padding:0 10px 0 14px;background:#f9fbfc;
+    border-bottom:1px solid var(--line)}
+  .tb-title{font-size:12px;color:var(--ink-3);font-weight:600}
+  .tb-right{margin-left:auto;display:flex;gap:14px;color:#b3bec8}
+  .tb-right svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.3}
+
+  /* ---------- 工作台 ---------- */
+  .work{display:flex;height:560px}
+  .side{width:206px;background:var(--nav);padding:16px 12px;display:flex;flex-direction:column;flex:0 0 auto}
+  .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+  .bl{width:30px;height:30px;border-radius:9px;background:linear-gradient(140deg,#00c4a7,#009079);display:grid;place-items:center}
+  .bl svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .bn{font-size:14.5px;font-weight:700;color:#fff;letter-spacing:.01em}
+  .bsub{font-size:11px;color:#7d94a8;margin-top:1px}
+  .navlabel{font-size:10.5px;color:#5f7789;letter-spacing:.1em;font-weight:700;padding:8px 10px 6px}
+  .nav{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;color:var(--nav-ink);
+    font-size:13.5px;margin-bottom:2px}
+  .nav svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .nav.on{background:var(--nav-2);color:#fff;font-weight:600}
+  .nav.on svg{stroke:#4fd8bf}
+  .nav .badge{margin-left:auto;font-size:10.5px;background:rgba(255,255,255,.12);border-radius:99px;padding:2px 7px;color:#cfdae4}
+  .nav .dotm{margin-left:auto;width:7px;height:7px;border-radius:50%;background:#31c48d}
+  .sidefoot{margin-top:auto;padding:10px;border-top:1px solid rgba(255,255,255,.08);font-size:11.5px;color:#7d94a8;line-height:1.7}
+
+  .main{flex:1;background:var(--bg);display:flex;flex-direction:column;min-width:0}
+  .mbar{display:flex;align-items:center;gap:12px;padding:16px 20px 12px}
+  .msearch{flex:1;display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;max-width:420px}
+  .msearch svg{width:16px;height:16px;stroke:var(--ink-3);fill:none;stroke-width:1.7}
+  .msearch input{border:none;outline:none;font-family:inherit;font-size:13px;color:var(--ink);background:transparent;flex:1}
+  .msearch input::placeholder{color:var(--ink-3)}
+  .shotbtn{height:38px;padding:0 16px;border-radius:10px;border:none;background:var(--teal);color:#fff;font-family:inherit;
+    font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;cursor:default;
+    box-shadow:0 6px 14px rgba(0,163,137,.25)}
+  .shotbtn svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+  .quick{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:6px 20px 4px}
+  .q{border:1px solid var(--line);background:#fff;border-radius:12px;padding:13px 14px;display:flex;align-items:center;gap:11px}
+  .q .qi{width:34px;height:34px;border-radius:10px;background:var(--teal-soft);display:grid;place-items:center;flex:0 0 auto}
+  .q .qi svg{width:18px;height:18px;stroke:var(--teal);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .q h4{font-size:13px;font-weight:700}
+  .q p{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+  .q.long .qi{background:#fdf1de}
+  .q.long .qi svg{stroke:var(--amber)}
+
+  .mhead{display:flex;align-items:center;gap:10px;padding:18px 20px 10px}
+  .mhead h3{font-size:14.5px;font-weight:700}
+  .mhead .link{margin-left:auto;font-size:12.5px;color:var(--teal)}
+
+  .hist{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:0 20px}
+  .h{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .hthumb{height:86px;background:linear-gradient(145deg,#eef2f6,#dfe6ec);position:relative;overflow:hidden}
+  .hthumb .mini{position:absolute;left:14px;top:12px;right:14px;height:44px;background:#fff;border-radius:4px;
+    box-shadow:0 2px 8px rgba(0,0,0,.08)}
+  .hthumb .mini i{display:block;height:5px;border-radius:3px;background:#e3e9ee;margin:8px 10px 0}
+  .hthumb .mini i.t{height:7px;width:50%;background:#d3dde5}
+  .hthumb .mark{position:absolute;right:16px;top:30px;width:44px;height:20px;border:2px solid #ff5b5b;border-radius:3px}
+  .hmeta{padding:8px 10px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-3)}
+  .hmeta b{color:var(--ink-2);font-weight:600;font-size:11.5px}
+  .hmeta .dots{margin-left:auto;letter-spacing:1px}
+
+  .mfoot{margin-top:auto;border-top:1px solid var(--line);background:#fff;padding:9px 20px;display:flex;
+    align-items:center;gap:16px;font-size:11.5px;color:var(--ink-3)}
+  .mfoot .r{margin-left:auto;display:flex;gap:14px}
+
+  /* ---------- 编辑器 ---------- */
+  .edwrap{display:flex;height:520px;background:#eef1f4}
+  .etools{width:54px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;
+    align-items:center;padding:10px 0;gap:5px;flex:0 0 auto}
+  .et{width:38px;height:38px;border-radius:9px;display:grid;place-items:center;color:var(--ink-2)}
+  .et svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .et.on{background:var(--nav);color:#fff}
+  .edv{width:20px;height:1px;background:var(--line);margin:4px 0}
+  .ecanvas{flex:1;display:grid;place-items:center;position:relative;padding:16px}
+  .shot{width:520px;height:300px;background:#fff;border-radius:6px;overflow:hidden;position:relative;
+    box-shadow:0 10px 26px rgba(18,32,46,.18)}
+  .fake-top{height:28px;background:#f2f4f6;border-bottom:1px solid #e6eaee;display:flex;align-items:center;gap:5px;padding:0 10px}
+  .fake-top i{width:8px;height:8px;border-radius:50%;background:#d5dde4;display:block}
+  .fake-body{display:flex;height:272px}
+  .fake-side{width:92px;background:#fafbfc;border-right:1px solid #eef1f4;padding:12px 10px}
+  .fake-side i{display:block;height:8px;border-radius:3px;background:#e6ebef;margin-bottom:9px}
+  .fake-main{flex:1;padding:14px 16px}
+  .fake-main i{display:block;height:9px;border-radius:3px;background:#eef2f5;margin-bottom:10px}
+  .fake-main i.t{height:13px;background:#dde4ea;width:54%}
+  .fake-main i.s{width:82%}
+  .fake-main i.s2{width:60%}
+  .anno{position:absolute;inset:0;pointer-events:none}
+  .anno svg{width:100%;height:100%}
+  .inspect{width:222px;background:#fff;border-left:1px solid var(--line);padding:16px 16px;overflow:hidden;flex:0 0 auto}
+  .inspect h4{font-size:12px;color:var(--ink-3);font-weight:700;letter-spacing:.06em;margin-bottom:13px}
+  .fld{margin-bottom:14px}
+  .fld label{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-2);margin-bottom:7px}
+  .fld label span{color:var(--ink-3)}
+  .sw{display:flex;gap:6px}
+  .sw span{width:21px;height:21px;border-radius:6px;border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .sw span.on{box-shadow:0 0 0 2px var(--teal)}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg i{flex:1;text-align:center;font-style:normal;font-size:12px;padding:6px 0;color:var(--ink-2);background:#fff}
+  .seg i.on{background:var(--nav);color:#fff}
+  .slider{height:4px;border-radius:99px;background:#e9edf1;position:relative}
+  .slider i{position:absolute;left:0;top:0;bottom:0;width:38%;background:var(--teal);border-radius:99px}
+  .slider b{position:absolute;left:calc(38% - 6px);top:-4px;width:12px;height:12px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,.22)}
+  .edstatus{height:32px;background:#fff;border-top:1px solid var(--line);display:flex;align-items:center;
+    padding:0 14px;font-size:11.5px;color:var(--ink-3);gap:16px}
+  .edstatus .r{margin-left:auto;display:flex;gap:14px}
+  .actrow{position:absolute;right:238px;bottom:26px;display:flex;gap:8px}
+  .abtn{height:32px;padding:0 13px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink);
+    font-size:12.5px;font-family:inherit;display:flex;align-items:center;gap:6px;box-shadow:0 3px 10px rgba(18,32,46,.08)}
+  .abtn.pri{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+  .abtn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---------- 遮罩 ---------- */
+  .mask{position:relative;width:980px;height:420px;background:#1b2430;overflow:hidden;border-radius:10px}
+  .mask .desk{position:absolute;inset:0;background:linear-gradient(145deg,#22303f,#32465a 60%,#26313d)}
+  .mask .wl{position:absolute;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.16);border-radius:8px}
+  .sel3{position:absolute;left:180px;top:80px;width:440px;height:240px;border:1.5px solid #00c4a7;
+    box-shadow:0 0 0 9999px rgba(10,18,26,.5)}
+  .sel3 .hh{position:absolute;width:9px;height:9px;background:#fff;border:2px solid #00c4a7;border-radius:2px}
+  .tb3{position:absolute;left:180px;top:336px;display:flex;align-items:center;gap:3px;background:rgba(255,255,255,.1);
+    backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.16);border-radius:11px;padding:6px}
+  .tb3 .b{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:#e8eef3}
+  .tb3 .b svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .tb3 .b.on{background:#00c4a7;color:#fff}
+  .tb3 .dv{width:1px;height:22px;background:rgba(255,255,255,.18);margin:0 3px}
+  .tb3 .txt{font-size:12px;color:#cfdae3;padding:0 9px}
+
+  .note{margin-top:12px;font-size:12.5px;color:var(--ink-2);line-height:1.7}
+  .kicker{margin-top:22px;background:#fff;border:1px solid var(--line);border-left:3px solid var(--teal);
+    border-radius:10px;padding:14px 16px;font-size:13px;color:var(--ink-2);line-height:1.8}
+  .kicker b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="page-head">
+    <div class="tag">方案 C</div>
+    <h1>侧栏工作台 · 可回看可复用</h1>
+    <p class="lede">
+      把截屏助手从「一个工具」变成「一个工作台」。左侧深色导航分四组（截图 / 取字 / 长图 / 贴图），
+      右侧内容区放最近截图的历史墙——截过的图能直接翻出来再标注、再复制，
+      而不必每次重截。顶栏是全局搜索 + 一个醒目的截图按钮。
+    </p>
+    <div class="chips">
+      <span class="chip">深色侧栏 + 浅色内容区</span>
+      <span class="chip">青绿 #00A389</span>
+      <span class="chip">历史截图墙</span>
+      <span class="chip">980×560 宽窗</span>
+      <span class="chip">信息密度中等</span>
+    </div>
+  </header>
+
+  <!-- 1. 工作台 -->
+  <section class="block">
+    <h2><span class="no">1</span>主窗口 · 从「按钮页」变成「工作台」</h2>
+    <p class="desc">
+      窗口 <b>980×560</b>。左侧导航：截图（框选/窗口/全屏）、取字、滚动长图、贴图、<b>历史</b>、设置。
+      内容区自上而下是：搜索栏 + 主截图按钮 → 四个常用模式 → <b>最近截图</b>九宫格（带尺寸、标注数、时间）。
+      历史项是这版的核心新增能力：点缩略图直接回到编辑器继续标注。
+    </p>
+
+    <div class="stage">
+      <div class="win">
+        <div class="titlebar">
+          <span class="tb-title">截屏助手</span>
+          <div class="tb-right">
+            <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+            <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+            <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+          </div>
+        </div>
+        <div class="work">
+          <div class="side">
+            <div class="brand">
+              <div class="bl"><svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h3l2-2h2l2 2h3a2 2 0 0 1 2 2v2"/><circle cx="12" cy="13" r="4"/><path d="M6 18h12"/></svg></div>
+              <div><div class="bn">截屏助手</div><div class="bsub">v37 · 托盘常驻</div></div>
+            </div>
+
+            <div class="navlabel">截图</div>
+            <div class="nav on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg>框选截图<span class="dotm"></span></div>
+            <div class="nav"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>窗口截图</div>
+            <div class="nav"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>全屏截图</div>
+
+            <div class="navlabel">工具</div>
+            <div class="nav"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>OCR 取字</div>
+            <div class="nav"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg>滚动长截图</div>
+            <div class="nav"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg>贴图到桌面<span class="badge">3</span></div>
+
+            <div class="navlabel">库</div>
+            <div class="nav"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>历史记录</div>
+            <div class="nav"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>保存目录</div>
+
+            <div class="navlabel">系统</div>
+            <div class="nav"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>设置</div>
+
+            <div class="sidefoot">
+              截图热键 <b style="color:#cfdae4">Ctrl+Shift+A</b><br>贴图热键 Ctrl+Shift+P
+            </div>
+          </div>
+
+          <div class="main">
+            <div class="mbar">
+              <div class="msearch">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+                <input value="搜索历史截图 / 打开命令" readonly>
+              </div>
+              <div class="shotbtn"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg>新截图</div>
+            </div>
+
+            <div class="quick">
+              <div class="q"><div class="qi"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></div><div><h4>框选</h4><p>拖拽选区</p></div></div>
+              <div class="q"><div class="qi"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></div><div><h4>窗口</h4><p>悬停高亮</p></div></div>
+              <div class="q"><div class="qi"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><div><h4>全屏</h4><p>整块桌面</p></div></div>
+              <div class="q long"><div class="qi"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg></div><div><h4>滚动长图</h4><p>自动拼接</p></div></div>
+            </div>
+
+            <div class="mhead"><h3>最近截图</h3><span class="link">查看全部 ›</span></div>
+            <div class="hist">
+              <div class="h"><div class="hthumb"><div class="mini"><i class="t"></i><i></i><i></i></div><span class="mark"></span></div>
+                <div class="hmeta"><b>1520×860</b><span>2 个标注</span><span class="dots">···</span></div></div>
+              <div class="h"><div class="hthumb"><div class="mini"><i class="t"></i><i></i><i></i></div></div>
+                <div class="hmeta"><b>960×540</b><span>未标注</span><span class="dots">···</span></div></div>
+              <div class="h"><div class="hthumb"><div class="mini"><i class="t"></i><i></i><i></i></div></div>
+                <div class="hmeta"><b>1280×720</b><span>1 个标注</span><span class="dots">···</span></div></div>
+              <div class="h"><div class="hthumb"><div class="mini"><i class="t"></i><i></i><i></i></div></div>
+                <div class="hmeta"><b>长图 3200px</b><span>长截图</span><span class="dots">···</span></div></div>
+            </div>
+
+            <div class="mfoot">
+              <span>托盘常驻中</span><span>默认模式：框选</span><span>语言：简体中文</span>
+              <span class="r"><span>Ctrl+Shift+A 截图</span><span>Ctrl+Shift+P 贴图</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 编辑器 -->
+  <section class="block">
+    <h2><span class="no">2</span>标注编辑器 · 三栏专业布局</h2>
+    <p class="desc">
+      编辑器改成 Figma 式三栏：左 54px 细工具条（形状分组 + 图像操作）、
+      中间无限画布、右侧 222px <b>检查器面板</b>常驻。检查器上半部分随选中对象切换
+      （矩形显示线宽/填充/旋转，文字显示字号/背景/边框），下半部分固定是画布级操作
+      （旋转、镜像、视图放缩）。底部状态栏显示缩放比与标注数量。
+    </p>
+
+    <div class="stage">
+      <div class="win">
+        <div class="titlebar">
+          <span class="tb-title">截屏助手 - 截图编辑</span>
+          <div class="tb-right">
+            <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+            <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+            <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+          </div>
+        </div>
+        <div class="edwrap">
+          <div class="etools">
+            <div class="et on"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M15 4h5v5"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+            <div class="edv"></div>
+            <div class="et"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></div>
+            <div class="et"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+            <div class="edv"></div>
+            <div class="et"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+          </div>
+          <div class="ecanvas">
+            <div class="shot">
+              <div class="fake-top"><i></i><i></i><i></i></div>
+              <div class="fake-body">
+                <div class="fake-side"><i></i><i></i><i></i><i></i></div>
+                <div class="fake-main">
+                  <i class="t"></i><i class="s"></i><i class="s2"></i>
+                  <i style="margin-top:16px"></i><i class="s"></i><i class="s2"></i>
+                </div>
+              </div>
+              <div class="anno">
+                <svg viewBox="0 0 520 300">
+                  <rect x="168" y="40" width="250" height="86" rx="4" fill="none" stroke="#ff5b5b" stroke-width="2.5"/>
+                  <path d="M300 128 L392 186" stroke="#ff5b5b" stroke-width="3" stroke-linecap="round"/>
+                  <path d="M392 186 L366 172 L378 199 Z" fill="#ff5b5b"/>
+                  <text x="176" y="222" font-size="15" font-family="Microsoft YaHei" fill="#ff5b5b">这里有问题</text>
+                </svg>
+              </div>
+            </div>
+            <div class="actrow">
+              <div class="abtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>撤销</div>
+              <div class="abtn"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>保存</div>
+              <div class="abtn pri"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>复制</div>
+            </div>
+          </div>
+          <div class="inspect">
+            <h4>矩形 · 样式</h4>
+            <div class="fld"><label>线条颜色</label>
+              <div class="sw"><span style="background:#ff5b5b"></span><span style="background:#f0a020"></span><span class="on" style="background:#111"></span><span style="background:#00a389"></span></div></div>
+            <div class="fld"><label>线宽 <span>2 px</span></label><div class="slider"><i style="width:26%"></i><b style="left:calc(26% - 6px)"></b></div></div>
+            <div class="fld"><label>线型</label>
+              <div class="seg"><i class="on">实线</i><i>虚线</i><i>点线</i></div></div>
+            <div class="fld"><label>填充 <span>无</span></label>
+              <div class="sw"><span style="background:#ff5b5b"></span><span style="background:#00a389"></span><span style="background:#fff;border:1px dashed #c3ced8"></span></div></div>
+            <div class="fld"><label>填充透明度 <span>0%</span></label><div class="slider"><i style="width:6%"></i><b style="left:calc(6% - 6px)"></b></div></div>
+            <div class="fld"><label>旋转角度 <span>0°</span></label><div class="slider"><i style="width:4%"></i><b style="left:calc(4% - 6px)"></b></div></div>
+
+            <div style="border-top:1px solid var(--line);padding-top:13px;margin-top:4px">
+              <h4>画布</h4>
+              <div class="seg" style="margin-bottom:12px"><i>顺旋</i><i>逆旋</i><i>左右</i><i>上下</i></div>
+              <div class="fld"><label>视图缩放 <span>100%</span></label><div class="slider"><i style="width:50%"></i><b style="left:calc(50% - 6px)"></b></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="edstatus">
+          <span>缩放 100%</span><span>已选：矩形</span><span>4 个标注</span><span>导出为原图分辨率</span>
+          <span class="r"><span>Ctrl+Z 撤销</span><span>Ctrl+S 保存</span><span>Ctrl+Enter 复制</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 遮罩 -->
+  <section class="block">
+    <h2><span class="no">3</span>截图遮罩 · 磨砂工具条</h2>
+    <p class="desc">
+      遮罩里也用同一套深色 + 青绿强调：选区边框为青绿色，四角控制柄为白底青边，
+      工具条改成<b>毛玻璃半透明条</b>，浮在选区正下方，与编辑器配色统一。
+    </p>
+
+    <div class="stage" style="padding:26px">
+      <div class="mask" style="box-shadow:var(--shadow)">
+        <div class="desk"></div>
+        <div class="wl" style="left:44px;top:44px;width:230px;height:130px"></div>
+        <div class="wl" style="left:760px;top:60px;width:170px;height:300px"></div>
+        <div class="wl" style="left:60px;top:300px;width:190px;height:90px"></div>
+        <div class="sel3">
+          <span class="hh" style="left:-5px;top:-5px"></span><span class="hh" style="right:-5px;top:-5px"></span>
+          <span class="hh" style="left:-5px;bottom:-5px"></span><span class="hh" style="right:-5px;bottom:-5px"></span>
+        </div>
+        <div class="tb3">
+          <div class="b on"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+          <div class="dv"></div>
+          <div class="b"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/></svg></div>
+          <div class="b"><svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h3l2-2h2l2 2h3a2 2 0 0 1 2 2v2"/><circle cx="12" cy="13" r="4"/></svg></div>
+          <div class="b"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+          <div class="dv"></div>
+          <span class="txt">440 × 240</span>
+        </div>
+      </div>
+    </div>
+    <div class="note">选区仍是 8 个控制柄可缩放；点「钉在桌面」直接贴到桌面并收起截图界面（沿用现有 v34 行为）。</div>
+  </section>
+
+  <div class="kicker">
+    <b>这套方案适合谁：</b>需要「反复对比同一张图」的场景——做设计、查资料、写文档时截好几张图对照着看。
+    <b>代价：</b>主窗口从 620×470 变成 980×560，占屏面积翻倍；而且「历史记录」需要新增一层
+    截图历史存储（当前程序只在「复制 / 保存」时落盘，没有统一的历史索引），
+    这是三套方案里唯一需要动后端数据模型的。
+  </div>
+
+</div>
+</body>
+</html>

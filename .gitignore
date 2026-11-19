@@ -25,3 +25,6 @@ run_out.txt
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 界面设计稿的 PNG 导出（体积大，只保留 HTML 源稿）
+ui-design/**/png/

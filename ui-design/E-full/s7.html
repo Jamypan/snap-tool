@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>E-07 滚动长截图</title>
+<link rel="stylesheet" href="_style.css">
+<style>
+  .target{position:absolute;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 18px 44px rgba(40,30,20,.26)}
+  .ring{position:absolute;border:2px solid #f97316;border-radius:12px;box-shadow:0 0 0 4px rgba(249,115,22,.18)}
+  .tchip{position:absolute;background:#1c1c1e;color:#fff;border-radius:9px;padding:5px 11px;font-size:11px;
+    box-shadow:0 8px 20px rgba(0,0,0,.28)}
+  .lpage{padding:16px 18px}
+  .lpage i{display:block;height:8px;border-radius:4px;background:#f0ece6;margin-bottom:9px}
+  .lpage i.h{height:12px;background:#e2dbd0;width:58%}
+  .lpage i.w80{width:80%}.lpage i.w64{width:64%}
+  .lpage .blk{height:56px;border-radius:8px;background:#faf7f2;border:1px solid #f0ebe3;margin:12px 0}
+</style></head>
+<body>
+<div class="desk">
+
+  <!-- 目标窗口 -->
+  <div class="target" style="left:60px;top:78px;width:720px;height:560px">
+    <div class="fw-bar" style="height:34px"><i></i><i></i><i></i><div class="fw-url"></div></div>
+    <div class="fw-body" style="height:526px">
+      <div class="fw-side" style="width:140px">
+        <b>章节</b><span class="cur" style="width:86%"></span><span style="width:72%"></span>
+        <span style="width:80%"></span><span style="width:62%"></span><span style="width:74%"></span>
+      </div>
+      <div class="fw-main" style="padding:22px 26px">
+        <h3 style="font-size:20px">广东省 2026 年普通高校招生工作规定</h3>
+        <div class="meta">第七章 志愿填报 · 共 42 条</div>
+        <p>考生须在规定时间内登录省教育考试院官方系统填报志愿，逾期不予补报。志愿填报分两个时段进行。</p>
+        <div class="ln w92" style="margin-top:14px"></div>
+        <div class="ln w80"></div>
+        <div class="ln w64"></div>
+        <div class="fw-table" style="margin-top:16px">
+          <div class="tr"><div class="td th">批次</div><div class="td th">志愿数</div><div class="td th">填报时间</div></div>
+          <div class="tr"><div class="td">提前批</div><div class="td">10 个</div><div class="td">6 月 28 日</div></div>
+          <div class="tr"><div class="td">本科批</div><div class="td">45 个</div><div class="td">6 月 29 日</div></div>
+          <div class="tr"><div class="td">专科批</div><div class="td">20 个</div><div class="td">7 月 3 日</div></div>
+        </div>
+        <div class="ln w80" style="margin-top:16px"></div>
+        <div class="ln w92"></div>
+        <div class="ln w64"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ring" style="left:56px;top:74px;width:728px;height:568px"></div>
+  <div class="tchip" style="left:60px;top:42px">正在滚动截取 · 已取窗口客户区（不含标题栏）</div>
+
+  <!-- 控制条 -->
+  <div class="longctl" style="left:60px;top:664px;width:720px">
+    <div class="stat">
+      <div>帧数<b>12</b></div>
+      <div>已拼高度<b>4820 px</b></div>
+      <div>匹配度<b>0.98</b></div>
+    </div>
+    <div class="sep"></div>
+    <div style="font-size:10.5px;color:#a89e92;line-height:1.6">
+      左键暂停 / 继续 · 右键结束<br>滚到底部会自动停止
+    </div>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <div class="cap" style="height:32px"><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>暂停</div>
+      <div class="cap dark" style="height:32px">确定
+        <svg viewBox="0 0 24 24" style="stroke:#fff"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- 长图预览 -->
+  <div class="longprev" style="left:824px;top:78px;width:396px;height:622px">
+    <div class="lbar"><i></i><i></i><i></i>
+      <span style="margin-left:8px;font-size:10.5px;color:#a89e92">长图预览 · 1280 × 4820</span>
+      <span style="margin-left:auto;font-size:10.5px;color:#8c8378">另存为</span>
+    </div>
+    <div class="lpage" style="height:596px;overflow:hidden">
+      <i class="h"></i>
+      <i class="w80"></i><i class="w64"></i>
+      <div class="blk"></div>
+      <i class="h" style="width:48%"></i>
+      <i></i><i class="w80"></i><i class="w64"></i><i class="w80"></i>
+      <div class="blk"></div>
+      <i class="h" style="width:52%"></i>
+      <i class="w80"></i><i></i><i class="w64"></i>
+      <div class="blk" style="height:44px"></div>
+      <i class="w80"></i><i class="w64"></i>
+      <div style="position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 78%)"></div>
+      <div style="position:absolute;left:50%;transform:translateX(-50%);bottom:18px;font-size:11px;color:#a89e92">
+        已拼接到第 12 帧…
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

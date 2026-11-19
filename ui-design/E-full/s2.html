@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>E-02 命令面板</title>
+<link rel="stylesheet" href="_style.css">
+<style>
+  body{background:#dfe5ea}
+  .dim{position:absolute;inset:0;background:linear-gradient(150deg,#2f363e,#3d4750 55%,#343d45);opacity:.62;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+  .panel{left:50%;transform:translateX(-50%);bottom:140px;width:748px}
+  .cols{display:flex;gap:8px}
+  .col{flex:1;min-width:0}
+  .col + .col{border-left:1px solid var(--line);padding-left:8px}
+</style></head>
+<body>
+<div class="desk">
+  <div class="fakewin" style="position:absolute;left:74px;top:86px;width:640px;height:430px">
+    <div class="fw-bar"><i></i><i></i><i></i><div class="fw-url"></div></div>
+    <div class="fw-body" style="height:398px">
+      <div class="fw-side"><b>目录</b><span class="cur" style="width:86%"></span><span style="width:72%"></span><span style="width:80%"></span><span style="width:64%"></span></div>
+      <div class="fw-main"><h3>2026 年第三季度项目复盘</h3><div class="meta">更新于 11 月 18 日 · 共 12 页</div>
+        <p>本季度整体交付节奏平稳，测试阶段发现的问题集中在边界场景。</p>
+        <div class="ln w92" style="margin-top:12px"></div><div class="ln w80"></div><div class="ln w64"></div>
+        <div class="fw-table" style="margin-top:14px"><div class="tr"><div class="td th">模块</div><div class="td th">完成度</div><div class="td th">备注</div></div><div class="tr"><div class="td">截图内核</div><div class="td">100%</div><div class="td">已冻结</div></div><div class="tr"><div class="td">标注编辑器</div><div class="td">92%</div><div class="td">缺撤销栈</div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="fakewin" style="position:absolute;left:790px;top:160px;width:420px;height:330px">
+    <div class="fw-bar"><i></i><i></i><i></i><div class="fw-url"></div></div>
+    <div class="fw-body" style="height:298px"><div class="fw-main" style="padding:20px 22px">
+      <h3 style="font-size:15px">待办清单</h3><div class="meta">今天 4 项 · 已完成 1</div>
+      <div class="ln w80"></div><div class="ln w64"></div><div class="ln w92"></div><div class="ln w64"></div>
+    </div></div>
+  </div>
+
+  <div class="dim"></div>
+
+  <!-- 完整命令面板 -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="mb-logo" style="width:28px;height:28px;border-radius:10px"><svg viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M4 8V6a2 2 0 0 1 2-2h3l2-2h2l2 2h3a2 2 0 0 1 2 2v2"/><circle cx="12" cy="13" r="4"/><path d="M6 18h12"/></svg></div>
+      <div><div class="tt">截屏助手</div><div class="sub">v37 · 托盘常驻 · 关闭面板不会退出</div></div>
+      <span class="badge">已启动</span>
+    </div>
+
+    <div class="cols">
+      <div class="col">
+        <div class="pgrp">截图</div>
+        <div class="prow on">
+          <span class="pi"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></span>
+          <div><div class="pn">框选截图</div><div class="pd">拖拽选取任意区域 · 默认模式</div></div>
+          <span class="pk"><b>Ctrl+Shift+A</b></span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></span>
+          <div><div class="pn">窗口截图</div><div class="pd">悬停高亮 · 单击确认</div></div>
+          <span class="pk">自动去阴影</span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+          <div><div class="pn">全屏截图</div><div class="pd">整块桌面 · 多屏合屏</div></div>
+          <span class="pk">直接进编辑</span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg></span>
+          <div><div class="pn">滚动长截图…</div><div class="pd">点窗口自动滚拼成长图</div></div>
+          <span class="pk">独立命令</span>
+        </div>
+
+        <div class="psep"></div>
+        <div class="pgrp">编辑与输出</div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></span>
+          <div><div class="pn">OCR 取字</div><div class="pd">识别剪贴板图片 · 离线 RapidOCR</div></div>
+          <span class="pk">离线</span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></span>
+          <div><div class="pn">贴出剪贴板图片</div><div class="pd">钉成置顶浮窗，可拖动缩放</div></div>
+          <span class="pk"><b>Ctrl+Shift+P</b></span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+          <div><div class="pn">打开保存目录</div><div class="pd">Pictures / SnapTool</div></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="pgrp">设置</div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M6 14h4M14 10h4M14 14h4"/></svg></span>
+          <div><div class="pn">截图热键</div><div class="pd">点击修改，立即生效</div></div>
+          <span class="pk"><b>Ctrl+Shift+A</b></span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M7 11h3M7 13h6M15 11h2"/></svg></span>
+          <div><div class="pn">贴图热键</div><div class="pd">独立于截图热键</div></div>
+          <span class="pk"><b>Ctrl+Shift+P</b></span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg></span>
+          <div><div class="pn">界面语言</div><div class="pd">8 种语言 · 可跟随系统</div></div>
+          <span class="pk">简体中文</span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/><path d="M14 7.5l2.5 2.5"/></svg></span>
+          <div><div class="pn">画笔平滑度</div><div class="pd">关闭 / 轻度 / 中等 / 强</div></div>
+          <span class="pk">中等</span>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h4M7 13h7"/></svg></span>
+          <div><div class="pn">默认截图模式</div><div class="pd">热键与托盘截图使用此模式</div></div>
+          <span class="pk">框选</span>
+        </div>
+
+        <div class="psep"></div>
+        <div class="pgrp">帮助</div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg></span>
+          <div><div class="pn">使用说明</div><div class="pd">10 节完整操作文档</div></div>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><path d="M4 6l7-3 9 4-7 3z"/><path d="M4 6v8l7 4 9-4V6"/></svg></span>
+          <div><div class="pn">命令行参数</div><div class="pd">--shot / --restart / --selftest</div></div>
+        </div>
+        <div class="prow">
+          <span class="pi"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .9-1 1.6v.4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/></svg></span>
+          <div><div class="pn">关于与退出</div><div class="pd">版本信息 · 联系邮箱 · 退出程序</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 悬浮条 -->
+  <div class="minibar" style="left:50%;transform:translateX(-50%);bottom:70px">
+    <div class="mb-logo"><svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h3l2-2h2l2 2h3a2 2 0 0 1 2 2v2"/><circle cx="12" cy="13" r="4"/><path d="M6 18h12"/></svg></div>
+    <div class="mbv"></div>
+    <div class="mb on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></div>
+    <div class="mb"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></div>
+    <div class="mb"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+    <div class="mbv"></div>
+    <div class="mb"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg></div>
+    <div class="mb"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+    <div class="mbv"></div>
+    <span class="mb-key"><b>Ctrl+Shift+A</b></span>
+    <div class="mb on" style="background:#fff;color:var(--ink);box-shadow:0 3px 10px rgba(50,40,30,.14)">
+      <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>
+    </div>
+  </div>
+</div>
+</body></html>

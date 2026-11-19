@@ -38,8 +38,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
+    QSizeGrip,
     QVBoxLayout,
     QWidget,
 )
@@ -88,6 +90,21 @@ from snapeditor import (
     unrotate_point_about,
 )
 from i18n import LANG, app_name, t
+from ui_theme import (
+    CANVAS_BG,
+    CREAM,
+    FONT_QSS,
+    HOVER,
+    INK,
+    INK2,
+    INK3,
+    LINE,
+    ORANGE,
+    SOFT,
+    PillButton,
+    IconButton,
+    apply_shadow,
+)
 
 # 连续拖动时的重绘节流（毫秒），与 Overlay 一致
 REPAINT_INTERVAL_MS = 10.0
@@ -220,7 +237,7 @@ class Canvas(QWidget):
         if self.base.isNull():
             return
         pad = 24
-        avail_w = max(40, self.width() - 2 * pad)
+        avail_w = max(40, self.width() - 2 * pad - self._right_inset())
         avail_h = max(40, self.height() - 2 * pad)
         iw, ih = self.base.width(), self.base.height()
         scale = min(avail_w / iw, avail_h / ih, 1.0)
@@ -229,7 +246,7 @@ class Canvas(QWidget):
         self._fit_scale = scale
         self.view_scale = scale * self._zoom
         # 放大到超过窗口时保持居中（偏移可为负），配合中键拖动浏览其它区域
-        self.off_x = (self.width() - iw * self.view_scale) / 2.0
+        self.off_x = max(pad, (self.width() - self._right_inset() - iw * self.view_scale) / 2.0)
         self.off_y = (self.height() - ih * self.view_scale) / 2.0
         self.zoom_changed.emit(self.view_scale)
 
@@ -362,12 +379,20 @@ class Canvas(QWidget):
         }
         self.style_panel.set_state(self._selected, defaults)
 
+    def _right_inset(self) -> int:
+        """右侧样式面板占用的宽度（面板可见时画布要让开）。"""
+        if not self.style_panel.isVisible():
+            return 0
+        return max(200, self.style_panel.sizeHint().width()) + 28
+
     def _place_style_panel(self) -> None:
         self.style_panel.adjustSize()
         sp = self.style_panel.sizeHint()
-        x = max(8, self.width() - sp.width() - 12)
-        y = 56
-        self.style_panel.setGeometry(x, y, sp.width(), sp.height())
+        w = max(196, min(sp.width(), max(196, self.width() // 3)))
+        x = max(8, self.width() - w - 16)
+        y = 16
+        h = min(sp.height(), max(160, self.height() - 32))
+        self.style_panel.setGeometry(x, y, w, h)
 
     def _apply_style(self, changes: dict) -> None:
         target = self._selected
@@ -1092,10 +1117,24 @@ class Canvas(QWidget):
     def paintEvent(self, ev) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        p.fillRect(self.rect(), QColor(28, 30, 34))
+        p.fillRect(self.rect(), QColor(CANVAS_BG))
 
         if self.base.isNull():
             return
+
+        # 图片外框：先画投影，再画底图（顺序反了投影会盖住图）
+        ir = QRect(
+            int(round(self.off_x)),
+            int(round(self.off_y)),
+            int(round(self.base.width() * self.view_scale)),
+            int(round(self.base.height() * self.view_scale)),
+        )
+        p.save()
+        p.setPen(Qt.NoPen)
+        for grow, alpha in ((20, 8), (12, 12), (6, 18)):
+            p.setBrush(QColor(60, 45, 30, alpha))
+            p.drawRoundedRect(ir.adjusted(-grow, -grow + 10, grow, grow + 12), 12, 12)
+        p.restore()
 
         # 截图底图（缩放、letterbox）
         p.save()
@@ -1108,14 +1147,7 @@ class Canvas(QWidget):
             draw_shape(p, self._draft, self.base, 1.0)
         p.restore()
 
-        # 图片边框
-        ir = QRect(
-            int(round(self.off_x)),
-            int(round(self.off_y)),
-            int(round(self.base.width() * self.view_scale)),
-            int(round(self.base.height() * self.view_scale)),
-        )
-        pen = QPen(QColor(80, 84, 90))
+        pen = QPen(QColor("#e6e0d6"))
         pen.setWidth(1)
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
@@ -1169,10 +1201,12 @@ class Canvas(QWidget):
         super().resizeEvent(ev)
 
     def _place_toolbar(self) -> None:
+        """底部 Dock：水平居中、离底边 16px（设计稿 .dock）。"""
         self.toolbar.adjustSize()
         tb = self.toolbar.sizeHint()
         x = max(8, (self.width() - tb.width()) // 2)
-        self.toolbar.setGeometry(x, 8, tb.width(), tb.height())
+        y = max(8, self.height() - tb.height() - 16)
+        self.toolbar.setGeometry(x, y, tb.width(), tb.height())
 
     def _place_ocr_panel(self) -> None:
         """识别中 / 降级用的整块文本面板，居中靠下（显示前也会调用）。"""
@@ -1417,8 +1451,43 @@ class Canvas(QWidget):
 # ---------------------------------------------------------------------------
 # 窗口化编辑器主窗口
 # ---------------------------------------------------------------------------
+class _TopBar(QWidget):
+    """编辑器顶部工具行：按住空白处可拖动整个无边框窗口。"""
+
+    def __init__(self, parent: QWidget, window: QWidget) -> None:
+        super().__init__(parent)
+        self._window = window
+        self._from: QPoint | None = None
+        self.setMouseTracking(True)
+
+    def paintEvent(self, ev) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(CANVAS_BG))
+        p.end()
+
+    def mousePressEvent(self, ev) -> None:  # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            self._from = ev.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, ev) -> None:  # noqa: N802
+        if self._from is not None and (ev.buttons() & Qt.LeftButton):
+            pos = ev.globalPosition().toPoint()
+            self._window.move(self._window.pos() + (pos - self._from))
+            self._from = pos
+
+    def mouseReleaseEvent(self, ev) -> None:  # noqa: N802
+        self._from = None
+
+    def mouseDoubleClickEvent(self, ev) -> None:  # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            if self._window.isMaximized():
+                self._window.showNormal()
+            else:
+                self._window.showMaximized()
+
+
 class EditorWindow(QMainWindow):
-    """选定截图后弹出的窗口化编辑器：标题栏 + 菜单 + 画布。"""
+    """无标题栏的标注编辑器：顶部工具行 + 画布 + 底部 Dock + 右侧样式浮层。"""
 
     copy_requested = Signal(QImage)
     save_requested = Signal(QImage)
@@ -1428,13 +1497,39 @@ class EditorWindow(QMainWindow):
 
     def __init__(self, image: QImage, shapes: list[Shape], save_dir, parent=None) -> None:
         super().__init__(parent)
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setWindowTitle(t("{app} - 截图编辑", app=app_name()))
         self._save_dir = save_dir
         self._actions: dict[str, QAction] = {}
-        self._menus: dict[str, object] = {}
+        self._menus: dict[str, QMenu] = {}
+        self.setMinimumSize(680, 460)
+
+        central = QWidget(self)
+        central.setObjectName("edRoot")
+        central.setStyleSheet(
+            f"QWidget#edRoot {{ background:{CANVAS_BG}; }}"
+            f"QMenu {{ background:#fcfbf9; border:1px solid {LINE}; border-radius:12px;"
+            f" padding:6px; {FONT_QSS} }}"
+            f"QMenu::item {{ padding:7px 26px 7px 12px; border-radius:8px;"
+            f" color:{INK}; font-size:12.5px; }}"
+            f"QMenu::item:selected {{ background:{SOFT}; color:{INK}; }}"
+            f"QMenu::item:disabled {{ color:{INK3}; }}"
+            f"QMenu::separator {{ height:1px; background:{LINE}; margin:5px 8px; }}"
+            f"QMenu::section {{ padding:8px 12px 3px 12px; color:{INK3};"
+            f" font-size:10.5px; font-weight:700; }}"
+        )
+        self.setCentralWidget(central)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self.topbar = _TopBar(central, self)
+        self.topbar.setFixedHeight(54)
+        outer.addWidget(self.topbar)
+        self._build_topbar()
 
         self.canvas = Canvas(image, shapes, self)
-        self.setCentralWidget(self.canvas)
+        outer.addWidget(self.canvas, 1)
 
         # 画布信号向外转发到窗口级信号（App 统一处理复制 / 保存 / 取字 / 关闭）
         self.canvas.copy_requested.connect(self.copy_requested.emit)
@@ -1444,9 +1539,89 @@ class EditorWindow(QMainWindow):
         self.canvas.close_requested.connect(self.closed.emit)
 
         self._build_menu()
-        self.resize(1000, 680)
+        self._build_hamburger()
+
+        self._grip = QSizeGrip(self.canvas)
+        self._grip.setFixedSize(14, 14)
+        self._grip.setStyleSheet("background:transparent;")
+
+        self.resize(1140, 760)
+        self.canvas.toolbar.set_phase("dock")
         self.canvas.toolbar.show()
         self.canvas.toolbar.raise_()
+        LANG.changed.connect(self.retranslate_ui)
+        self._round_corners()
+
+    # ------------------------------------------------------------ 外观
+    def _round_corners(self) -> None:
+        """Win11：请 DWM 给无边框窗口加圆角（失败就算了，不影响功能）。"""
+        try:
+            import ctypes
+
+            hwnd = int(self.winId())
+            value = ctypes.c_int(2)          # DWMWCP_ROUND
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 33, ctypes.byref(value), ctypes.sizeof(value)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _build_topbar(self) -> None:
+        bar = self.topbar
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(14, 9, 14, 9)
+        lay.setSpacing(8)
+
+        self.btn_menu = IconButton("menu", t("菜单"), bar, size=34, radius=11)
+        self.btn_menu.setCheckable(True)
+        self.btn_menu.clicked.connect(lambda _=False: self._show_menu())
+        lay.addWidget(self.btn_menu)
+
+        # 缩放比例胶囊：点开是视图菜单
+        self.zoom_pill = QPushButton("", bar)
+        self.zoom_pill.setCursor(Qt.PointingHandCursor)
+        self.zoom_pill.setFocusPolicy(Qt.NoFocus)
+        self.zoom_pill.setFixedHeight(30)
+        self.zoom_pill.setStyleSheet(
+            f"QPushButton{{background:rgba(251,250,247,0.96);border:1px solid {LINE};"
+            f"border-radius:15px;padding:0 14px;color:{INK2};font-size:12px;{FONT_QSS}}}"
+            f"QPushButton:hover{{background:#ffffff;}}"
+        )
+        self.zoom_pill.clicked.connect(lambda _=False: self._show_view_menu())
+        lay.addWidget(self.zoom_pill)
+
+        lay.addStretch(1)
+
+        self.btn_save = PillButton(t("保存"), "save", "plain", bar, height=30)
+        self.btn_save.clicked.connect(
+            lambda _=False: self.save_requested.emit(self.canvas.compose())
+        )
+        lay.addWidget(self.btn_save)
+
+        self.btn_close = PillButton(f"{t('关闭')}   Esc", "close", "plain", bar, height=30)
+        self.btn_close.clicked.connect(lambda _=False: self.closed.emit())
+        lay.addWidget(self.btn_close)
+
+    def resizeEvent(self, ev) -> None:  # noqa: N802
+        super().resizeEvent(ev)
+        grip = getattr(self, "_grip", None)
+        if grip is not None:
+            grip.move(self.canvas.width() - 16, self.canvas.height() - 16)
+            grip.raise_()
+
+    def _show_menu(self) -> None:
+        self.btn_menu.setChecked(True)
+        pos = self.btn_menu.mapToGlobal(QPoint(0, self.btn_menu.height() + 6))
+        self._hamburger.exec(pos)
+        self.btn_menu.setChecked(False)
+
+    def _show_view_menu(self) -> None:
+        m = QMenu(self)
+        for i in range(4):
+            a = self._actions.get(f"view{i}")
+            if a is not None:
+                m.addAction(a)
+        m.exec(self.zoom_pill.mapToGlobal(QPoint(0, self.zoom_pill.height() + 4)))
 
     # 菜单文案的简体中文 key，retranslate_ui 与构造共用
     _FILE_TEXTS = ("复制到剪贴板\tCtrl+Enter", "另存为…\tCtrl+S",
@@ -1460,6 +1635,7 @@ class EditorWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         mb = self.menuBar()
+        mb.hide()          # 方案 E 不再显示菜单栏，命令都从左上角 ☰ 弹出
         m_file = mb.addMenu(t("文件(&F)"))
         self._menus["file"] = m_file
         for i, (text_key, slot) in enumerate(zip(self._FILE_TEXTS, (
@@ -1531,6 +1707,7 @@ class EditorWindow(QMainWindow):
         # 视图放缩：只改显示比例，导出仍是全分辨率原图
         m_view = mb.addMenu(t("视图(&V)"))
         self._menus["view"] = m_view
+        _ = None
         for i, (text_key, slot, shortcut) in enumerate(zip(
             self._VIEW_TEXTS,
             (self.canvas.zoom_in, self.canvas.zoom_out,
@@ -1545,7 +1722,35 @@ class EditorWindow(QMainWindow):
         self.canvas.zoom_changed.connect(self._show_zoom)
         self._show_zoom(self.canvas.view_scale)
 
+        # 菜单栏是隐藏的，QAction 的快捷键要靠挂到窗口上才生效
+        for a in self._actions.values():
+            if not a.shortcut().isEmpty():
+                self.addAction(a)
+
         LANG.changed.connect(self.retranslate_ui)
+
+    def _build_hamburger(self) -> None:
+        """把「文件 / 编辑 / 视图」三组命令平铺进一个弹出菜单（设计稿第 5 屏）。"""
+        m = QMenu(self)
+        for key in ("file", "edit", "view"):
+            src = self._menus.get(key)
+            if src is None:
+                continue
+            m.addSection(src.title())
+            for act in src.actions():
+                if act.isSeparator():
+                    continue
+                sub = act.menu()
+                if sub is not None:
+                    wrap = m.addMenu(act.text())
+                    for child in sub.actions():
+                        if child.isSeparator():
+                            wrap.addSeparator()
+                        else:
+                            wrap.addAction(child)
+                else:
+                    m.addAction(act)
+        self._hamburger = m
 
     def retranslate_ui(self, _code: str = "") -> None:
         self.setWindowTitle(t("{app} - 截图编辑", app=app_name()))
@@ -1562,11 +1767,20 @@ class EditorWindow(QMainWindow):
         ):
             for i, text_key in enumerate(keys):
                 self._actions[f"{prefix}{i}"].setText(t(text_key))
+        self.btn_menu.setToolTip(t("菜单"))
+        self.btn_save.setText(t("保存"))
+        self.btn_close.setText(f"{t('关闭')}   Esc")
+        self.btn_save._restyle()
+        self.btn_close._restyle()
+        self._show_zoom(self.canvas.view_scale)
 
     def _show_zoom(self, scale: float) -> None:
-        self.statusBar().showMessage(
-            t("缩放 {pct}%", pct=int(round(scale * 100)))
-        )
+        text = t("缩放 {pct}%", pct=int(round(scale * 100)))
+        self.zoom_pill.setText(text)
+        self.zoom_pill.adjustSize()
+        # 比例显示在顶部胶囊里，状态栏只用来存文本（自测读 currentMessage）
+        self.statusBar().showMessage(text)
+        self.statusBar().hide()
 
     def show_ocr_busy(self) -> None:
         self.canvas.show_ocr_busy()

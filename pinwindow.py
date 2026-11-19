@@ -14,8 +14,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage, QPainter, QPen
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QFont,
+    QGuiApplication,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -29,7 +38,8 @@ MIN_SCALE = 0.1
 MAX_SCALE = 8.0
 SCALE_STEP = 1.15          # 每格滚轮的缩放倍率
 BORDER = 1                 # 图片外框宽度
-CLOSE_BOX = 18             # 右上角关闭按钮边长（逻辑像素）
+PIN_RADIUS = 8             # 浮窗圆角（设计稿 .pin）
+CLOSE_BOX = 20             # 右上角关闭按钮直径（逻辑像素）
 OPACITY_STEPS = (100, 75, 50, 25)
 
 
@@ -42,6 +52,7 @@ class PinWindow(QWidget):
         flags = Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         super().__init__(parent, flags)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setWindowTitle(t("贴图"))
@@ -286,21 +297,51 @@ class PinWindow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         p.setRenderHint(QPainter.Antialiasing, True)
-        # 外框
-        frame = QColor("#0a84ff") if (self._hover or not self._topmost) else QColor("#4b5563")
-        p.setPen(QPen(frame, BORDER))
-        p.drawRect(QRect(0, 0, self.width() - 1, self.height() - 1))
-        # 图片
+
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, PIN_RADIUS, PIN_RADIUS)
+
+        # 图片（圆角裁切）
+        p.save()
+        p.setClipPath(path)
         target = QRect(BORDER, BORDER, self.width() - BORDER * 2, self.height() - BORDER * 2)
         p.drawImage(target, self._base)
-        # 关闭按钮（悬停才画）
+        p.restore()
+
+        # 外框：悬停 / 取消置顶时用暖橙提示
+        frame = QColor("#f97316") if (self._hover or not self._topmost) else QColor(28, 28, 30, 46)
+        p.setPen(QPen(frame, BORDER))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+
+        # 缩放比例角标（设计稿 .ptag）
+        if self._hover or abs(self._scale - 1.0) > 1e-3:
+            text = f"{int(round(self._scale * 100))}%"
+            p.setFont(QFont("Microsoft YaHei UI", 8))
+            fm = p.fontMetrics()
+            w = fm.horizontalAdvance(text) + 14
+            h = fm.height() + 6
+            box = QRectF(self.width() - w - 8, self.height() - h - 8, w, h)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(28, 28, 30, 170))
+            p.drawRoundedRect(box, 6, 6)
+            p.setPen(QColor("#ffffff"))
+            p.drawText(box, Qt.AlignCenter, text)
+
+        # 关闭按钮：深色圆点 + 白叉（悬停才出现）
         if self._hover:
-            box = QRect(self.width() - CLOSE_BOX - BORDER - 2, BORDER + 2, CLOSE_BOX, CLOSE_BOX)
-            p.fillRect(box, QColor("#d93025" if self._hover_close else "#1f2937"))
-            p.setPen(QPen(QColor("#ffffff"), 2))
-            m = 5
-            p.drawLine(box.left() + m, box.top() + m, box.right() - m, box.bottom() - m)
-            p.drawLine(box.right() - m, box.top() + m, box.left() + m, box.bottom() - m)
+            r = CLOSE_BOX / 2.0
+            center = QPointF(self.width() - r - 6, r + 6)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#d93025" if self._hover_close else QColor(28, 28, 30, 190)))
+            p.drawEllipse(center, r, r)
+            p.setPen(QPen(QColor("#ffffff"), 1.8))
+            m = r * 0.42
+            p.drawLine(QPointF(center.x() - m, center.y() - m),
+                       QPointF(center.x() + m, center.y() + m))
+            p.drawLine(QPointF(center.x() + m, center.y() - m),
+                       QPointF(center.x() - m, center.y() + m))
         p.end()
 
     def closeEvent(self, ev) -> None:  # noqa: N802

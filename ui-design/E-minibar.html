@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案 E · 迷你悬浮条 — 截屏助手 UI 设计</title>
+<style>
+  :root{
+    --bg:#f7f5f1;
+    --cream:#fbfaf7;
+    --ink:#1c1c1e;
+    --ink-2:#6b6660;
+    --ink-3:#a39a90;
+    --line:#e9e4dc;
+    --orange:#f97316;
+    --orange-soft:#ffefe2;
+    --shadow:0 18px 40px rgba(60,45,30,.14), 0 2px 6px rgba(60,45,30,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:linear-gradient(180deg,#faf8f5,#f1ede7);color:var(--ink);
+    font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:44px 28px 80px;
+  }
+  .page{max-width:1040px;margin:0 auto}
+  .page-head{margin-bottom:38px}
+  .tag{display:inline-block;background:var(--orange);color:#fff;font-size:12px;font-weight:700;letter-spacing:.08em;
+    padding:5px 11px;border-radius:999px;margin-bottom:14px}
+  h1{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .lede{margin-top:10px;color:var(--ink-2);font-size:15px;line-height:1.75;max-width:780px}
+  .chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;color:var(--ink-2)}
+
+  .block{margin-top:44px}
+  .block h2{font-size:19px;font-weight:700;display:flex;align-items:center;gap:10px}
+  .block h2 .no{width:24px;height:24px;border-radius:8px;background:var(--orange-soft);color:var(--orange);
+    font-size:12.5px;display:grid;place-items:center;font-weight:800}
+  .desc{margin-top:8px;color:var(--ink-2);font-size:14px;line-height:1.8;max-width:800px}
+  .desc b{color:var(--ink)}
+
+  .stage{margin-top:18px;padding:26px;border-radius:18px;background:#eae5de;border:1px solid #e0d9cf;
+    display:flex;justify-content:center}
+
+  /* 桌面场景 */
+  .desktop{position:relative;width:960px;height:520px;border-radius:14px;overflow:hidden;box-shadow:var(--shadow);
+    background:linear-gradient(150deg,#e7eef2,#dfe7ec 55%,#e9e3da)}
+  .desktop .wp{position:absolute;background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.9);
+    border-radius:10px;box-shadow:0 8px 22px rgba(40,50,60,.08)}
+  .wp .bar{height:26px;border-bottom:1px solid #e6e9ec;display:flex;align-items:center;gap:5px;padding:0 10px}
+  .wp .bar i{width:7px;height:7px;border-radius:50%;background:#d3d9dd;display:block}
+  .wp .body{padding:14px 16px}
+  .wp .body i{display:block;height:9px;border-radius:4px;background:#e4e8ea;margin-bottom:10px}
+  .wp .body i.t{height:13px;width:52%;background:#d5dcdf}
+  .wp .body i.s{width:80%}
+  .wp .body i.s2{width:62%}
+  .taskbar{position:absolute;left:0;right:0;bottom:0;height:44px;background:rgba(251,250,247,.82);
+    backdrop-filter:blur(10px);border-top:1px solid rgba(255,255,255,.8);display:flex;align-items:center;
+    justify-content:center;gap:10px}
+  .taskbar i{width:26px;height:26px;border-radius:7px;background:#dfe3e6;display:block}
+  .taskbar i.on{background:var(--orange-soft)}
+
+  /* 悬浮条 */
+  .minibar{position:absolute;left:50%;transform:translateX(-50%);bottom:64px;display:flex;align-items:center;
+    gap:6px;background:rgba(251,250,247,.94);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.9);
+    border-radius:20px;padding:9px 12px;box-shadow:0 14px 34px rgba(50,40,30,.20)}
+  .mb-logo{width:34px;height:34px;border-radius:12px;background:linear-gradient(140deg,#ff9a4d,#f97316);
+    display:grid;place-items:center;flex:0 0 auto}
+  .mb-logo svg{width:19px;height:19px;stroke:#fff;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .mb{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;color:var(--ink-2);position:relative}
+  .mb svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .mb.on{background:var(--ink);color:#fff}
+  .mb.on::after{content:"";position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:4px;height:4px;
+    border-radius:50%;background:var(--orange)}
+  .mbv{width:1px;height:24px;background:var(--line);margin:0 4px}
+  .mb-key{font-size:11px;color:var(--ink-3);padding:0 6px;white-space:nowrap}
+  .mb-key b{color:var(--ink-2);font-weight:600}
+
+  /* 展开的 popover */
+  .popover{position:absolute;left:50%;transform:translateX(-50%);bottom:150px;width:360px;background:var(--cream);
+    border:1px solid var(--line);border-radius:20px;box-shadow:0 20px 46px rgba(50,40,30,.20);padding:8px}
+  .pop-item{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:13px}
+  .pop-item.on{background:var(--orange-soft)}
+  .pop-item .pi{width:32px;height:32px;border-radius:10px;background:#fff;border:1px solid var(--line);
+    display:grid;place-items:center;flex:0 0 auto}
+  .pop-item .pi svg{width:17px;height:17px;stroke:var(--ink-2);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .pop-item.on .pi{border-color:#ffd9bd}
+  .pop-item.on .pi svg{stroke:var(--orange)}
+  .pop-item h4{font-size:13.5px;font-weight:700}
+  .pop-item p{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+  .pop-item .pk{margin-left:auto;font-size:11px;color:var(--ink-3);white-space:nowrap}
+  .pop-item .pk b{font-weight:600;color:var(--ink-2)}
+  .pop-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);margin-top:6px;padding:10px 12px 6px;
+    font-size:11.5px;color:var(--ink-3)}
+  .pop-foot .r{margin-left:auto}
+
+  .cap{position:absolute;left:24px;top:20px;font-size:12px;color:#5c6670;background:rgba(255,255,255,.75);
+    border:1px solid rgba(255,255,255,.9);border-radius:999px;padding:5px 12px}
+
+  /* ---------- 编辑器：画布优先 + 底部 Dock ---------- */
+  .edwin{width:960px;height:540px;border-radius:14px;overflow:hidden;box-shadow:var(--shadow);position:relative;
+    background:#efece7;border:1px solid #e2dcd3}
+  .edtop{position:absolute;top:0;left:0;right:0;height:44px;display:flex;align-items:center;padding:0 16px;z-index:3}
+  .edtop .t{font-size:12px;color:var(--ink-3)}
+  .edtop .r{margin-left:auto;display:flex;gap:8px}
+  .chipbtn{height:28px;padding:0 12px;border-radius:999px;background:rgba(251,250,247,.9);border:1px solid var(--line);
+    font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+  .chipbtn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
+  .edcanvas{position:absolute;inset:0;display:grid;place-items:center}
+  .shot{width:620px;height:350px;background:#fff;border-radius:6px;overflow:hidden;position:relative;
+    box-shadow:0 16px 40px rgba(60,45,30,.20)}
+  .fake-top{height:30px;background:#f5f3f0;border-bottom:1px solid #eae6e0;display:flex;align-items:center;gap:5px;padding:0 10px}
+  .fake-top i{width:8px;height:8px;border-radius:50%;background:#ddd6cc;display:block}
+  .fake-body{display:flex;height:320px}
+  .fake-side{width:104px;background:#faf9f7;border-right:1px solid #f0ece6;padding:12px 10px}
+  .fake-side i{display:block;height:8px;border-radius:4px;background:#ebe6df;margin-bottom:9px}
+  .fake-main{flex:1;padding:14px 16px}
+  .fake-main i{display:block;height:9px;border-radius:4px;background:#f1ede8;margin-bottom:10px}
+  .fake-main i.t{height:14px;background:#e3dcd3;width:54%}
+  .fake-main i.s{width:82%}
+  .fake-main i.s2{width:60%}
+  .anno{position:absolute;inset:0;pointer-events:none}
+  .anno svg{width:100%;height:100%}
+  .dock{position:absolute;left:50%;transform:translateX(-50%);bottom:22px;display:flex;align-items:center;gap:5px;
+    background:rgba(251,250,247,.95);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.9);
+    border-radius:20px;padding:9px 12px;box-shadow:0 16px 38px rgba(50,40,30,.24);z-index:4}
+  .dk{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;color:var(--ink-2)}
+  .dk svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .dk.on{background:var(--orange);color:#fff;box-shadow:0 5px 12px rgba(249,115,22,.32)}
+  .dkv{width:1px;height:24px;background:var(--line);margin:0 4px}
+  .dkbtn{height:38px;padding:0 16px;border-radius:13px;background:var(--ink);color:#fff;font-size:13px;
+    font-weight:600;display:flex;align-items:center;gap:7px}
+  .dkbtn svg{width:15px;height:15px;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .stylestrip{position:absolute;left:50%;transform:translateX(-50%);bottom:96px;display:flex;align-items:center;gap:14px;
+    background:rgba(251,250,247,.95);border:1px solid var(--line);border-radius:16px;padding:10px 16px;
+    box-shadow:0 10px 26px rgba(50,40,30,.16);z-index:4}
+  .stylestrip .grp{display:flex;align-items:center;gap:7px}
+  .stylestrip .lab{font-size:11px;color:var(--ink-3)}
+  .sw{width:20px;height:20px;border-radius:7px;border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .sw.on{box-shadow:0 0 0 2px var(--orange)}
+  .mini-slider{width:80px;height:4px;border-radius:99px;background:#e7e1d9;position:relative}
+  .mini-slider i{position:absolute;left:0;top:0;bottom:0;width:40%;background:var(--orange);border-radius:99px}
+  .mini-slider b{position:absolute;left:calc(40% - 6px);top:-4px;width:12px;height:12px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,.25)}
+
+  /* ---------- 遮罩 ---------- */
+  .mask{position:relative;width:960px;height:440px;background:#3a3f45;overflow:hidden;border-radius:14px;box-shadow:var(--shadow)}
+  .mask .desk{position:absolute;inset:0;background:linear-gradient(150deg,#454c55,#5c6670 60%,#49525b)}
+  .mask .wl{position:absolute;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.18);border-radius:8px}
+  .sel{position:absolute;left:200px;top:70px;width:450px;height:240px;border:1.5px solid #ffb27a;
+    box-shadow:0 0 0 9999px rgba(24,26,30,.5);border-radius:4px}
+  .sel .hh{position:absolute;width:9px;height:9px;background:#fff;border:2px solid var(--orange);border-radius:50%}
+  .minitools{position:absolute;left:482px;top:322px;display:flex;align-items:center;gap:4px;
+    background:rgba(251,250,247,.96);border-radius:16px;padding:7px 9px;box-shadow:0 12px 30px rgba(0,0,0,.32)}
+  .minitools .mb{width:32px;height:32px;border-radius:11px}
+  .minitools .mb svg{width:16px;height:16px}
+  .sizehint{position:absolute;left:200px;top:44px;font-size:11.5px;color:#fff;background:rgba(28,28,30,.7);
+    border-radius:8px;padding:4px 9px}
+
+  .note{margin-top:12px;font-size:12.5px;color:var(--ink-2);line-height:1.7}
+  .kicker{margin-top:22px;background:#fff;border:1px solid var(--line);border-left:3px solid var(--orange);
+    border-radius:10px;padding:14px 16px;font-size:13px;color:var(--ink-2);line-height:1.8}
+  .kicker b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="page-head">
+    <div class="tag">方案 E · 第二批</div>
+    <h1>迷你悬浮条 · 不占屏的工具</h1>
+    <p class="lede">
+      默认根本不弹「主窗口」——只在屏幕底部浮一条 420×64 的圆角小条，像 macOS 的程序坞。
+      点一下才展开模式菜单，用完自动收起。编辑器也去掉标题栏和菜单栏，
+      画布占满整个窗口，工具全部收进底部悬浮 Dock。
+    </p>
+    <div class="chips">
+      <span class="chip">奶油白 #FBFAF7</span>
+      <span class="chip">暖橙 #F97316</span>
+      <span class="chip">大圆角 16–20px</span>
+      <span class="chip">毛玻璃 + 柔投影</span>
+      <span class="chip">主窗口 ≈ 一条 Dock</span>
+    </div>
+  </header>
+
+  <!-- 1. 悬浮条 -->
+  <section class="block">
+    <h2><span class="no">1</span>主窗口 · 一条 64px 高的悬浮条</h2>
+    <p class="desc">
+      常态只占屏幕底部一小块（可拖到任意位置、可贴边隐藏）。条上只有：
+      图标 + <b>框选 / 窗口 / 全屏</b>三个模式按钮 + 长截图 + 贴图 + 设置。
+      点模式按钮向上弹出<b>带说明的模式卡</b>（需要看解释的人才展开），
+      老用户直接点按钮截图，不经过弹层。
+    </p>
+
+    <div class="stage" style="padding:26px">
+      <div class="desktop">
+        <div class="cap">桌面常态：只有底部一条悬浮条</div>
+        <div class="wp" style="left:60px;top:64px;width:330px;height:210px">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <div class="body"><i class="t"></i><i class="s"></i><i class="s2"></i><i></i><i class="s"></i></div>
+        </div>
+        <div class="wp" style="left:520px;top:96px;width:360px;height:180px">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <div class="body"><i class="t"></i><i class="s"></i><i class="s2"></i></div>
+        </div>
+
+        <div class="popover">
+          <div class="pop-item on">
+            <span class="pi"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></span>
+            <div><h4>框选截图</h4><p>拖拽选取任意区域</p></div>
+            <span class="pk"><b>Ctrl+Shift+A</b></span>
+          </div>
+          <div class="pop-item">
+            <span class="pi"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></span>
+            <div><h4>窗口截图</h4><p>悬停高亮 · 单击确认</p></div>
+            <span class="pk">自动去阴影</span>
+          </div>
+          <div class="pop-item">
+            <span class="pi"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+            <div><h4>全屏截图</h4><p>整块桌面，多屏合屏</p></div>
+            <span class="pk">直接进编辑器</span>
+          </div>
+          <div class="pop-item">
+            <span class="pi"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg></span>
+            <div><h4>滚动长截图</h4><p>点窗口自动滚拼长图</p></div>
+            <span class="pk">独立命令</span>
+          </div>
+          <div class="pop-foot">
+            <span>默认模式：框选</span><span class="r">设置 · 帮助 · 退出</span>
+          </div>
+        </div>
+
+        <div class="minibar">
+          <div class="mb-logo"><svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h3l2-2h2l2 2h3a2 2 0 0 1 2 2v2"/><circle cx="12" cy="13" r="4"/><path d="M6 18h12"/></svg></div>
+          <div class="mbv"></div>
+          <div class="mb on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></div>
+          <div class="mb"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></div>
+          <div class="mb"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+          <div class="mbv"></div>
+          <div class="mb"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg></div>
+          <div class="mb"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+          <div class="mbv"></div>
+          <span class="mb-key"><b>Ctrl+Shift+A</b></span>
+          <div class="mb"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></div>
+        </div>
+
+        <div class="taskbar"><i></i><i></i><i class="on"></i><i></i><i></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 编辑器 -->
+  <section class="block">
+    <h2><span class="no">2</span>标注编辑器 · 无菜单栏 + 底部 Dock</h2>
+    <p class="desc">
+      窗口没有标题栏和菜单栏，只有右上角两个胶囊按钮（保存 / 关闭）。
+      <b>底部悬浮 Dock</b> 承载 7 个标注工具 + 撤销 + 贴图 + 复制；
+      选中标注时 Dock 正上方再浮出一条<b>样式条</b>（颜色、线宽、透明度），
+      不做侧边栏，画布永远占满窗口。
+    </p>
+
+    <div class="stage" style="padding:26px">
+      <div class="edwin">
+        <div class="edtop">
+          <span class="t">截图编辑 · 1520 × 860</span>
+          <div class="r">
+            <span class="chipbtn"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>保存</span>
+            <span class="chipbtn"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>关闭 Esc</span>
+          </div>
+        </div>
+        <div class="edcanvas">
+          <div class="shot">
+            <div class="fake-top"><i></i><i></i><i></i></div>
+            <div class="fake-body">
+              <div class="fake-side"><i></i><i></i><i></i><i></i></div>
+              <div class="fake-main">
+                <i class="t"></i><i class="s"></i><i class="s2"></i>
+                <i style="margin-top:16px"></i><i class="s"></i><i class="s2"></i>
+              </div>
+            </div>
+            <div class="anno">
+              <svg viewBox="0 0 620 350">
+                <rect x="200" y="46" width="290" height="96" rx="4" fill="none" stroke="#f43f5e" stroke-width="2.5"/>
+                <path d="M350 144 L452 208" stroke="#f43f5e" stroke-width="3" stroke-linecap="round"/>
+                <path d="M452 208 L424 192 L437 222 Z" fill="#f43f5e"/>
+                <text x="206" y="252" font-size="16" font-family="Microsoft YaHei" fill="#f43f5e">这里有问题</text>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="stylestrip">
+          <div class="grp"><span class="lab">颜色</span>
+            <span class="sw" style="background:#f43f5e"></span><span class="sw on" style="background:#f97316"></span>
+            <span class="sw" style="background:#111"></span><span class="sw" style="background:#0ea5e9"></span></div>
+          <div class="grp"><span class="lab">线宽</span><span class="mini-slider"><i></i><b></b></span></div>
+          <div class="grp"><span class="lab">透明度</span><span class="mini-slider"><i style="width:12%"></i><b style="left:calc(12% - 6px)"></b></span></div>
+        </div>
+        <div class="dock">
+          <div class="dk on"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M15 4h5v5"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+          <div class="dkv"></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+          <div class="dk"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+          <div class="dkv"></div>
+          <div class="dkbtn"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>复制</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 遮罩 -->
+  <section class="block">
+    <h2><span class="no">3</span>截图遮罩 · 贴着选区右下角的迷你条</h2>
+    <p class="desc">
+      选区边框用暖橙色，控制柄改成<b>圆点</b>（和 Dock 的圆润语言一致）。
+      确认工具条不再居中，而是<b>吸在选区右下角</b>——鼠标松手的位置就在附近，移动距离最短。
+      选区尺寸单独显示在选区左上角外侧。
+    </p>
+
+    <div class="stage" style="padding:26px">
+      <div class="mask">
+        <div class="desk"></div>
+        <div class="wl" style="left:44px;top:52px;width:200px;height:120px"></div>
+        <div class="wl" style="left:740px;top:60px;width:170px;height:300px"></div>
+        <div class="sizehint">450 × 240</div>
+        <div class="sel">
+          <span class="hh" style="left:-5px;top:-5px"></span><span class="hh" style="right:-5px;top:-5px"></span>
+          <span class="hh" style="left:-5px;bottom:-5px"></span><span class="hh" style="right:-5px;bottom:-5px"></span>
+        </div>
+        <div class="minitools">
+          <div class="mb"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/></svg></div>
+          <div class="mb"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/></svg></div>
+          <div class="mb"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+          <div class="mbv"></div>
+          <div class="mb"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+          <div class="mb on"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">贴边时工具条自动向内翻（现有「确定按钮就近浮出、贴边自动收缩」的逻辑可以直接复用）。</div>
+  </section>
+
+  <div class="kicker">
+    <b>这套方案适合谁：</b>把截图当肌肉记忆、不想让工具占屏幕的人。视觉上最「清新」，
+    也是三套里唯一把主窗口近乎消灭的。
+    <b>代价：</b>①悬浮条是<b>无边框置顶窗口</b>，要新写拖动、贴边隐藏、多屏定位
+    （可复用 v34 <code>pinwindow.py</code> 的浮窗骨架）；
+    ②编辑器去掉标题栏后要自己实现拖动与缩放，且「文件 / 编辑 / 视图」菜单里的低频项要另找入口；
+    ③样式条悬浮在 Dock 上方，双浮层重叠时的遮挡处理比方案 A/C 的常驻侧栏麻烦。
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>E-05 编辑器 · 菜单</title>
+<link rel="stylesheet" href="_style.css">
+<style>
+  .selbox{position:absolute;border:1.5px solid #f97316;border-radius:2px}
+  .selbox .h{position:absolute;width:9px;height:9px;background:#fff;border:2px solid #f97316;border-radius:50%}
+  .rot{position:absolute;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #f97316}
+  .rotline{position:absolute;width:1.5px;background:#f97316}
+</style></head>
+<body>
+<div class="desk" style="background:#e7e3dc">
+  <div class="edwin" style="left:20px;top:20px;width:1240px;height:720px">
+
+    <div class="cap" style="position:absolute;left:16px;top:16px;width:34px;height:34px;padding:0;justify-content:center;border-radius:12px;background:#1c1c1e;color:#fff;border-color:#1c1c1e">
+      <svg viewBox="0 0 24 24" style="stroke:#fff"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </div>
+    <div class="cap" style="position:absolute;left:58px;top:16px;height:34px;border-radius:12px">缩放 100%</div>
+    <div style="position:absolute;right:16px;top:16px;display:flex;gap:8px">
+      <div class="cap" style="height:34px;border-radius:12px"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>保存</div>
+      <div class="cap" style="height:34px;border-radius:12px"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>关闭 <span style="font-size:10px;color:#a89e92">Esc</span></div>
+    </div>
+
+    <div class="edcanvas">
+      <div class="shot" style="width:820px;height:480px">
+        <div class="fw-bar" style="height:34px"><i></i><i></i><i></i><div class="fw-url"></div></div>
+        <div class="fw-body" style="height:446px">
+          <div class="fw-side" style="width:150px">
+            <b>目录</b><span class="cur" style="width:86%"></span><span style="width:72%"></span>
+            <span style="width:80%"></span><span style="width:64%"></span><span style="width:76%"></span>
+          </div>
+          <div class="fw-main" style="padding:22px 26px">
+            <h3 style="font-size:19px">2026 年第三季度项目复盘</h3>
+            <div class="meta">更新于 11 月 18 日 · 共 12 页</div>
+            <p>本季度整体交付节奏平稳，测试阶段发现的问题集中在边界场景。下表是各模块的完成度对比。</p>
+            <div class="fw-table" style="margin-top:16px">
+              <div class="tr"><div class="td th">模块</div><div class="td th">完成度</div><div class="td th">备注</div></div>
+              <div class="tr"><div class="td">截图内核</div><div class="td">100%</div><div class="td">已冻结</div></div>
+              <div class="tr"><div class="td">标注编辑器</div><div class="td">92%</div><div class="td">缺撤销栈</div></div>
+            </div>
+            <div class="ln w92" style="margin-top:18px"></div><div class="ln w80"></div><div class="ln w64"></div>
+          </div>
+        </div>
+        <div class="anno">
+          <svg viewBox="0 0 820 480">
+            <rect x="300" y="150" width="360" height="120" rx="4" fill="none" stroke="#f43f5e" stroke-width="3"/>
+            <path d="M470 268 L560 330" stroke="#f43f5e" stroke-width="3.5" stroke-linecap="round"/>
+            <path d="M560 330 L530 316 L544 348 Z" fill="#f43f5e"/>
+            <rect x="316" y="356" width="150" height="40" rx="6" fill="rgba(255,255,255,.94)" stroke="#f43f5e" stroke-width="2"/>
+            <text x="328" y="383" font-size="21" font-family="Microsoft YaHei" font-weight="600" fill="#f43f5e">这里有问题</text>
+          </svg>
+        </div>
+        <!-- 矩形被选中：四角缩放柄 + 旋转柄 -->
+        <div class="selbox" style="left:296px;top:146px;width:368px;height:128px">
+          <span class="h" style="left:-5px;top:-5px"></span>
+          <span class="h" style="right:-5px;top:-5px"></span>
+          <span class="h" style="left:-5px;bottom:-5px"></span>
+          <span class="h" style="right:-5px;bottom:-5px"></span>
+        </div>
+        <div class="rotline" style="left:479px;top:120px;height:24px"></div>
+        <div class="rot" style="left:473px;top:110px"></div>
+      </div>
+    </div>
+
+    <!-- 主菜单 -->
+    <div class="menu" style="left:16px;top:60px;width:252px">
+      <div class="mhead">文件</div>
+      <div class="mi"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>复制到剪贴板<span class="k">Ctrl+Enter</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>另存为 PNG / JPG<span class="k">Ctrl+S</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg>钉在桌面</div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>关闭编辑器<span class="k">Esc</span></div>
+
+      <div class="msep"></div>
+      <div class="mhead">编辑</div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>撤销<span class="k">Ctrl+Z</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>OCR 取字</div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M4 8h16M4 14h10"/></svg>样式面板</div>
+      <div class="mi on"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>图像变换<span class="k">▸</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8 7L4 12l4 5"/><path d="M16 7l4 5-4 5"/></svg>旋转选中形状<span class="k">▸</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M15 4h5v5"/></svg>端点箭头<span class="k">▸</span></div>
+
+      <div class="msep"></div>
+      <div class="mhead">视图</div>
+      <div class="mi"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21M8 11h6M11 8v6"/></svg>放大<span class="k">Ctrl+=</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21M8 11h6"/></svg>缩小<span class="k">Ctrl+-</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>实际大小 1:1<span class="k">Ctrl+1</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>适应窗口<span class="k">Ctrl+0</span></div>
+    </div>
+
+    <!-- 图像变换子菜单 -->
+    <div class="menu" style="left:276px;top:362px;width:186px">
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>顺时针旋转 90°<span class="k">Ctrl+R</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg>逆时针旋转 90°<span class="k">Ctrl+Shift+R</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8 7L4 12l4 5"/><path d="M16 7l4 5-4 5"/></svg>左右镜像<span class="k">Ctrl+H</span></div>
+      <div class="mi"><svg viewBox="0 0 24 24"><path d="M3 12h18"/><path d="M7 8l-5 4 5 4"/><path d="M17 8l5 4-5 4"/></svg>上下镜像<span class="k">Ctrl+Shift+H</span></div>
+    </div>
+
+    <div class="dock" style="bottom:16px">
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></svg></div>
+      <div class="dk on"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M15 4h5v5"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+      <div class="dkv"></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+      <div class="dk"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+      <div class="dkv"></div>
+      <div class="dkbtn"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>复制</div>
+    </div>
+  </div>
+</div>
+</body></html>

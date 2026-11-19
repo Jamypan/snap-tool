@@ -10,9 +10,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFrame,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QPushButton,
     QTextBrowser,
     QVBoxLayout,
@@ -29,6 +31,29 @@ from PySide6.QtWidgets import (
 from hotkeys import CAPTURE_MODES, Hotkey, mode_label
 from i18n import LANG, app_name, language_choices, language_label, t
 from i18n_docs import about_html, cli_help, cli_help_html, help_html
+from ui_theme import (
+    BAR_HEIGHT,
+    BAR_RADIUS,
+    BTN_RADIUS,
+    BTN_SIZE,
+    CREAM,
+    FONT_QSS,
+    GREEN,
+    HOVER,
+    INK,
+    INK2,
+    INK3,
+    LINE,
+    ORANGE,
+    PANEL_RADIUS,
+    SOFT,
+    Card,
+    IconButton,
+    PanelRow,
+    apply_shadow,
+    group_title,
+    paint_icon,
+)
 
 # 常量保留简体中文：配置目录名、exe 名、自检与旧版脚本都依赖它，
 # 界面上显示的程序名统一用随语言变化的 app_name()。
@@ -40,6 +65,8 @@ PEN_SMOOTH_LABELS = {
     "off": "关闭（原始线条）", "low": "轻度", "medium": "中等", "high": "强",
 }
 PEN_SMOOTH_LEVELS = ("off", "low", "medium", "high")
+# 面板右侧只显示短档位名
+PEN_SMOOTH_SHORT = {"off": "关闭", "low": "轻度", "medium": "中等", "high": "强"}
 
 # 随程序分发的资源：源码运行时在 snapui.py 同目录，PyInstaller 打包后在 _MEIPASS。
 # SnapTool.spec 的 datas 里必须同步列出这两个文件，否则绿色版会缺图标 / 头像。
@@ -101,9 +128,10 @@ code { background:#f3f4f6; padding:1px 4px; }
 </style></head><body>
 
 <h2>1. 启动与常驻</h2>
-<p>双击 <code>run-silent.bat</code> 启动后会显示本主窗口，同时右下角托盘出现图标。
-<b>关闭主窗口只会最小化到托盘，程序不会退出</b>；要彻底退出请点「文件 → 退出」或托盘右键「退出」。
-托盘右键「显示主窗口」可随时把窗口叫回来，左键单击托盘图标则直接截图。</p>
+<p>双击 <code>run-silent.bat</code> 启动后，屏幕<b>底部居中会浮出一条迷你悬浮条</b>：左边是橙色相机图标，中间依次是「框选 / 窗口 / 全屏」三个模式按钮（当前模式为深色底加橙点）、「滚动长截图」与「贴图」，右边是当前热键提示和「⋯」。
+<b>关掉悬浮条只会收回托盘，程序不会退出</b>；要彻底退出请点「⋯ → 帮助 → 关于与退出」或托盘右键「退出」。
+按住悬浮条空白处可把整条拖到屏幕任意位置，托盘右键「显示主窗口」可随时叫回来，左键单击托盘图标则直接截图。</p>
+<p>点「⋯」弹出<b>双列命令面板</b>：左列「截图 / 编辑与输出」，右列「设置 / 帮助」，共 15 行。每行左侧图标、中间标题与说明、右侧当前取值或快捷键——<b>平滑度、默认模式、界面语言、热键都能在面板里就地切换</b>，点一下循环到下一个取值，改完立即生效并自动记住。点面板外任意位置即收起。</p>
 
 <h2>2. 三种截图模式</h2>
 <table>
@@ -113,13 +141,14 @@ code { background:#f3f4f6; padding:1px 4px; }
 <tr><td>全屏截图</td><td>进入时自动选中整个虚拟屏幕，无需拖选</td><td>截整个桌面或多显示器合屏</td></tr>
 </table>
 <p class="hint">窗口模式会跳过截屏助手自己的窗口；启动截图时本程序的主窗口、帮助窗口、预览窗口都会临时隐藏，避免被拍进图里，结束后自动恢复。
-三种模式确定选区后，工具条最左侧的「复制」按钮可直接把原图放进剪贴板，<b>并关闭截图编辑与截屏助手两个窗口，只留托盘常驻</b>；需要标注时点「确定」打开截图编辑窗口，标注、取字、复制、保存的用法完全一致。全屏直截与滚动长截图完成时也会自动把原图放进剪贴板。
+三种模式确定选区后，<b>选区外侧会浮出一条确认条</b>：最左「复制」可直接把原图放进剪贴板，<b>并关闭截图编辑与截屏助手两个窗口，只留托盘常驻</b>；「取字」直接识别选区里的文字；「钉在桌面」把选区贴成浮窗；「✕」取消；右侧深色的<b>「确定」</b>才打开截图编辑窗口，标注、取字、复制、保存的用法完全一致。选区下方空间不够时确认条会自动翻到上方。全屏直截与滚动长截图完成时也会自动把原图放进剪贴板。
+遮罩顶部还有一条<b>模式切换条</b>，框选到一半想改成截窗口或全屏，直接点一下就地切换，不用退出重来。
 另有不进编辑器的独立「滚动长截图」命令，见第 9 节。</p>
 
 <h2>3. 全局热键</h2>
-<p>默认 <b>Ctrl + Shift + A</b> 唤起截图，使用的模式由主窗口的「默认模式」决定（会记住，重启后仍有效）。
-右键托盘或主窗口「设置 → 设置热键…」可改成任意组合：打开后直接按键录制，也可以勾选修饰键 + 选主键。
-保存时立即生效，无需重启。</p>
+<p>默认 <b>Ctrl + Shift + A</b> 唤起截图，使用的模式由命令面板里的「默认模式」决定（会记住，重启后仍有效，悬浮条上用深色底加橙点标出当前模式）。
+点「⋯」在「设置 → 设置热键…」或托盘右键「设置热键…」可改成任意组合：打开后直接按键录制，也可以勾选修饰键 + 选主键。
+面板里的「贴图热键」同理，保存时立即生效，无需重启。</p>
 <p class="hint">若提示「无法注册」，说明该组合已被其它程序占用或属于系统保留组合，换一个即可，原设置不受影响。
 至少需要 Ctrl / Alt / Shift / Win 中的一个修饰键。热键配置保存在 <code>%APPDATA%\\SnapTool\\settings.json</code>。</p>
 
@@ -139,41 +168,42 @@ code { background:#f3f4f6; padding:1px 4px; }
 <tr><td>形状旋转</td><td>选中<b>矩形 / 椭圆 / 文字</b>后，上方会出现一个圆形<b>旋转柄</b>：拖动它即可绕形状中心任意旋转，按住 <b>Shift</b> 吸附到 15° 整数倍；样式面板里的「<b>旋转角度</b>」滑块可精确设定 -180°~180°。菜单「编辑 → 旋转选中形状」提供 90° 步进（Ctrl+[ / Ctrl+]）。旋转后四角控制柄、选中虚线框与点选命中都会跟着转；截图遮罩与程序窗口编辑器都支持。马赛克、箭头 / 直线、画笔保持原样</td></tr>
 <tr><td>整图旋转 / 镜像</td><td>程序窗口工具条右侧一组按钮：顺旋（顺时针 90° Ctrl+R）、逆旋（逆时针 90° Ctrl+Shift+R）、左右（镜像 Ctrl+H）、上下（镜像 Ctrl+Shift+H）；底图与已有标注一起变，<b>文字标注的字形也跟着旋转</b>（不再保持水平）；镜像时文字仍可读、不做反字。Ctrl+Z 可撤销，角度一并恢复</td></tr>
 <tr><td>画笔端点箭头</td><td>菜单「编辑 → 样式面板」打开面板，勾选「起点加箭头 / 终点加箭头」；无选中时设新建画笔默认，选中画笔时改当前线。也可用菜单「编辑 → 画笔端点箭头」</td></tr>
-<tr><td>撤销</td><td>Ctrl + Z 或工具条「撤销」（整图变换也能撤销）</td></tr>
-<tr><td>复制 / 保存 / 取消</td><td>确定选区后工具条最左侧「复制」：复制原图并关闭截图编辑与截屏助手两个窗口，不打开编辑器、只留托盘；点「确定」才打开截图编辑窗口；已进入编辑器后用 Ctrl+Enter 更新成图；工具条「保存」；Esc 或「✕」取消</td></tr>
-<tr><td>滚动长截图</td><td>独立命令，不进入编辑器：主窗口按钮 /「截图(&S) → 滚动长截图…」/ 托盘右键均可启动，详见第 9 节</td></tr>
+<tr><td>撤销</td><td>Ctrl + Z，或编辑器底部 Dock 的「撤销」（整图变换也能撤销）</td></tr>
+<tr><td>复制 / 保存 / 取消</td><td>选区外侧确认条最左的「复制」：复制原图并关闭截图编辑与截屏助手两个窗口，不打开编辑器、只留托盘；点「确定」才打开截图编辑窗口；已进入编辑器后用 Ctrl+Enter 更新成图，顶部「保存」存盘；Esc 或顶部「✕」取消</td></tr>
+<tr><td>滚动长截图</td><td>独立命令，不进入编辑器：悬浮条的长截图按钮 / 命令面板「滚动长截图…」/ 托盘右键均可启动，详见第 9 节</td></tr>
 </table>
+<p class="hint">编辑器窗口没有标题栏：顶部一行是「☰ 菜单」、缩放胶囊（− 100% ＋）、「保存」与「关闭 Esc」；中间是奶油色画布，图片带柔和投影；<b>底部居中是 Dock</b>——选择、矩形、椭圆、箭头、直线、画笔、马赛克、文字、撤销、钉在桌面、复制（深色主按钮）；右侧浮层是选中标注的样式面板，没选中标注时不出现。点「☰」是分组菜单（编辑与输出 / 变换 / 视图 / 帮助），所有快捷键在菜单收起后依然可用。</p>
 <p class="hint">视图放缩只改变屏幕上的显示比例，不会缩放、重采样导出图片；坐标换算、取字行块、文字输入都会跟着比例同步，因此放大后仍能精确标注。马赛克是纯像素化效果，没有颜色、线宽、线型等可调样式：使用马赛克工具或选中马赛克标注时，样式面板都不会弹出。</p>
 <p class="hint">旋转 90° 后图片宽高互换，矩形/箭头/画笔/文字等标注位置跟着变换；文字按包围盒中心映射，字形与底图一起旋转（镜像时保持可读，不变成反字）。导出始终是全分辨率。</p>
 
 <h2>5. 取字（OCR）</h2>
-<p>在程序窗口里点工具条「取字」或菜单「编辑 → OCR 取字」，识别结果会<b>逐行盖回原文位置</b>：每行文字可选中、拖选、Ctrl+A / Ctrl+C 复制，
+<p>从选区确认条的「取字」、编辑器底部 Dock 的「取字」，或菜单「编辑 → OCR 取字」进入，识别结果会<b>逐行盖回原文位置</b>：每行文字可选中、拖选、Ctrl+A / Ctrl+C 复制，
 也可用窗口顶部取字工具条的「复制选中」「复制全部」。复制后约 0.4 秒自动收起，回到正常编辑态；
 点「返回」或按 Esc 只收起取字层，不会关闭窗口。改变窗口大小后行块会重新盖回，不会错位。
 识别中按 Esc 取消本次取字；识别中、失败或后端不返回坐标时显示整块结果面板。
 取字默认走 RapidOCR（ONNX 模型随程序自带），首次取字需加载模型约 1~5 秒，之后常驻缓存。</p>
 
 <h2>6. 文件与配置</h2>
-<p>截图默认保存到 <code>%USERPROFILE%\\Pictures\\Screenshots</code>（主窗口状态栏显示实际路径，托盘「打开保存目录」可直接打开）。
+<p>截图默认保存到 <code>%USERPROFILE%\\Pictures\\Screenshots</code>（命令面板「打开保存目录」一行右侧显示实际路径，点一下即在资源管理器里打开；托盘右键同样有「打开保存目录」）。
 配置在 <code>%APPDATA%\\SnapTool\\settings.json</code>，含热键与默认截图模式；设置环境变量
 <code>SNAPTOOL_HOME</code> 可把配置目录改到别处，方便便携版。</p>
 
 <h2>7. 命令行</h2>
 <p><code>python snap.py --help</code> 查看全部参数；<code>--shot</code> 启动后立即截一次图；
 <code>--restart</code> 结束后台残留实例并重启（等价于双击 <code>restart.bat</code>）。
-图形界面里也可以点「帮助 → 命令行参数」。</p>
+图形界面里也可以点「⋯ → 帮助 → 命令行参数」。</p>
 
 <h2>8. 常见问题</h2>
 <ul>
-<li><b>按热键没反应：</b>多半是热键被别的程序占用。托盘会弹注册失败提示，去「设置热键…」换一个组合；也可以直接点主窗口的截图按钮。</li>
-<li><b>提示「已经在运行」却看不到程序：</b>托盘图标可能被折叠到通知区（点 ^ 展开）；也可能是旧实例只留下隐藏窗口。重复启动时会先把它唤醒并显示主窗口，弹窗里选「是」即可结束它并重启，或直接双击 restart.bat。</li>
+<li><b>按热键没反应：</b>多半是热键被别的程序占用。托盘会弹注册失败提示，去命令面板「设置热键…」换一个组合；也可以直接点悬浮条上的「框选」按钮。</li>
+<li><b>提示「已经在运行」却看不到程序：</b>托盘图标可能被折叠到通知区（点 ^ 展开），或悬浮条被拖到了屏幕边缘看不见的位置。重复启动时会先把它唤醒并显示，弹窗里选「是」即可结束它并重启，或直接双击 restart.bat。</li>
 <li><b>改了代码没变化：</b>程序是单实例 + 托盘常驻，旧进程仍在跑旧代码，双击 restart.bat 即可用新代码重启。</li>
 <li><b>高分屏坐标不准：</b>程序已开启 per-monitor DPI 感知；若仍偏移，重启程序后再试。</li>
 <li><b>杀软误报：</b>全局热键 + 屏幕捕获容易被误报，未签名的 exe 需要加入信任。</li>
 </ul>
 
 <h2>9. 滚动长截图</h2>
-<p>这是与三种截图模式并列的<b>独立命令</b>，从主窗口按钮区「滚动长截图…」、「截图(&S) → 滚动长截图…」或托盘右键「滚动长截图…」启动。它<b>不进入编辑器、也不需要框选</b>：<b>单击目标窗口即自动向下滚屏</b>。</p>
+<p>这是与三种截图模式并列的<b>独立命令</b>，从悬浮条的长截图按钮、命令面板「滚动长截图…」或托盘右键「滚动长截图…」启动。它<b>不进入编辑器、也不需要框选</b>：<b>单击目标窗口即自动向下滚屏</b>。</p>
 <ol>
 <li>启动后先隐藏本程序所有窗口，再抓一帧底图并显示遮罩；</li>
 <li>移动鼠标，目标窗口会高亮并显示标题；<b>单击左键选中窗口</b>，程序取它的客户区（自动排除标题栏与边框）作为滚动区域，<b>立即开始</b>逐帧抓屏、模板匹配拼成长图；</li>
@@ -189,7 +219,7 @@ code { background:#f3f4f6; padding:1px 4px; }
 <li>框选后确认阶段的「<b>钉在桌面</b>」按钮：贴当前截图，并收起截图界面与编辑器，只留浮窗；</li>
 <li>编辑器「<b>文件 → 钉在桌面</b>」：贴当前带标注的成图，编辑器保持打开可继续编辑；</li>
 <li>托盘右键「<b>贴出剪贴板图片</b>」：把剪贴板里的任意图片贴到桌面；</li>
-<li>贴图热键（默认 <b>Ctrl + Shift + P</b>，可在「设置 → 设置贴图热键…」修改）：同样贴剪贴板图片。</li>
+<li>贴图热键（默认 <b>Ctrl + Shift + P</b>，可在命令面板「设置 → 设置贴图热键…」修改）：同样贴剪贴板图片。</li>
 </ul>
 <p>浮窗操作：<b>左键拖动</b>移动，<b>滚轮</b>缩放（0.1~8 倍），<b>右键菜单</b>可复制图片 / 另存为 / 调透明度（100/75/50/25%）/ 开关保持置顶 / 重置大小 / 关闭；<b>双击</b>或 <b>Esc</b> 关闭，<b>Ctrl+C</b> 复制原图。可同时钉多张，鼠标悬停时右上角出现关闭按钮。程序退出时会一并收起所有贴图。</p>
 </body></html>
@@ -197,7 +227,7 @@ code { background:#f3f4f6; padding:1px 4px; }
 
 CLI_HELP = f"""{APP_NAME} —— 命令行参数
 
-  python snap.py              正常启动：显示主窗口 + 托盘常驻
+  python snap.py              正常启动：底部悬浮条 + 托盘常驻
   python snap.py --shot       启动后立即截一次图（使用默认截图模式）
   python snap.py --restart    结束后台残留实例并重新启动（不弹确认框）
   python snap.py --selftest   只跑后端自检，不进入界面
@@ -205,15 +235,15 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
   python snap.py --help       显示本说明（也可写 -h 或 /?）
 
 日常使用请双击 run-silent.bat（无黑窗口）。程序是单实例，重复启动会先唤醒
-已有实例并显示主窗口；若看不到界面，弹窗里选「是」即可结束后台实例并重启，
+已有实例；若看不到界面，弹窗里选「是」即可结束后台实例并重启，
 也可直接双击 restart.bat 一键重启。启动诊断见 %APPDATA%\\SnapTool\\startup.log。
 
 三种截图模式：框选（拖鼠标选区域）、窗口（悬停高亮并单击）、全屏（自动选中整个虚拟屏幕）。
-另有独立命令「滚动长截图…」（主窗口 /「截图」菜单 / 托盘右键）：单击目标窗口即自动向下滚屏并拼接成长图，不框选、不进编辑器；滚动中左键暂停 / 继续、右键或「确定 ✓」结束、到底自动结束。
+另有独立命令「滚动长截图…」（悬浮条长截图按钮 / 命令面板 / 托盘右键）：单击目标窗口即自动向下滚屏并拼接成长图，不框选、不进编辑器；滚动中左键暂停 / 继续、右键或「确定 ✓」结束、到底自动结束。
 默认模式与全局热键保存在 %APPDATA%\\SnapTool\\settings.json，
-可在主窗口或托盘菜单「设置热键…」里修改。
+可在命令面板或托盘菜单「设置热键…」里修改。
 
-更多说明见程序内「帮助 → 使用说明」，或项目 README.md。
+更多说明见程序内「⋯ → 帮助 → 使用说明」，或项目 README.md。
 """
 
 ABOUT_HTML = f"""
@@ -301,11 +331,333 @@ class AboutDialog(QDialog):
 # ---------------------------------------------------------------------------
 # 主窗口
 # ---------------------------------------------------------------------------
+# 主窗口：迷你悬浮条 + 命令面板（方案 E）
+# ---------------------------------------------------------------------------
+MODE_ICONS = {"rect": "region", "window": "window", "fullscreen": "fullscreen"}
+MODE_DESCS = {
+    "rect": "拖动选取任意区域 · 默认模式",
+    "window": "悬停高亮 · 单击确认",
+    "fullscreen": "整块桌面 · 多屏合屏",
+}
+
+
+class LogoButton(QPushButton):
+    """橙色渐变圆角 Logo（设计稿 .mb-logo）：点击用默认模式截图。"""
+
+    def __init__(self, parent: QWidget | None = None, size: int = 36) -> None:
+        super().__init__(parent)
+        self._size = size
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setStyleSheet("background:transparent;border:none;")
+
+    def paintEvent(self, ev) -> None:  # noqa: N802
+        from PySide6.QtGui import QLinearGradient
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(0, 0, self._size, self._size)
+        grad = QLinearGradient(r.topLeft(), r.bottomRight())
+        grad.setColorAt(0.0, QColor("#ffa257"))
+        grad.setColorAt(1.0, QColor("#f97316"))
+        p.setPen(Qt.NoPen)
+        p.setBrush(grad)
+        p.drawRoundedRect(r, min(13.0, self._size * 0.36), min(13.0, self._size * 0.36))
+        side = self._size * 0.56
+        box = QRectF((self._size - side) / 2, (self._size - side) / 2, side, side)
+        paint_icon(p, "logo", box, QColor("#ffffff"), 1.9)
+        p.end()
+
+
+class _BarCard(Card):
+    """悬浮条卡片：空白处按住可拖动整条（按钮区域正常点击）。"""
+
+    def __init__(self, parent: QWidget, on_drag) -> None:
+        super().__init__(parent, radius=BAR_RADIUS, bg=CREAM, border="#ffffff")
+        self._on_drag = on_drag
+        self._from: QPoint | None = None
+        self.setCursor(Qt.SizeAllCursor)
+
+    def mousePressEvent(self, ev) -> None:  # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            self._from = ev.globalPosition().toPoint()
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev) -> None:  # noqa: N802
+        if self._from is not None and (ev.buttons() & Qt.LeftButton):
+            pos = ev.globalPosition().toPoint()
+            self._on_drag(pos - self._from)
+            self._from = pos
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev) -> None:  # noqa: N802
+        self._from = None
+        super().mouseReleaseEvent(ev)
+
+
+class CommandPanel(QWidget):
+    """「⋯」展开的完整命令面板（设计稿第 2 屏）。
+
+    两列布局：左列截图命令 + 编辑输出，右列设置 + 帮助。
+    所有行都是 PanelRow（QPushButton 子类），点击后先收起面板再执行。
+    """
+
+    def __init__(self, owner: "MainWindow") -> None:
+        super().__init__(None, Qt.Popup | Qt.FramelessWindowHint)
+        self._owner = owner
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(0)
+        self.card = Card(self, radius=PANEL_RADIUS, bg=CREAM, border=LINE)
+        self.card.setMinimumWidth(600)
+        apply_shadow(self.card, blur=48, dy=18, alpha=64)
+        outer.addWidget(self.card)
+
+        root = QVBoxLayout(self.card)
+        root.setContentsMargins(10, 10, 10, 12)
+        root.setSpacing(4)
+
+        # ---- 标题栏 ----
+        head = QHBoxLayout()
+        head.setContentsMargins(10, 6, 10, 8)
+        head.setSpacing(10)
+        self._logo = LogoButton(self.card, 30)
+        head.addWidget(self._logo, 0, Qt.AlignVCenter)
+        title_col = QVBoxLayout()
+        title_col.setContentsMargins(0, 0, 0, 0)
+        title_col.setSpacing(1)
+        self._title = QLabel(app_name(), self.card)
+        self._title.setStyleSheet(
+            f"color:{INK};font-size:13.5px;font-weight:800;{FONT_QSS}"
+        )
+        self._sub = QLabel("", self.card)
+        self._sub.setStyleSheet(f"color:{INK3};font-size:11px;{FONT_QSS}")
+        title_col.addWidget(self._title)
+        title_col.addWidget(self._sub)
+        head.addLayout(title_col, 1)
+        self._badge = QLabel("", self.card)
+        self._badge.setStyleSheet(
+            f"color:{GREEN};background:#e6f6ee;border-radius:99px;"
+            f"padding:3px 9px;font-size:10.5px;{FONT_QSS}"
+        )
+        head.addWidget(self._badge, 0, Qt.AlignVCenter)
+        root.addLayout(head)
+
+        sep = QWidget(self.card)
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background:{LINE};")
+        root.addWidget(sep)
+
+        # ---- 两列主体 ----
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 4, 0, 0)
+        body.setSpacing(0)
+        left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(2)
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(2)
+        body.addLayout(left, 1)
+        vline = QWidget(self.card)
+        vline.setFixedWidth(1)
+        vline.setStyleSheet(f"background:{LINE};")
+        body.addWidget(vline)
+        body.addLayout(right, 1)
+        root.addLayout(body)
+
+        self._rows: dict[str, PanelRow] = {}
+
+        def add(lay, key: str, icon_name: str, title: str, desc: str,
+                slot, shortcut: str = "", obj: str = "") -> PanelRow:
+            row = PanelRow(icon_name, title, desc, shortcut, self.card)
+            if obj:
+                row.setObjectName(obj)
+            row.clicked.connect(lambda _=False: self._fire(slot))
+            lay.addWidget(row)
+            self._rows[key] = row
+            return row
+
+        def group(lay, key: str, label_widget: QLabel) -> None:
+            holder = QWidget(self.card)
+            hl = QHBoxLayout(holder)
+            hl.setContentsMargins(12, 8, 12, 3)
+            hl.addWidget(label_widget)
+            lay.addWidget(holder)
+
+        self._lbl_now = group_title("", self.card)
+        group(left, "g_shot", self._lbl_now)
+        for mode in CAPTURE_MODES:
+            add(left, f"mode_{mode}", MODE_ICONS[mode], mode_label(mode),
+                MODE_DESCS[mode], (lambda m=mode: owner._on_quick_mode(m)))
+        self._b_long = add(left, "long_capture", "long", "滚动长截图…",
+                           "点击窗口自动滚屏成长图",
+                           lambda: owner.long_capture_requested.emit(), obj="long")
+
+        left.addSpacing(4)
+        self._lbl_edit = group_title("", self.card)
+        group(left, "g_edit", self._lbl_edit)
+        add(left, "ocr", "text", "OCR 取字", "识别选区文字 · 离线 RapidOCR",
+            lambda: owner.ocr_capture_requested.emit(), "离线")
+        add(left, "pin_clipboard", "pin", "贴出剪贴板图片", "钉成桌面浮窗 · 可拖动缩放",
+            lambda: owner.pin_clipboard_requested.emit(), "Ctrl+Shift+P")
+        self._dir_row = add(left, "dir", "folder", "打开保存目录", "",
+                            lambda: owner.open_dir_requested.emit())
+        left.addStretch(1)
+
+        self._lbl_hotkey = group_title("", self.card)
+        group(right, "g_set", self._lbl_hotkey)
+        self._hk_row = add(right, "hotkey", "key", "截图热键", "点击修改，立即生效",
+                           lambda: owner.hotkey_requested.emit())
+        self._pinhk_row = add(right, "pin_hotkey", "pin", "贴图热键", "独立于截图热键",
+                              lambda: owner.pin_hotkey_requested.emit())
+        self._lang_row = add(right, "language", "globe", "界面语言", "8 种语言 · 可跟随系统",
+                             lambda: owner.language_requested.emit())
+        self._smooth_row = add(right, "pen_smooth", "pen", "画笔平滑度",
+                               "关闭 / 轻度 / 中等 / 强", self._cycle_smooth)
+        self._mode_row = add(right, "default_mode", "region", "默认截图模式",
+                             "热键与托盘使用此模式",
+                             lambda: self._cycle_mode())
+
+        right.addSpacing(4)
+        self._lbl_mode = group_title("", self.card)
+        group(right, "g_help", self._lbl_mode)
+        add(right, "help_help", "help", "使用说明", "10 个完整操作文档",
+            lambda: owner.help_requested.emit("help"))
+        add(right, "help_cli", "info", "命令行参数", "--shot / --restart / --selftest",
+            lambda: owner.help_requested.emit("cli"))
+        add(right, "about", "smile", "关于与退出", "版本信息 · 联系邮箱 · 退出程序",
+            self._about_or_quit)
+        right.addStretch(1)
+
+        # 兼容旧接口：面板里不再单独放「更改…」按钮
+        self._b_change = QPushButton(self.card)
+        self._b_change.setVisible(False)
+        self._b_change.clicked.connect(lambda _=False: owner.hotkey_requested.emit())
+        self.hotkey_label = QLabel("", self.card)
+        self.hotkey_label.setVisible(False)
+        self._mode_buttons = {}
+        for mode in CAPTURE_MODES:
+            self._mode_buttons[mode] = self._rows[f"mode_{mode}"]
+        self._tip = QLabel("", self.card)
+        self._tip.setVisible(False)
+        self._last_hide = 0.0
+        self.retranslate_ui()
+
+    # ---------------------------------------------------------- 交互
+    def hideEvent(self, ev) -> None:  # noqa: N802
+        import time as _time
+        self._last_hide = _time.monotonic()
+        super().hideEvent(ev)
+
+    def _fire(self, slot) -> None:
+        self.hide()
+        slot()
+
+    def _cycle_smooth(self) -> None:
+        levels = PEN_SMOOTH_LEVELS
+        cur = self._owner._pen_smooth
+        nxt = levels[(levels.index(cur) + 1) % len(levels)] if cur in levels else "medium"
+        self._owner.set_pen_smooth(nxt)
+        self._owner.pen_smooth_changed.emit(nxt)
+
+    def _cycle_mode(self) -> None:
+        modes = list(CAPTURE_MODES)
+        cur = self._owner._mode
+        nxt = modes[(modes.index(cur) + 1) % len(modes)] if cur in modes else "rect"
+        self._owner.set_mode(nxt)
+        self._owner.mode_changed.emit(nxt)
+
+    def _about_or_quit(self) -> None:
+        """「关于与退出」：弹出二级菜单，避免误触直接退出。"""
+        m = QMenu(self)
+        a_about = m.addAction(t("关于…"))
+        a_about.triggered.connect(lambda _=False: self._owner.about_requested.emit())
+        m.addSeparator()
+        a_quit = m.addAction(t("退出"))
+        a_quit.triggered.connect(lambda _=False: self._owner.quit_requested.emit())
+        pos = self.mapToGlobal(QPoint(self.width() - 250, self.height() - 90))
+        m.exec(pos)
+
+    # ---------------------------------------------------------- 刷新
+    def set_values(self, hotkey: Hotkey, pin_hotkey: Hotkey | None, mode: str,
+                   lang_label: str, smooth: str, save_dir) -> None:
+        self._hk_row.set_texts(t("截图热键"), t("点击修改，立即生效"), hotkey.label())
+        if pin_hotkey is not None:
+            self._pinhk_row.set_texts(t("贴图热键"), t("独立于截图热键"),
+                                      pin_hotkey.label())
+        self._lang_row.set_texts(t("界面语言"), t("8 种语言 · 可跟随系统"), lang_label)
+        self._smooth_row.set_texts(t("画笔平滑度"), t("关闭 / 轻度 / 中等 / 强"),
+                                   t(PEN_SMOOTH_SHORT.get(smooth, "中等")))
+        self._mode_row.set_texts(t("默认截图模式"), t("热键与托盘使用此模式"),
+                                 mode_label(mode))
+        self._dir_row.set_texts(t("打开保存目录"), str(save_dir), "")
+        for m, row in self._rows.items():
+            if m.startswith("mode_"):
+                row.set_highlight(m == f"mode_{mode}")
+
+    def retranslate_ui(self) -> None:
+        self._title.setText(app_name())
+        self._sub.setText(t("托盘常驻 · 关闭面板不会退出程序"))
+        self._badge.setText(t("已启动"))
+        self._lbl_now.setText(t("截图"))
+        self._lbl_edit.setText(t("编辑与输出"))
+        self._lbl_hotkey.setText(t("设置"))
+        self._lbl_mode.setText(t("帮助"))
+        for mode in CAPTURE_MODES:
+            self._rows[f"mode_{mode}"].set_texts(
+                mode_label(mode), t(MODE_DESCS[mode]),
+                t("默认") if self._owner._mode == mode else "",
+            )
+        self._b_long.set_texts(t("滚动长截图…"), t("点击窗口自动滚屏成长图"), "")
+        self._rows["ocr"].set_texts(t("OCR 取字"), t("识别选区文字 · 离线 RapidOCR"),
+                                    t("离线"))
+        self._rows["pin_clipboard"].set_texts(
+            t("贴出剪贴板图片"), t("钉成桌面浮窗 · 可拖动缩放"), "Ctrl+Shift+P")
+        self._rows["hotkey"].set_texts(t("截图热键"), t("点击修改，立即生效"), "")
+        self._rows["pin_hotkey"].set_texts(t("贴图热键"), t("独立于截图热键"), "")
+        self._rows["language"].set_texts(t("界面语言"), t("8 种语言 · 可跟随系统"), "")
+        self._rows["pen_smooth"].set_texts(t("画笔平滑度"), t("关闭 / 轻度 / 中等 / 强"), "")
+        self._rows["default_mode"].set_texts(t("默认截图模式"), t("热键与托盘使用此模式"), "")
+        self._rows["dir"].set_texts(t("打开保存目录"), str(self._owner._save_dir), "")
+        self._rows["help_help"].set_texts(t("使用说明"), t("10 个完整操作文档"), "")
+        self._rows["help_cli"].set_texts(t("命令行参数"),
+                                         "--shot / --restart / --selftest", "")
+        self._rows["about"].set_texts(t("关于与退出"), t("版本信息 · 联系邮箱 · 退出程序"), "")
+        self.adjustSize()
+
+    def show_at(self, anchor: QWidget) -> None:
+        """弹在悬浮条右上角，越界自动贴边。"""
+        self.adjustSize()
+        size = self.size()
+        g = anchor.mapToGlobal(QPoint(anchor.width(), 0))
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
+        x = g.x() - size.width() + 40
+        y = g.y() - size.height() - 6
+        x = max(avail.left() + 8, min(x, avail.right() - size.width() - 8))
+        y = max(avail.top() + 8, y)
+        self.move(x, y)
+        self.show()
+        self.raise_()
+        self.setFocus()
+
+
 class MainWindow(QMainWindow):
-    """启动即显示的程序窗口：菜单、模式按钮、热键与默认模式。"""
+    """启动即显示的「迷你悬浮条」：三种截图 + 长截图 + 贴图 + 热键 + 命令面板。
+
+    设计稿方案 E：不再有标题栏和菜单栏，桌面底部只留一条 60px 高的胶囊条。
+    所有低频命令收进「⋯」面板；主窗口的鼠标右键仍然给出菜单式入口。
+    """
 
     capture_requested = Signal(str)      # rect / window / fullscreen
-    long_capture_requested = Signal()    # 独立命令：滚动长截图（框选→确定→自动拼接）
+    long_capture_requested = Signal()    # 独立命令：滚动长截图
+    ocr_capture_requested = Signal()     # v38 框选后直接取字
+    pin_clipboard_requested = Signal()   # v38 贴出剪贴板图片
     mode_changed = Signal(str)           # 用户改了「默认模式」
     hotkey_requested = Signal()
     pin_hotkey_requested = Signal()      # v34 设置贴图热键
@@ -315,51 +667,54 @@ class MainWindow(QMainWindow):
     minimize_requested = Signal()
     quit_requested = Signal()
     language_requested = Signal()
-    pen_smooth_changed = Signal(str)     # 画笔平滑档位 off/low/medium/high
-
-    STYLE = (
-        "QMainWindow, QWidget#central { background:#f7f8fa; }"
-        "QFrame#card { background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; }"
-        "QPushButton#mode { background:#ffffff; border:1px solid #d1d5db; border-radius:8px;"
-        " padding:14px 6px; color:#111827; font-size:13px; }"
-        "QPushButton#mode:hover { border-color:#0a84ff; background:#f0f7ff; }"
-        "QPushButton#long { background:#f0f7ff; border:1px solid #b6d7fb; border-radius:8px;"
-        " padding:10px 8px; color:#0a6ed1; font-size:13px; font-weight:bold; }"
-        "QPushButton#long:hover { border-color:#0a84ff; background:#e2f0ff; }"
-        "QPushButton#minor { padding:4px 12px; }"
-        "QPushButton#primary { background:#0a84ff; color:#fff; border:none; border-radius:6px;"
-        " padding:8px 16px; font-weight:bold; }"
-        "QComboBox { padding:4px 8px; }"
-        "QLabel#sub, QLabel#hint { color:#6b7280; }"
-    )
+    pen_smooth_changed = Signal(str)     # 画笔平滑度档位 off/low/medium/high
 
     def __init__(self, icon: QIcon, hotkey: Hotkey, mode: str, save_dir: Path,
                  pen_smooth: str = "medium") -> None:
         super().__init__()
-        # 程序真正退出时由 App 置 True：closeEvent 直接放行关闭，
-        # 不再走「最小化到托盘」并弹出「程序仍在运行」之类的提示。
         self._allow_close = False
         self._save_dir = Path(save_dir)
         self._actions: dict[str, QAction] = {}
         self._pen_smooth_actions: dict[str, QAction] = {}
         self._pen_smooth = pen_smooth
+        self._mode = mode
+        self._hotkey = hotkey
+        self._pin_hotkey = None
+        self._drag_from: QPoint | None = None
+        self._placed = False
+
         self.setWindowTitle(app_name())
         self.setWindowIcon(icon)
-        self.setMinimumWidth(540)
-        self.resize(620, 470)
-        self.setStyleSheet(self.STYLE)
+        self.setWindowFlags(
+            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("QMainWindow{background:transparent;}QWidget{background:transparent;}")
+
         self._build_menu()
-        self._build_body(save_dir)
+        self._build_bar()
+        self._panel = CommandPanel(self)
+        # 兼容旧属性名：自测与内部逻辑仍按主窗口读这些控件
+        self._sub = self._panel._sub
+        self._tip = self._panel._tip
+        self._lbl_now = self._panel._lbl_now
+        self._lbl_hotkey = self._panel._lbl_hotkey
+        self._lbl_mode = self._panel._lbl_mode
+        self._mode_buttons = self._panel._mode_buttons
+        self._b_change = self._panel._b_change
         self.set_hotkey(hotkey)
         self.set_mode(mode)
         self.set_pen_smooth(pen_smooth)
+        self.set_save_dir(save_dir)
+        self.adjustSize()
         LANG.changed.connect(self.retranslate_ui)
 
+    # ------------------------------------------------------------ 菜单动作
     def _build_menu(self) -> None:
-        mb = self.menuBar()
-        self._menus: dict[str, object] = {}
+        """建立 QAction（命令面板 / 右键菜单共用），QMenu 只作标题载体。"""
+        self._menus: dict[str, QMenu] = {}
 
-        m_file = mb.addMenu(t("文件(&F)"))
+        m_file = QMenu(t("文件(&F)"), self)
         self._menus["file"] = m_file
         a_dir = QAction(t("打开保存目录"), self)
         a_dir.triggered.connect(lambda _checked=False: self.open_dir_requested.emit())
@@ -373,7 +728,7 @@ class MainWindow(QMainWindow):
         m_file.addAction(a_quit)
         self._actions.update(dir=a_dir, minimize=a_min, quit=a_quit)
 
-        m_shot = mb.addMenu(t("截图(&S)"))
+        m_shot = QMenu(t("截图(&S)"), self)
         self._menus["shot"] = m_shot
         for mode in CAPTURE_MODES:
             a = QAction(mode_label(mode), self)
@@ -388,7 +743,7 @@ class MainWindow(QMainWindow):
         m_shot.addAction(a_long)
         self._actions["long_capture"] = a_long
 
-        m_set = mb.addMenu(t("设置(&E)"))
+        m_set = QMenu(t("设置(&E)"), self)
         self._menus["settings"] = m_set
         a_hk = QAction(t("设置热键…"), self)
         a_hk.triggered.connect(lambda _checked=False: self.hotkey_requested.emit())
@@ -401,12 +756,11 @@ class MainWindow(QMainWindow):
         )
         a_lang.triggered.connect(lambda _checked=False: self.language_requested.emit())
         m_set.addAction(a_lang)
-        # 画笔平滑度子菜单：单选，改动即时生效并持久化
         m_smooth = m_set.addMenu(t("画笔平滑度"))
         self._menus["pen_smooth"] = m_smooth
         smooth_group = QActionGroup(self)
         smooth_group.setExclusive(True)
-        for level in ("off", "low", "medium", "high"):
+        for level in PEN_SMOOTH_LEVELS:
             a = QAction(t(PEN_SMOOTH_LABELS[level]), self, checkable=True)
             a.setActionGroup(smooth_group)
             a.triggered.connect(
@@ -416,7 +770,7 @@ class MainWindow(QMainWindow):
             self._pen_smooth_actions[level] = a
         self._actions.update(hotkey=a_hk, pin_hotkey=a_pinhk, language=a_lang)
 
-        m_help = mb.addMenu(t("帮助(&H)"))
+        m_help = QMenu(t("帮助(&H)"), self)
         self._menus["help"] = m_help
         for text_key, topic in (("使用说明…", "help"), ("命令行参数…", "cli")):
             a = QAction(t(text_key), self)
@@ -431,96 +785,141 @@ class MainWindow(QMainWindow):
         m_help.addAction(a_about)
         self._actions["about"] = a_about
 
-    def _build_body(self, save_dir: Path) -> None:
-        central = QWidget()
-        central.setObjectName("central")
-        root = QVBoxLayout(central)
-        root.setContentsMargins(24, 18, 24, 16)
-        root.setSpacing(12)
-
-        self._title = QLabel(app_name())
-        self._title.setStyleSheet("font-size:22px; font-weight:bold; color:#111827;")
-        root.addWidget(self._title)
-        self._sub = QLabel(t("程序已启动 · 托盘常驻 · 关闭本窗口只会最小化到托盘，不会退出程序"))
-        self._sub.setObjectName("sub")
-        self._sub.setWordWrap(True)
-        root.addWidget(self._sub)
-
-        card = QFrame()
-        card.setObjectName("card")
-        grid = QGridLayout(card)
-        grid.setContentsMargins(16, 14, 16, 14)
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(10)
-
-        self.hotkey_label = QLabel("")
-        self._b_change = QPushButton(t("更改…"))
-        self._b_change.setObjectName("minor")
-        self._b_change.clicked.connect(lambda _checked=False: self.hotkey_requested.emit())
-        self.mode_combo = QComboBox()
-        for m in CAPTURE_MODES:
-            self.mode_combo.addItem(mode_label(m), m)
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_combo)
-
-        self._lbl_hotkey = QLabel(t("截图热键"))
-        grid.addWidget(self._lbl_hotkey, 0, 0)
-        grid.addWidget(self.hotkey_label, 0, 1)
-        grid.addWidget(self._b_change, 0, 2)
-        self._lbl_mode = QLabel(t("默认模式"))
-        grid.addWidget(self._lbl_mode, 1, 0)
-        grid.addWidget(self.mode_combo, 1, 1)
-        self._hint = QLabel(t("热键与托盘「截图」使用此模式"))
-        self._hint.setObjectName("hint")
-        grid.addWidget(self._hint, 1, 2)
-        root.addWidget(card)
-
-        self._lbl_now = QLabel(t("立即截图"))
-        root.addWidget(self._lbl_now)
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        self._mode_buttons: dict[str, QPushButton] = {}
-        for mode in CAPTURE_MODES:
-            b = QPushButton(f"{mode_label(mode)}\n{t(MODE_DESC[mode])}")
-            b.setObjectName("mode")
-            b.setMinimumHeight(76)
-            b.clicked.connect(
-                lambda _checked=False, m=mode: self.capture_requested.emit(m)
-            )
-            row.addWidget(b)
-            self._mode_buttons[mode] = b
-        root.addLayout(row)
-
-        # 独立命令：滚动长截图（不属于三种截图模式，走专门的框选→拼接流程）
-        self._b_long = QPushButton(
-            f"{t('滚动长截图…')}    {t('点击窗口后自动滚动拼接成长图')}"
-        )
-        self._b_long.setObjectName("long")
-        self._b_long.setMinimumHeight(42)
-        self._b_long.setToolTip(t("点击窗口后自动滚动拼接成长图"))
-        self._b_long.clicked.connect(
-            lambda _checked=False: self.long_capture_requested.emit()
-        )
-        root.addWidget(self._b_long)
-
-        self._tip = QLabel(
-            t("提示：截图中按 Esc 取消；选区确定后可标注、取字、复制或保存。 详细说明见「帮助 → 使用说明」。")
-        )
-        self._tip.setObjectName("hint")
-        self._tip.setWordWrap(True)
-        root.addWidget(self._tip)
-        root.addStretch(1)
-
+    # ------------------------------------------------------------ 悬浮条
+    def _build_bar(self) -> None:
+        central = QWidget(self)
         self.setCentralWidget(central)
-        self.set_save_dir(save_dir)
+        lay = QVBoxLayout(central)
+        lay.setContentsMargins(18, 14, 18, 20)
+        lay.setSpacing(0)
 
+        self.card = _BarCard(central, self._drag_by)
+        self.card.setFixedHeight(BAR_HEIGHT)
+        apply_shadow(self.card, blur=38, dy=12, alpha=58)
+        lay.addWidget(self.card)
+
+        row = QHBoxLayout(self.card)
+        row.setContentsMargins(12, 9, 12, 9)
+        row.setSpacing(6)
+
+        self._logo = LogoButton(self.card, 36)
+        self._logo.setToolTip(t("截屏助手"))
+        self._logo.clicked.connect(
+            lambda _=False: self.capture_requested.emit(self._mode)
+        )
+        row.addWidget(self._logo, 0, Qt.AlignVCenter)
+        row.addWidget(self._vline())
+
+        self._quick: dict[str, IconButton] = {}
+        for mode in CAPTURE_MODES:
+            b = IconButton(MODE_ICONS[mode], mode_label(mode), self.card,
+                           size=BTN_SIZE, radius=BTN_RADIUS)
+            b.setCheckable(True)
+            b.clicked.connect(lambda _=False, m=mode: self._on_quick_mode(m))
+            row.addWidget(b, 0, Qt.AlignVCenter)
+            self._quick[mode] = b
+        row.addWidget(self._vline())
+
+        self._b_long = IconButton("long", t("滚动长截图…"), self.card,
+                                  size=BTN_SIZE, radius=BTN_RADIUS)
+        # 自绘按钮不画文字，但保留 text 供读屏 / 自测按文案查找
+        self._b_long.setText(t("滚动长截图…"))
+        self._b_long.setObjectName("long")
+        self._b_long.clicked.connect(
+            lambda _=False: self.long_capture_requested.emit()
+        )
+        row.addWidget(self._b_long, 0, Qt.AlignVCenter)
+
+        self._b_pin = IconButton("pin", t("贴出剪贴板图片"), self.card,
+                                 size=BTN_SIZE, radius=BTN_RADIUS)
+        self._b_pin.clicked.connect(
+            lambda _=False: self.pin_clipboard_requested.emit()
+        )
+        row.addWidget(self._b_pin, 0, Qt.AlignVCenter)
+        row.addWidget(self._vline())
+
+        self.hotkey_label = QLabel("", self.card)
+        self.hotkey_label.setTextFormat(Qt.RichText)
+        self.hotkey_label.setStyleSheet(
+            f"color:{INK3};font-size:11px;padding:0 6px;{FONT_QSS}"
+        )
+        row.addWidget(self.hotkey_label, 0, Qt.AlignVCenter)
+
+        self._b_more = IconButton("more", t("命令面板"), self.card,
+                                  size=BTN_SIZE, radius=BTN_RADIUS)
+        self._b_more.setCheckable(True)
+        self._b_more.clicked.connect(lambda _=False: self.toggle_panel())
+        row.addWidget(self._b_more, 0, Qt.AlignVCenter)
+
+    def _vline(self) -> QWidget:
+        w = QWidget(self.card)
+        w.setFixedSize(1, 24)
+        w.setStyleSheet(f"background:{LINE};")
+        holder = QWidget(self.card)
+        hl = QHBoxLayout(holder)
+        hl.setContentsMargins(4, 0, 4, 0)
+        hl.addWidget(w)
+        return holder
+
+    def _on_quick_mode(self, mode: str) -> None:
+        """点某个模式按钮：立刻截图，并把它记住成默认模式。"""
+        self.set_mode(mode)
+        self.mode_changed.emit(mode)
+        self.capture_requested.emit(mode)
+
+    def toggle_panel(self) -> None:
+        import time as _time
+        if self._panel.isVisible():
+            self._panel.hide()
+            self._b_more.setChecked(False)
+            return
+        # 面板是 Qt.Popup：点「⋯」时它先被外部点击关掉，click 再来一次。
+        # 200ms 内视为同一次点击，避免关了又立刻弹出来。
+        if _time.monotonic() - self._panel._last_hide < 0.2:
+            self._b_more.setChecked(False)
+            return
+        self._b_more.setChecked(True)
+        self._panel.set_values(self._hotkey, self._pin_hotkey, self._mode,
+                               language_label(LANG.preference), self._pen_smooth,
+                               self._save_dir)
+        self._panel.show_at(self._b_more)
+
+    def hide_panel(self) -> None:
+        self._panel.hide()
+        self._b_more.setChecked(False)
+
+    # ------------------------------------------------------------ 拖动 / 定位
+    def _drag_by(self, delta: QPoint) -> None:
+        self.move(self.pos() + delta)
+
+    def _place_default(self) -> None:
+        """默认贴在屏幕底部居中（避开任务栏）。"""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        self.adjustSize()
+        w, h = self.width(), self.height()
+        self.move(avail.left() + (avail.width() - w) // 2, avail.bottom() - h - 6)
+
+    def showEvent(self, ev) -> None:  # noqa: N802
+        if not self._placed:
+            self._placed = True
+            self._place_default()
+        super().showEvent(ev)
+
+    # ------------------------------------------------------------ 状态刷新
     def _on_mode_combo(self, idx: int) -> None:
-        mode = self.mode_combo.itemData(idx)
-        if isinstance(mode, str):
-            self.mode_changed.emit(mode)
+        # 兼容旧接口（面板里已不再使用下拉框）
+        if isinstance(idx, str):
+            self.mode_changed.emit(idx)
 
-    # ------------------------------------------------------------ 画笔平滑度
+    def _sync_quick(self) -> None:
+        for mode, btn in self._quick.items():
+            btn.setChecked(mode == self._mode)
+            btn.set_dot(True)
+
     def set_pen_smooth(self, level: str) -> None:
-        """更新平滑度菜单勾选状态（不发出变更信号）。"""
         if level not in PEN_SMOOTH_LEVELS:
             level = "medium"
         self._pen_smooth = level
@@ -529,13 +928,31 @@ class MainWindow(QMainWindow):
             a.setChecked(True)
 
     def _on_pen_smooth(self, level: str) -> None:
-        """用户在菜单里选了档位：更新勾选并发信号给 App 持久化 + 应用。"""
         self._pen_smooth = level
         self.pen_smooth_changed.emit(level)
 
+    def set_hotkey(self, hk: Hotkey) -> None:
+        self._hotkey = hk
+        self.hotkey_label.setText(f"{hk.label()}")
+
+    def set_pin_hotkey(self, hk: Hotkey) -> None:
+        self._pin_hotkey = hk
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in CAPTURE_MODES:
+            mode = "rect"
+        self._mode = mode
+        self._sync_quick()
+
+    def set_save_dir(self, path: Path) -> None:
+        self._save_dir = Path(path)
+
+    def _minimize_to_tray(self) -> None:
+        self.hide()
+        self.minimize_requested.emit()
+
     # ------------------------------------------------------------ 语言刷新
     def retranslate_ui(self, _code: str = "") -> None:
-        """LANG.changed 触发：已在界面上的所有文案立即换语言。"""
         self.setWindowTitle(app_name())
         for key, text_key in (
             ("file", "文件(&F)"), ("shot", "截图(&S)"),
@@ -559,69 +976,36 @@ class MainWindow(QMainWindow):
             self._menus["pen_smooth"].setTitle(t("画笔平滑度"))
             for level, a in self._pen_smooth_actions.items():
                 a.setText(t(PEN_SMOOTH_LABELS[level]))
-
-        self._title.setText(app_name())
-        self._sub.setText(t("程序已启动 · 托盘常驻 · 关闭本窗口只会最小化到托盘，不会退出程序"))
-        self._b_change.setText(t("更改…"))
-        self._lbl_hotkey.setText(t("截图热键"))
-        self._lbl_mode.setText(t("默认模式"))
-        self._hint.setText(t("热键与托盘「截图」使用此模式"))
-        self._lbl_now.setText(t("立即截图"))
-        for mode, btn in self._mode_buttons.items():
-            btn.setText(f"{mode_label(mode)}\n{t(MODE_DESC[mode])}")
-        self._b_long.setText(
-            f"{t('滚动长截图…')}    {t('点击窗口后自动滚动拼接成长图')}"
-        )
-        self._b_long.setToolTip(t("点击窗口后自动滚动拼接成长图"))
-        self._tip.setText(
-            t("提示：截图中按 Esc 取消；选区确定后可标注、取字、复制或保存。 详细说明见「帮助 → 使用说明」。")
-        )
-        idx = self.mode_combo.currentIndex()
-        self.mode_combo.blockSignals(True)
-        for i, mode in enumerate(CAPTURE_MODES):
-            self.mode_combo.setItemText(i, mode_label(mode))
-        self.mode_combo.setCurrentIndex(idx)
-        self.mode_combo.blockSignals(False)
-        self.set_save_dir(self._save_dir)
+        for mode, btn in self._quick.items():
+            btn.setToolTip(mode_label(mode))
+        self._b_long.setText(t("滚动长截图…"))
+        self._b_pin.setText(t("贴出剪贴板图片"))
+        self._logo.setToolTip(app_name())
+        self._b_long.setToolTip(t("滚动长截图…"))
+        self._b_pin.setToolTip(t("贴出剪贴板图片"))
+        self._b_more.setToolTip(t("命令面板"))
         self.set_hotkey(self._hotkey)
+        self._panel.retranslate_ui()
+        self.adjustSize()
 
-    # ------------------------------------------------------------ 对外更新
-    def set_hotkey(self, hk: Hotkey) -> None:
-        self._hotkey = hk
-        self.hotkey_label.setText(f"<b>{hk.label()}</b>")
-
-    def set_pin_hotkey(self, hk: Hotkey) -> None:
-        """v34：记住贴图热键，用于「设置贴图热键…」菜单提示。"""
-        self._pin_hotkey = hk
-
-    def set_mode(self, mode: str) -> None:
-        idx = self.mode_combo.findData(mode)
-        if idx < 0 or idx == self.mode_combo.currentIndex():
-            return
-        self.mode_combo.blockSignals(True)
-        self.mode_combo.setCurrentIndex(idx)
-        self.mode_combo.blockSignals(False)
-
-    def set_save_dir(self, path: Path) -> None:
-        self._save_dir = Path(path)
-        self.statusBar().showMessage(t("保存目录：{path}", path=self._save_dir))
-
-    def _minimize_to_tray(self) -> None:
-        self.hide()
-        self.minimize_requested.emit()
+    # ------------------------------------------------------------ 右键 / 关闭
+    def contextMenuEvent(self, ev) -> None:  # noqa: N802
+        m = QMenu(self)
+        m.addAction(self._actions["help_help"])
+        m.addAction(self._actions["dir"])
+        m.addSeparator()
+        m.addAction(self._actions["minimize"])
+        m.addAction(self._actions["quit"])
+        m.exec(ev.globalPos())
 
     def closeEvent(self, ev) -> None:  # noqa: N802
-        # 程序正在退出：安静关闭窗口，不做任何提示 / 不最小化到托盘。
         if self._allow_close:
             ev.accept()
             return
-        # 关窗口 = 最小化到托盘，程序继续常驻；退出走菜单
         ev.ignore()
         self._minimize_to_tray()
 
 
-# ---------------------------------------------------------------------------
-# 帮助窗口
 # ---------------------------------------------------------------------------
 class HelpWindow(QDialog):
     """非模态说明窗口，截图时由 App 临时隐藏、结束后恢复。"""

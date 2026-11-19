@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>E-08 贴图浮窗</title>
+<link rel="stylesheet" href="_style.css">
+<style>
+  .pinbody{position:relative;height:100%}
+  .pinbody .mini{padding:14px 16px}
+  .pinbody .mini h4{font-size:13px;color:#2b2620;font-weight:700;margin-bottom:8px}
+  .pinbody .mini i{display:block;height:8px;border-radius:4px;background:#f0ece6;margin-bottom:9px}
+  .pinbody .mini i.w80{width:80%}.pinbody .mini i.w64{width:64%}
+  .zoomtag{position:absolute;right:8px;bottom:8px;font-size:10px;color:#fff;background:rgba(28,28,30,.68);
+    border-radius:6px;padding:3px 7px}
+</style></head>
+<body>
+<div class="desk">
+  <div class="taskbar"><i></i><i></i><i class="on"></i><i></i></div>
+
+  <!-- 贴图 A：不透明，悬停显示关闭按钮 -->
+  <div class="pin" style="left:150px;top:110px;width:540px;height:340px">
+    <div class="pinbody">
+      <div class="mini">
+        <h4>2026 年第三季度项目复盘</h4>
+        <i class="w80"></i><i class="w64"></i><i></i><i class="w80"></i><i class="w64"></i>
+      </div>
+      <div style="position:absolute;left:16px;top:150px;right:16px;border:1px solid #f0ebe4;border-radius:8px;overflow:hidden">
+        <div style="display:flex;background:#faf8f4;border-bottom:1px solid #f4f0ea">
+          <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#6b6257;font-weight:700">模块</div>
+          <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#6b6257;font-weight:700">完成度</div>
+        </div>
+        <div style="display:flex;border-bottom:1px solid #f4f0ea">
+          <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">截图内核</div>
+          <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">100%</div>
+        </div>
+        <div style="display:flex">
+          <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">标注编辑器</div>
+          <div style="flex:1;padding:8px 10px;font-size:10.5px;color:#8b8175">92%</div>
+        </div>
+      </div>
+      <div class="pclose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+      <div class="zoomtag">100%</div>
+    </div>
+  </div>
+
+  <!-- 贴图 B：半透明 50% -->
+  <div class="pin" style="left:742px;top:470px;width:420px;height:250px;opacity:.55">
+    <div class="pinbody">
+      <div class="mini">
+        <h4>志愿填报时间轴</h4>
+        <i class="w80"></i><i class="w64"></i><i></i>
+      </div>
+      <div style="position:absolute;left:16px;right:16px;top:112px;height:96px;border-radius:8px;background:#faf7f2;border:1px solid #f0ebe3"></div>
+      <div class="zoomtag">75%</div>
+    </div>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div class="menu" style="left:470px;top:150px;width:214px">
+    <div class="mi"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>复制图片<span class="k">Ctrl+C</span></div>
+    <div class="mi"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>另存为…</div>
+    <div class="msep"></div>
+    <div class="mi on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>透明度<span class="k">▸</span></div>
+    <div class="mi"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg>保持置顶<span class="k">✓</span></div>
+    <div class="mi"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>重置大小<span class="k">100%</span></div>
+    <div class="msep"></div>
+    <div class="mi"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>关闭<span class="k">Esc</span></div>
+  </div>
+
+  <!-- 透明度子菜单 -->
+  <div class="menu" style="left:690px;top:240px;width:132px">
+    <div class="mi"><span style="width:14px;color:#f97316;font-size:11px">✓</span>100%</div>
+    <div class="mi"><span style="width:14px"></span>75%</div>
+    <div class="mi"><span style="width:14px"></span>50%</div>
+    <div class="mi"><span style="width:14px"></span>25%</div>
+  </div>
+</div>
+</body></html>

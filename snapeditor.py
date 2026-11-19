@@ -43,13 +43,25 @@ from PySide6.QtWidgets import (
 )
 
 from i18n import LANG, t
+from ui_theme import (
+    CREAM,
+    FONT_QSS,
+    INK,
+    INK2,
+    INK3,
+    LINE,
+    ORANGE,
+    SOFT,
+    IconButton,
+)
 
 # ---------------------------------------------------------------------------
 # 外观常量
 # ---------------------------------------------------------------------------
-DIM_ALPHA = 118              # 选区外遮罩不透明度
-BORDER_COLOR = QColor(0, 174, 255)
-HANDLE_SIZE = 8
+DIM_ALPHA = 132              # 选区外遮罩不透明度（近似 rgba(22,24,28,.52)）
+BORDER_COLOR = QColor("#f97316")      # 选区描边：暖橙
+BORDER_SOFT = QColor("#ffb27a")       # 选区外圈浅橙（设计稿 .sel 1.5px）
+HANDLE_SIZE = 9
 HANDLE_HIT = 8
 MIN_SELECT = 6               # 小于这个尺寸视为误触
 ARROW_HANDLE_R = 6           # 箭头两端控制柄的绘制半径
@@ -379,8 +391,11 @@ TRANSFORM_ACTIONS = ("顺旋", "逆旋", "左右", "上下")
 _ICON_SIZE = 26
 
 
+_ICON_INK = QColor(245, 247, 250)
+
+
 def _icon_pen(lw: int = 2) -> QPen:
-    pen = QPen(QColor(245, 247, 250))
+    pen = QPen(QColor(_ICON_INK))
     pen.setWidth(lw)
     pen.setJoinStyle(Qt.RoundJoin)
     pen.setCapStyle(Qt.RoundCap)
@@ -479,7 +494,18 @@ def _draw_icon(name: str, p: QPainter) -> None:
     p.setPen(_icon_pen(2))
     S = _ICON_SIZE
     # ---- 绘图工具 ----
-    if name == "rect":
+    if name == "select":
+        # 鼠标指针：选中/移动态
+        path = QPainterPath(QPointF(6, 2.5))
+        path.lineTo(6, 19)
+        path.lineTo(10.4, 14.8)
+        path.lineTo(13.4, 21.2)
+        path.lineTo(16.2, 19.9)
+        path.lineTo(13.2, 13.6)
+        path.lineTo(18.8, 13.6)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == "rect":
         p.drawRect(4, 4, S - 8, S - 8)
     elif name == "ellipse":
         p.drawEllipse(QRectF(4, 4, S - 8, S - 8))
@@ -506,7 +532,8 @@ def _draw_icon(name: str, p: QPainter) -> None:
         p.drawLine(4, 4 + 2 * g, S - 4, 4 + 2 * g)
         p.setPen(Qt.NoPen)
         # 方块用略淡的白：与纯白网格线拉开层次，22px 下才不会糊成一整片
-        p.setBrush(QBrush(QColor(245, 247, 250, 170)))
+        p.setBrush(QBrush(QColor(_ICON_INK.red(), _ICON_INK.green(),
+                                 _ICON_INK.blue(), 170)))
         pad = 1.0
         for r, c in ((0, 0), (0, 1), (1, 2), (2, 0), (2, 2)):
             p.drawRect(QRectF(4 + c * g + pad, 4 + r * g + pad,
@@ -527,7 +554,7 @@ def _draw_icon(name: str, p: QPainter) -> None:
     elif name == "样式":
         p.drawEllipse(QRectF(5, 7, 15, 15))
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(245, 247, 250)))
+        p.setBrush(QBrush(QColor(_ICON_INK)))
         for dx, dy in ((9, 11), (15, 11), (12, 16.5)):
             p.drawEllipse(QRectF(dx - 1.6, dy - 1.6, 3.2, 3.2))
     elif name in ("顺旋", "逆旋"):
@@ -537,7 +564,8 @@ def _draw_icon(name: str, p: QPainter) -> None:
         _arc_arrow(p, S / 2, S / 2, 8,
                    40 if cw else 140, 290 if cw else -290)
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(245, 247, 250, 170)))
+        p.setBrush(QBrush(QColor(_ICON_INK.red(), _ICON_INK.green(),
+                                 _ICON_INK.blue(), 170)))
         p.drawRect(QRectF(9, 9, 8, 8))
     elif name in ("左右", "上下"):
         # 镜像 = 沿轴翻过去：虚线轴 + 两侧一大一小同形三角（纯白原件 /
@@ -585,21 +613,41 @@ def _draw_icon(name: str, p: QPainter) -> None:
         p.drawLine(19, 7, 7, 19)
 
 
-_ICONS: dict[str, QIcon] = {}
+_ICONS: dict[tuple[str, str, str], QIcon] = {}
 
 
-def toolbar_icon(name: str) -> QIcon:
-    """返回缓存的工具栏矢量图标（白色线条，适配深色按钮背景）。"""
-    if name in _ICONS:
-        return _ICONS[name]
+def _icon_pixmap(name: str, color: str) -> QPixmap:
+    global _ICON_INK
+    old = _ICON_INK
+    _ICON_INK = QColor(color)
     pm = QPixmap(_ICON_SIZE, _ICON_SIZE)
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing, True)
     _draw_icon(name, p)
     p.end()
-    icon = QIcon(pm)
-    _ICONS[name] = icon
+    _ICON_INK = old
+    return pm
+
+
+def toolbar_icon(name: str, color: str | None = None,
+                 active: str | None = None) -> QIcon:
+    """返回工具栏矢量图标。
+
+    color  —— 常规状态线条色（默认深灰，适配奶油白底的工具条）
+    active —— 选中状态线条色（QPushButton checked 时 Qt 取 State.On 图标）
+    """
+    ink = color or "#6b6660"
+    on = active or "#ffffff"
+    key = (name, ink, on)
+    if key in _ICONS:
+        return _ICONS[key]
+    icon = QIcon()
+    icon.addPixmap(_icon_pixmap(name, ink), QIcon.Normal, QIcon.Off)
+    icon.addPixmap(_icon_pixmap(name, on), QIcon.Normal, QIcon.On)
+    icon.addPixmap(_icon_pixmap(name, on), QIcon.Active, QIcon.On)
+    icon.addPixmap(_icon_pixmap(name, "#c9c1b6"), QIcon.Disabled, QIcon.Off)
+    _ICONS[key] = icon
     return icon
 
 
@@ -1223,10 +1271,10 @@ class StylePanel(QWidget):
         self._color_btns: list[QPushButton] = []
         for c in PRESET_COLORS:
             b = QPushButton()
-            b.setFixedSize(22, 22)
+            b.setFixedSize(21, 21)
             b.setProperty("color", c)
             b.setStyleSheet(
-                f"background:{c}; border:1px solid #555; border-radius:4px;"
+                f"background:{c}; border:2px solid #ffffff; border-radius:7px;"
             )
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
@@ -1235,7 +1283,7 @@ class StylePanel(QWidget):
             self._color_btns.append(b)
         # 透明线条：#AARRGGBB 中 alpha=0，画出来即无边框 / 无线条
         self._transparent_btn = QPushButton("\u2205")
-        self._transparent_btn.setFixedSize(22, 22)
+        self._transparent_btn.setFixedSize(21, 21)
         self._transparent_btn.setProperty("color", "#00000000")
         self._transparent_btn.setToolTip(t("透明（无边框）"))
         self._transparent_btn.setCursor(Qt.PointingHandCursor)
@@ -1336,6 +1384,7 @@ class StylePanel(QWidget):
         self._angle_slider.valueChanged.connect(self._on_angle_changed)
         angle_row.addWidget(self._angle_slider)
         self._angle_value = QLabel("0°")
+        self._angle_value.setObjectName("angleValue")
         self._angle_value.setFixedWidth(38)
         angle_row.addWidget(self._angle_value)
         root.addWidget(self._angle_box)
@@ -1472,25 +1521,49 @@ class StylePanel(QWidget):
         for b in self._fill_btns + self._bg_btns:
             b.setVisible(False)
 
+        self.setObjectName("stylePanel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
         self.setStyleSheet(
             """
-            QWidget { background:#2b2b2b; border-radius:8px; }
-            QLabel { color:#e8e8e8; font-size:12px; }
-            QPushButton { color:#e8e8e8; background:#3c3c3c;
-                border:1px solid #4a4a4a; border-radius:5px; padding:4px 8px; font-size:12px; }
-            QPushButton:hover { background:#4a4a4a; }
-            QCheckBox { color:#e8e8e8; font-size:12px; }
-            QComboBox { color:#e8e8e8; background:#3c3c3c; border:1px solid #4a4a4a;
-                border-radius:5px; padding:3px 6px; font-size:12px; }
-            QComboBox QAbstractItemView { background:#3c3c3c; color:#e8e8e8;
-                selection-background-color:#0a84ff; }
-            QSlider::groove:horizontal { height:4px; background:#4a4a4a; border-radius:2px; }
-            QSlider::handle:horizontal { width:14px; margin:-5px 0;
-                background:#0a84ff; border-radius:7px; }
-            QSlider::sub-page:horizontal { background:#0a84ff; border-radius:2px; }
+            QLabel { color:#a39a90; font-size:10.5px; font-weight:700;
+                letter-spacing:0.5px; background:transparent; padding-top:4px; }
+            QLabel#angleValue, QLabel#valueLabel { color:#1c1c1e; font-size:11.5px;
+                font-weight:600; letter-spacing:0; }
+            QPushButton { color:#6b6660; background:#ffffff; border:1px solid #e9e4dc;
+                border-radius:9px; padding:5px 10px; font-size:11.5px; }
+            QPushButton:hover { background:#fbf8f3; border-color:#e0d8cc; }
+            QCheckBox { color:#6b6660; font-size:11.5px; spacing:7px; }
+            QCheckBox::indicator { width:15px; height:15px; border-radius:5px;
+                border:1px solid #d8d0c4; background:#ffffff; }
+            QCheckBox::indicator:checked { background:#f97316; border-color:#f97316; }
+            QComboBox { color:#1c1c1e; background:#ffffff; border:1px solid #e9e4dc;
+                border-radius:9px; padding:4px 8px; font-size:11.5px; }
+            QComboBox::drop-down { border:none; width:16px; }
+            QComboBox QAbstractItemView { background:#ffffff; color:#1c1c1e;
+                border:1px solid #e9e4dc; selection-background-color:#ffefe2;
+                selection-color:#1c1c1e; outline:none; }
+            QSlider::groove:horizontal { height:4px; background:#e8e2d9; border-radius:2px; }
+            QSlider::handle:horizontal { width:12px; height:12px; margin:-5px 0;
+                background:#ffffff; border:1px solid #e0d8cc; border-radius:6px; }
+            QSlider::sub-page:horizontal { background:#f97316; border-radius:2px; }
+            QSlider::sub-page:horizontal:disabled { background:#e8e2d9; }
+            QSlider::handle:horizontal:disabled { border-color:#e8e2d9; }
             """
         )
+        from ui_theme import apply_shadow as _apply_shadow
+
+        _apply_shadow(self, blur=42, dy=14, alpha=44)
         LANG.changed.connect(self.retranslate_ui)
+
+    def paintEvent(self, ev) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(QColor(LINE), 1))
+        p.setBrush(QColor("#fbfaf7"))
+        p.drawRoundedRect(r, 18, 18)
+        p.end()
 
     def retranslate_ui(self, _code: str = "") -> None:
         self._line_label.setText(t(self._line_key))
@@ -1552,7 +1625,7 @@ class StylePanel(QWidget):
             b.setProperty("color", c)
             # 半透明展示（alpha 0x80），点击时用同样带透明度的颜色
             b.setStyleSheet(
-                f"background:{c}; border:1px solid #555; border-radius:4px;"
+                f"background:{c}; border:2px solid #ffffff; border-radius:7px;"
             )
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
@@ -1779,14 +1852,16 @@ class StylePanel(QWidget):
             c = b.property("color").lower()
             if c == bcur and not btrans:
                 b.setStyleSheet(
-                    f"background:{c}; border:2px solid #ffffff; border-radius:4px;"
+                    f"background:{c}; border:2px solid #ffffff; border-radius:7px;"
+                    f" outline:2px solid #f97316;"
                 )
             else:
                 b.setStyleSheet(
-                    f"background:{c}; border:1px solid #555; border-radius:4px;"
+                    f"background:{c}; border:2px solid #ffffff; border-radius:7px;"
                 )
         self._bg_border_transparent_btn.setStyleSheet(
-            "color:#e8e8e8; background:#3c3c3c; border:2px solid #ffffff;"
+            "color:#6b6660; background:#ffffff; border:2px solid #f97316;"
+            " border-radius:7px;"
             "border-radius:4px; padding:0;" if btrans else
             "color:#e8e8e8; background:#3c3c3c; border:1px dashed #888;"
             "border-radius:4px; padding:0;"
@@ -1799,16 +1874,18 @@ class StylePanel(QWidget):
             c = b.property("color").lower()
             if c == cur_hex and not is_transparent:
                 b.setStyleSheet(
-                    f"background:{c}; border:2px solid #ffffff; border-radius:4px;"
+                    f"background:{c}; border:2px solid #ffffff; border-radius:7px;"
+                    f" outline:2px solid #f97316;"
                 )
             else:
                 b.setStyleSheet(
-                    f"background:{c}; border:1px solid #555; border-radius:4px;"
+                    f"background:{c}; border:2px solid #ffffff; border-radius:7px;"
                 )
         # 文字不该被设成透明（否则内容看不见），所以文字标注时隐藏该色块
         self._transparent_btn.setVisible(not is_text)
         self._transparent_btn.setStyleSheet(
-            "color:#e8e8e8; background:#3c3c3c; border:2px solid #ffffff;"
+            "color:#6b6660; background:#ffffff; border:2px solid #f97316;"
+            " border-radius:7px;"
             "border-radius:4px; padding:0;" if is_transparent else
             "color:#e8e8e8; background:#3c3c3c; border:1px dashed #888;"
             "border-radius:4px; padding:0;"
@@ -1832,15 +1909,16 @@ class OcrPanel(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.ArrowCursor)
         self.setStyleSheet(
-            "QWidget#OcrPanelRoot { background:#202124; border:1px solid #4a4a4a; "
-            "border-radius:8px; }"
-            "QLabel { color:#e8eaed; font-size:12px; }"
-            "QPlainTextEdit { background:#2b2d31; color:#f1f3f4; border:1px solid #555; "
-            "border-radius:4px; selection-background-color:#0a84ff; padding:6px; }"
-            "QPushButton { background:#3a3d42; color:#f1f3f4; border:1px solid #5a5d62; "
-            "border-radius:4px; padding:5px 12px; }"
-            "QPushButton:hover { background:#4a4d52; }"
-            "QPushButton:disabled { color:#888; background:#2b2d31; }"
+            "QWidget#OcrPanelRoot { background:#fbfaf7; border:1px solid #e9e4dc; "
+            "border-radius:18px; }"
+            "QLabel { color:#6b6660; font-size:12px; background:transparent; }"
+            "QPlainTextEdit { background:#ffffff; color:#1c1c1e;"
+            " border:1px solid #e9e4dc; border-radius:10px;"
+            " selection-background-color:#f97316; selection-color:#ffffff; padding:8px; }"
+            "QPushButton { background:#ffffff; color:#6b6660; border:1px solid #e9e4dc;"
+            " border-radius:9px; padding:6px 14px; font-size:11.5px; }"
+            "QPushButton:hover { background:#fbf8f3; }"
+            "QPushButton:disabled { color:#c2b9ad; background:#f7f4ef; }"
         )
 
         root = QVBoxLayout(self)
@@ -2011,12 +2089,14 @@ class OcrBar(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.ArrowCursor)
         self.setStyleSheet(
-            "QWidget#OcrBar { background:#202124; border:1px solid #4a4a4a; "
-            "border-radius:8px; }"
-            "QLabel { color:#e8eaed; font-size:12px; }"
-            "QPushButton { background:#3a3d42; color:#f1f3f4; border:1px solid #5a5d62; "
-            "border-radius:4px; padding:4px 10px; }"
-            "QPushButton:hover { background:#4a4d52; }"
+            "QWidget#OcrBar { background:rgba(28,28,30,0.94);"
+            " border:1px solid rgba(255,255,255,0.08); border-radius:14px; }"
+            "QLabel { color:#f2ede6; font-size:12px; background:transparent; }"
+            "QPushButton { background:rgba(255,255,255,0.13); color:#ffffff;"
+            " border:none; border-radius:9px; padding:5px 12px; font-size:11.5px; }"
+            "QPushButton:hover { background:rgba(255,255,255,0.22); }"
+            "QPushButton#ocrPrimary { background:#f97316; font-weight:700; }"
+            "QPushButton#ocrPrimary:hover { background:#fb8a35; }"
         )
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 6, 10, 6)
@@ -2032,6 +2112,8 @@ class OcrBar(QWidget):
             ("返回", self.closed),
         ):
             b = QPushButton(t(text_key))
+            if text_key == "复制全部":
+                b.setObjectName("ocrPrimary")
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(sig.emit)
@@ -2055,7 +2137,7 @@ class OcrBar(QWidget):
 
     def retranslate_ui(self, _code: str = "") -> None:
         for b, key in self._btn_keys:
-            b.setText(t(key))
+            b.setText(t(key) + ("   Esc" if key == "返回" else ""))
         self._render_status()
 
 
@@ -2438,7 +2520,13 @@ class OcrLayer(QWidget):
 
 # ---------------------------------------------------------------------------
 class Toolbar(QWidget):
-    """贴着选区显示的浮动工具条（作为 Overlay 的子控件，随遮罩一起消失）。"""
+    """浮动工具条（Overlay 与窗口编辑器共用，样式为方案 E 的奶油白 Dock）。
+
+    三个阶段（phase）决定显示哪些按钮：
+      full    —— 截屏遮罩里的完整编辑态：全部工具 + 撤销 + 整图变换 + 动作
+      confirm —— 选区刚确定：「取字 / 复制 / 钉在桌面 / ✕ / 确定」
+      dock    —— 窗口编辑器底部 Dock：7 种工具 + 撤销 + 钉在桌面 + 复制
+    """
 
     tool_changed = Signal(str)
     undo_clicked = Signal()
@@ -2456,14 +2544,15 @@ class Toolbar(QWidget):
     flip_h_clicked = Signal()
     flip_v_clicked = Signal()
 
+    # 各阶段的主按钮顺序（"t:<工具>" / "a:<动作>" / "s:<分隔线序号>"）
     def __init__(self, parent: QWidget | None = None, exclude: Iterable[str] = ()) -> None:
         super().__init__(parent)
         # 纯 QWidget 需要这个属性，样式表里的 background 才会被绘制
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
+        self.setObjectName("dock")
         self.current = "select"
-
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QLabel
+        self._phase = "full"
 
         excluded = set(exclude or ())
         self._excluded = excluded
@@ -2471,79 +2560,193 @@ class Toolbar(QWidget):
         self._actions: dict[str, QPushButton] = {}
         self._tip_keys: dict[str, str] = {}
         self._separators: list[QLabel] = []
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 6, 8, 6)
-        lay.setSpacing(4)
+        self._order: list[tuple[str, str]] = []
+        self._lay = QHBoxLayout(self)
+        self._lay.setContentsMargins(9, 7, 9, 7)
+        self._lay.setSpacing(3)
 
-        for key, label in TOOLS:
+        for key, label in [("select", "选择")] + list(TOOLS):
             b = QPushButton()
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(t(label))
             b.setFocusPolicy(Qt.NoFocus)
             b.setIcon(toolbar_icon(key))
-            b.setIconSize(QSize(22, 22))
-            b.setFixedSize(34, 30)
+            b.setIconSize(QSize(19, 19))
+            b.setFixedSize(38, 38)
             b.clicked.connect(lambda _=False, k=key: self._on_tool(k))
-            lay.addWidget(b)
+            self._lay.addWidget(b)
             self._buttons[key] = b
             self._tip_keys["tool:" + key] = label
+            self._order.append(("t", key))
+        self._buttons["select"].setChecked(True)
 
-        def add_action(key: str, tip: str, sig: Signal) -> None:
+        def add_sep() -> None:
+            sep = QLabel("")
+            sep.setFixedSize(1, 24)
+            sep.setStyleSheet("QLabel { background:#e9e4dc; }")
+            holder = QWidget(self)
+            hl = QHBoxLayout(holder)
+            hl.setContentsMargins(4, 0, 4, 0)
+            hl.addWidget(sep)
+            self._lay.addWidget(holder)
+            self._separators.append(sep)
+            self._order.append(("s", str(len(self._separators) - 1)))
+            sep._holder = holder        # 隐藏整条分隔线（含留白）
+
+        def add_action(key: str, tip: str, sig: Signal, kind: str = "") -> None:
             b = QPushButton()
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(t(tip))
             b.setFocusPolicy(Qt.NoFocus)
-            b.setIcon(toolbar_icon(key))
-            b.setIconSize(QSize(22, 22))
-            b.setFixedSize(34, 30)
+            b.setIcon(toolbar_icon(key, "#ffffff" if kind == "primary" else None))
+            b.setIconSize(QSize(18, 18))
+            if kind == "primary":
+                b.setFixedHeight(38)
+                b.setMinimumWidth(38)
+            else:
+                b.setFixedSize(38, 38)
+            if kind:
+                b.setProperty("kind", kind)
             b.clicked.connect(sig.emit)
-            lay.addWidget(b)
-            if key in excluded:
-                b.hide()
+            self._lay.addWidget(b)
             self._actions[key] = b
             self._tip_keys["action:" + key] = tip
+            self._order.append(("a", key))
 
+        add_sep()
         add_action("撤销", "撤销上一步标注 (Ctrl+Z)", self.undo_clicked)
-        # 工具栏不再放「样式」按钮：选中标注时样式面板会自动弹出，
-        # 窗口编辑器菜单里也有「样式面板」入口，不必多占一个图标位。
 
-        # 整图变换分组（仅窗口化编辑器显示；截屏遮罩里隐藏）
-        sep = QLabel("│")
-        sep.setStyleSheet("QLabel { color:#666; font-size:14px; padding:0 2px; }")
-        lay.addWidget(sep)
-        self._separators.append(sep)
+        # 整图变换分组（仅窗口化编辑器使用；遮罩里隐藏）
+        add_sep()
         add_action("顺旋", "顺时针旋转 90° (Ctrl+R)", self.rot_cw_clicked)
         add_action("逆旋", "逆时针旋转 90° (Ctrl+Shift+R)", self.rot_ccw_clicked)
         add_action("左右", "左右镜像 / 水平翻转 (Ctrl+H)", self.flip_h_clicked)
         add_action("上下", "上下镜像 / 垂直翻转 (Ctrl+Shift+H)", self.flip_v_clicked)
 
+        add_sep()
         add_action("长截图", "滚动长截图", self.long_clicked)
         add_action("取字", "识别选区文字 (OCR)", self.ocr_clicked)
         add_action("保存", "另存为文件 (Ctrl+S)", self.save_clicked)
-        add_action("复制", "复制到剪贴板 (Enter)", self.copy_clicked)
-        add_action("钉在桌面", "钉在桌面：把当前截图贴成可移动的浮窗", self.pin_clicked)
-        add_action("确定", "确认选区，进入程序窗口继续编辑 (Enter)", self.confirm_clicked)
-        add_action("✕", "取消 (Esc)", self.close_clicked)
 
-        self.setStyleSheet(
-            """
-            QWidget { background: #2b2b2b; border-radius: 8px; }
-            QPushButton {
-                color: #e8e8e8; background: #3c3c3c; border: 1px solid #4a4a4a;
-                border-radius: 6px; padding: 2px; font-size: 13px;
-            }
-            QPushButton:hover { background: #4a4a4a; }
-            QPushButton:checked { background: #0a84ff; border-color: #0a84ff; color: white; }
-            """
-        )
+        add_sep()
+        add_action("钉在桌面", "钉在桌面：把当前截图贴成可移动的浮窗", self.pin_clicked)
+        add_action("复制", "复制到剪贴板 (Enter)", self.copy_clicked, "primary")
+
+        add_sep()
+        add_action("✕", "取消 (Esc)", self.close_clicked)
+        add_action("确定", "确认选区，进入程序窗口继续编辑 (Enter)",
+                   self.confirm_clicked, "primary")
+
+        self.setStyleSheet(self._qss())
+        self._apply_phase("full")
         LANG.changed.connect(self.retranslate_ui)
 
-    def set_confirm_tip(self, text_key: str) -> None:
-        """切换「确定」按钮的提示文案（长截图流程与常规编辑流程不同）。
+    # ---------------------------------------------------------------- 外观
+    @staticmethod
+    def _qss() -> str:
+        return (
+            "QWidget#dock { background:rgba(251,250,247,0.98);"
+            " border:1px solid rgba(255,255,255,0.95); border-radius:20px; }"
+            "QPushButton { background:transparent; border:none; border-radius:13px; }"
+            "QPushButton:hover { background:#f5f0e8; }"
+            "QPushButton:checked { background:#f97316; }"
+            'QPushButton[kind="primary"] { background:#1c1c1e; color:#ffffff;'
+            " padding:0 15px; font-size:13px; font-weight:600; border-radius:13px; }"
+            'QPushButton[kind="primary"]:hover { background:#34302c; }'
+        )
 
-        同时更新 _tip_keys，保证切换界面语言后 retranslate_ui 用对文案。
-        """
+    # ---------------------------------------------------------------- 阶段
+    def set_phase(self, phase: str) -> None:
+        """切换按钮组合与顺序（full / confirm / dock）。"""
+        if phase == self._phase:
+            self._apply_phase(phase)
+            return
+        self._phase = phase
+        self._apply_phase(phase)
+
+    def _apply_phase(self, phase: str) -> None:
+        tools = [("t", "select")] + [("t", k) for k, _ in TOOLS]
+        if phase == "confirm":
+            order = [("a", "复制"), ("a", "取字"), ("a", "钉在桌面"),
+                     ("s", "4"), ("a", "✕"), ("a", "确定")]
+        elif phase == "dock":
+            order = tools + [("s", "0"), ("a", "撤销"), ("s", "3"),
+                             ("a", "钉在桌面"), ("a", "复制")]
+        else:
+            order = list(self._order)
+            order = [tok for tok in order if tok[1] not in self._excluded]
+
+        # 先全部收起，再按顺序重新摆一遍
+        for b in self._buttons.values():
+            b.hide()
+        for b in self._actions.values():
+            b.hide()
+        for sep in self._separators:
+            sep._holder.hide()
+
+        self._visible = []
+        for kind, name in order:
+            if kind == "t":
+                b = self._buttons.get(name)
+                if b is not None and phase != "confirm":
+                    b.show()
+                    self._visible.append(b)
+            elif kind == "a":
+                b = self._actions.get(name)
+                if b is not None and name not in self._excluded:
+                    b.show()
+                    self._visible.append(b)
+            else:
+                idx = int(name)
+                if idx < len(self._separators):
+                    holder = self._separators[idx]._holder
+                    holder.show()
+                    self._visible.append(holder)
+
+        # 复制按钮：确认态只留图标，编辑器 Dock 里是带文字的深色主按钮
+        copy_b = self._actions.get("复制")
+        if copy_b is not None:
+            if phase == "dock":
+                copy_b.setText(t("复制"))
+                copy_b.setIcon(toolbar_icon("复制", "#ffffff"))
+                copy_b.setProperty("kind", "primary")
+                copy_b.setMinimumWidth(38)
+                copy_b.setMaximumWidth(16777215)
+                copy_b.setFixedHeight(38)
+                copy_b.adjustSize()
+                copy_b.style().unpolish(copy_b)
+                copy_b.style().polish(copy_b)
+            else:
+                copy_b.setText("")
+                copy_b.setIcon(toolbar_icon("复制"))
+                copy_b.setProperty("kind", "")
+                copy_b.setFixedSize(38, 38)
+                copy_b.style().unpolish(copy_b)
+                copy_b.style().polish(copy_b)
+        conf_b = self._actions.get("确定")
+        if conf_b is not None and phase == "confirm":
+            conf_b.setText(t("确定"))
+            conf_b.setStyleSheet(self._qss())
+            conf_b.adjustSize()
+        self._relayout(self._visible)
+        self.adjustSize()
+
+    def _relayout(self, widgets: list[QWidget]) -> None:
+        while self._lay.count():
+            item = self._lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(self)
+        for w in widgets:
+            self._lay.addWidget(w)
+
+    def set_confirm_mode(self, on: bool) -> None:
+        """选择阶段（确认前）：只留「取字 / 复制 / 钉在桌面 / ✕ / 确定」。"""
+        self.set_phase("confirm" if on else self._phase)
+
+    def set_confirm_tip(self, text_key: str) -> None:
+        """切换「确定」按钮的提示文案（长截图流程与常规编辑流程不同）。"""
         self._tip_keys["action:确定"] = text_key
         btn = self._actions.get("确定")
         if btn is not None:
@@ -2556,11 +2759,16 @@ class Toolbar(QWidget):
             btn = self._buttons.get(name) if kind == "tool" else self._actions.get(name)
             if btn is not None:
                 btn.setToolTip(t(text_key))
+        if self._phase == "dock":
+            copy_b = self._actions.get("复制")
+            if copy_b is not None:
+                copy_b.setText(t("复制"))
+        conf_b = self._actions.get("确定")
+        if conf_b is not None and self._phase == "confirm":
+            conf_b.setText(t("确定"))
 
     def _on_tool(self, key: str) -> None:
-        # 粘滞工具（v31）：再次点击当前已激活的绘制工具 = 取消该命令，回到
-        # 「选择」态；点击其它工具则是切换命令。这样画完一个箭头后工具保持
-        # 亮起、可连续画，直到再点一次箭头按钮 / 点别的命令 / 右键才结束。
+        # 粘滞工具：再次点击当前已激活的绘制工具 = 取消该命令，回到「选择」态。
         if key == self.current:
             key = "select"
         for k, b in self._buttons.items():
@@ -2568,23 +2776,66 @@ class Toolbar(QWidget):
         self.current = key
         self.tool_changed.emit(key)
 
-    def set_confirm_mode(self, on: bool) -> None:
-        """选择阶段（确认前）：保留「复制 / 确定 / 取消」，隐藏全部标注工具与
-        其它动作（撤销 / 长截图 / 取字 / 保存）。on=False 时恢复
-        （被排除的项保持隐藏）。
 
-        v26：「复制」按钮排在「确定 / ✕」最左侧，点击只复制原图并关闭遮罩，
-        不会打开程序窗口编辑器。
-        """
-        for b in self._buttons.values():
-            b.setVisible(not on)
-        for s in self._separators:
-            s.setVisible(not on)
-        for key, b in self._actions.items():
-            if key in ("复制", "钉在桌面", "确定", "✕"):
-                b.setVisible(on)
-            else:
-                b.setVisible((not on) and key not in self._excluded)
+class ModeStrip(QWidget):
+    """遮罩顶部的模式切换条（设计稿第 3 屏 .modestrip）。
+
+    三个模式图标 + 一句操作提示；点图标就地切换截图模式，不必退出重来。
+    """
+
+    mode_selected = Signal(str)
+
+    HINTS = {
+        "rect": "框选模式 · 拖动选区或控制点微调 · Esc 取消",
+        "window": "窗口模式 · 单击目标窗口确认 · Esc 取消",
+        "fullscreen": "全屏模式 · 已选中整块桌面 · 点确定继续",
+    }
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setObjectName("modestrip")
+        self.setFocusPolicy(Qt.NoFocus)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 5, 12, 5)
+        lay.setSpacing(2)
+        self._btns: dict[str, IconButton] = {}
+        for mode, icon_name in (("rect", "region"), ("window", "window"),
+                                ("fullscreen", "fullscreen")):
+            b = IconButton(icon_name, "", self, size=30, radius=9, icon_size=15,
+                           stroke=1.8, active_bg=SOFT, active_color=ORANGE)
+            b.setCheckable(True)
+            b.set_dot(False)
+            b.clicked.connect(lambda _=False, m=mode: self._pick(m))
+            lay.addWidget(b, 0, Qt.AlignVCenter)
+            self._btns[mode] = b
+        self._hint = QLabel("", self)
+        self._hint.setStyleSheet(
+            f"color:{INK2};font-size:11px;background:transparent;padding-left:6px;"
+            f"{FONT_QSS}"
+        )
+        lay.addWidget(self._hint, 0, Qt.AlignVCenter)
+        self.setStyleSheet(
+            "QWidget#modestrip { background:rgba(251,250,247,0.95);"
+            " border:1px solid rgba(255,255,255,0.9); border-radius:14px; }"
+        )
+        self.set_mode("rect")
+        LANG.changed.connect(self.retranslate_ui)
+
+    def _pick(self, mode: str) -> None:
+        self.set_mode(mode)
+        self.mode_selected.emit(mode)
+
+    def set_mode(self, mode: str) -> None:
+        mode = mode if mode in self._btns else "rect"
+        for m, b in self._btns.items():
+            b.setChecked(m == mode)
+        self._hint.setText(t(self.HINTS[mode]))
+        self.adjustSize()
+
+    def retranslate_ui(self, _code: str = "") -> None:
+        mode = next((m for m, b in self._btns.items() if b.isChecked()), "rect")
+        self.set_mode(mode)
 
 
 # ---------------------------------------------------------------------------
@@ -2661,6 +2912,7 @@ class Overlay(QWidget):
         self._mode = "idle"               # idle | picking | selecting | editing
         self.capture_mode = "rect"        # rect | window | fullscreen
         self.long_mode = False            # 独立「滚动长截图」命令：框选→确定→直接拼接
+        self.auto_ocr = False             # v38：选区一确定就自动取字（快捷入口）
         # 遮罩上的提示文字在 paintEvent 里现取 t()，语言切换后需触发重绘
         LANG.changed.connect(self.update)
         self._window_picker = None        # callable(pos) -> (QRect, title[, hwnd]) | QRect | None
@@ -2700,6 +2952,10 @@ class Overlay(QWidget):
         self._cursor_cache = Qt.CrossCursor      # __init__ 里已设为十字
         self._label_font = QFont("", 10)
         self._label_cache: tuple[str, int, int] | None = None  # (文本, 宽, 高)
+
+        self.mode_strip = ModeStrip(self)
+        self.mode_strip.hide()
+        self.mode_strip.mode_selected.connect(self._switch_mode)
 
         self.toolbar = Toolbar(self, exclude=TRANSFORM_ACTIONS)
         self.toolbar.hide()
@@ -2772,6 +3028,7 @@ class Overlay(QWidget):
         退回框选 + 确定的兼容路径，避免卡在 picking 状态无法操作。
         """
         self.long_mode = on
+        self.auto_ocr = False
         self.sel = None
         self.shapes.clear()
         self._selected = None
@@ -2784,6 +3041,12 @@ class Overlay(QWidget):
         self.toolbar.set_confirm_tip(
             "开始滚动拼接 (Enter)" if on else "确认选区，进入程序窗口继续编辑 (Enter)"
         )
+        if on:
+            self.mode_strip.hide()
+        else:
+            self._place_strip()
+            self.mode_strip.show()
+            self.mode_strip.raise_()
         if on and window_picker is not None:
             self.capture_mode = "window"
             self._window_picker = window_picker
@@ -2845,6 +3108,7 @@ class Overlay(QWidget):
         fullscreen —— 直接选中整个虚拟屏幕（含多显示器）
         """
         self.capture_mode = mode if mode in ("rect", "window", "fullscreen") else "rect"
+        self.auto_ocr = False
         self._window_picker = window_picker
         self._window_regrab = None       # 切换到新模式：清掉上次的回调
         self._hover_hwnd = 0
@@ -2866,6 +3130,11 @@ class Overlay(QWidget):
                 self.capture_mode = "rect"
             self._mode = "idle"
             self.update()
+        if not self.long_mode:
+            self.mode_strip.set_mode(self.capture_mode)
+            self._place_strip()
+            self.mode_strip.show()
+            self.mode_strip.raise_()
 
     def _apply_selection(self, r: QRect, near: QPoint | None = None) -> None:
         """把矩形直接确定为选区并进入编辑态（框选 / 窗口 / 全屏共用）。
@@ -2892,6 +3161,19 @@ class Overlay(QWidget):
         self._set_tool("select")
         self.toolbar._on_tool("select")
         self.update()
+        if self.auto_ocr:
+            QTimer.singleShot(0, self._auto_ocr_now)
+
+    def set_auto_ocr(self, on: bool = True) -> None:
+        """选区确定后立即取字（主窗口「OCR 取字」快捷入口用）。"""
+        self.auto_ocr = bool(on)
+        if on and self.sel and self._mode == "editing":
+            QTimer.singleShot(0, self._auto_ocr_now)
+
+    def _auto_ocr_now(self) -> None:
+        if not self.auto_ocr or not self.sel or self._ocr_active():
+            return
+        self.ocr.emit(self.raw_crop())
 
     def _update_hover(self, pos: QPoint, force: bool = False) -> None:
         """窗口模式：查询鼠标下的窗口并刷新高亮。枚举窗口较贵，做 50ms 节流。"""
@@ -4110,10 +4392,59 @@ class Overlay(QWidget):
     def hideEvent(self, ev) -> None:  # noqa: N802
         # 兜底：遮罩被隐藏时，工具条/样式面板/取字层也一定收起来
         self.toolbar.hide()
+        self.mode_strip.hide()
         self.style_panel.hide()
         self.ocr_panel.hide()
         self.ocr_layer.hide()
         super().hideEvent(ev)
+
+    # -------------------------------------------------------------- 模式条
+    def _switch_mode(self, mode: str) -> None:
+        """点顶部模式条图标：就地换模式，不用退出重来。
+
+        已框选 / 已有标注时切换会清空当前选区（模式之间互不通用），
+        这是用户主动点图标的结果，不做二次确认。
+        """
+        if self.long_mode:
+            return
+        if mode == "window" and self._window_picker is None:
+            mode = "rect"
+        self.toolbar.hide()
+        self.sel = None
+        self.shapes.clear()
+        self._selected = None
+        self._confirm_mode = False
+        self._hover_rect = None
+        self._hover_title = ""
+        self._hover_hwnd = 0
+        self.capture_mode = mode
+        if mode == "fullscreen":
+            self._apply_selection(QRect(0, 0, self.width(), self.height()))
+        elif mode == "window":
+            self._mode = "picking"
+        else:
+            self._mode = "idle"
+        self.mode_strip.set_mode(mode)
+        self._place_strip()
+        self.update()
+
+    def _place_strip(self) -> None:
+        self.mode_strip.adjustSize()
+        hint = self.mode_strip.sizeHint()
+        x = max(8, (self.width() - hint.width()) // 2)
+        self.mode_strip.setGeometry(x, 16, hint.width(), hint.height())
+
+    def resizeEvent(self, ev) -> None:  # noqa: N802
+        self._place_strip()
+        if self.toolbar.isVisible():
+            self._place_toolbar()
+        if self.style_panel.isVisible():
+            self._place_style_panel()
+        super().resizeEvent(ev)
+
+    def showEvent(self, ev) -> None:  # noqa: N802
+        self._place_strip()
+        super().showEvent(ev)
 
     # -------------------------------------------------------------- 绘制
     def _place_toolbar(self, near: QPoint | None = None) -> None:
@@ -4129,31 +4460,33 @@ class Overlay(QWidget):
             return
         self.toolbar.adjustSize()
         tb = self.toolbar.sizeHint()
-        if near is not None:
-            gap = 14
-            x = near.x() + gap
-            y = near.y() + gap
-            # 贴边收缩：超出哪条边就贴哪条边，绝不镜像到对侧（避免漂到角落）
-            x = min(x, self.width() - tb.width())
-            y = min(y, self.height() - tb.height())
-            x = max(0, x)
-            y = max(0, y)
+        gap = 14
+
+        def clamp(x: int, y: int) -> tuple[int, int]:
+            # 贴边收缩：超出哪条边就贴哪条边，绝不镜像到对侧
+            x = min(x, max(0, self.width() - tb.width()))
+            y = min(y, max(0, self.height() - tb.height()))
+            return max(0, x), max(0, y)
+
+        # 确认模式：按钮组固定贴在选区外侧，位置不随鼠标漂移
+        if self._confirm_mode:
+            x = self.sel.left()
+            y = self.sel.bottom() + gap
+            if y + tb.height() > self.height():
+                above = self.sel.top() - tb.height() - gap
+                y = above if above >= 0 else y
+            x, y = clamp(x, y)
             self.toolbar.setGeometry(x, y, tb.width(), tb.height())
             return
-        # 确认模式下按钮位置保持不动（鼠标点击其他位置也不会漂移）
-        if self._confirm_mode:
+        if near is not None:
+            x, y = clamp(near.x() + gap, near.y() + gap)
+            self.toolbar.setGeometry(x, y, tb.width(), tb.height())
             return
-        gap = 8
         x = self.sel.left()
-        y = self.sel.bottom() + gap
+        y = self.sel.bottom() + 8
         if y + tb.height() > self.height():
-            y = self.sel.top() - tb.height() - gap
-        if y < 0:
-            y = min(self.sel.bottom() - tb.height() - gap, self.height() - tb.height())
-        if x + tb.width() > self.width():
-            x = self.width() - tb.width()
-        x = max(0, x)
-        y = max(0, y)
+            y = self.sel.top() - tb.height() - 8
+        x, y = clamp(x, y)
         self.toolbar.setGeometry(x, y, tb.width(), tb.height())
 
     def paintEvent(self, ev) -> None:
@@ -4198,9 +4531,9 @@ class Overlay(QWidget):
                 ly = hr.top() - th - 4
                 if ly < 0:
                     ly = min(hr.bottom() + 4, self.height() - th - 4)
-                p.setBrush(QColor(0, 0, 0, 190))
+                p.setBrush(QColor(24, 24, 26, 190))
                 p.setPen(Qt.NoPen)
-                p.drawRoundedRect(QRect(hr.left(), max(0, ly), tw, th), 4, 4)
+                p.drawRoundedRect(QRect(hr.left(), max(0, ly), tw, th), 8, 8)
                 p.setPen(QColor(255, 255, 255))
                 p.drawText(QRect(hr.left(), max(0, ly), tw, th), Qt.AlignCenter, label)
 
@@ -4285,9 +4618,9 @@ class Overlay(QWidget):
             # 旋转柄：矩形 / 椭圆 / 文字都有，拖动即可绕中心任意旋转
             paint_shape_rotate_handle(p, self._selected, self._rotate_handle_dist())
 
-            # 4) 边框
-            pen = QPen(BORDER_COLOR)
-            pen.setWidth(1)
+            # 4) 边框（设计稿 .sel：1.5px 浅橙）
+            pen = QPen(BORDER_SOFT)
+            pen.setWidthF(1.5)
             p.setPen(pen)
             p.setBrush(Qt.NoBrush)
             p.drawRect(sel.adjusted(0, 0, -1, -1))
@@ -4297,18 +4630,11 @@ class Overlay(QWidget):
                 "dragging_shape", "reshaping_arrow", "resizing_shape",
                 "rotating_shape",
             ):
-                # 5) 八个控制点
-                p.setPen(Qt.NoPen)
-                p.setBrush(QBrush(BORDER_COLOR))
+                # 5) 八个控制点：白底圆点 + 橙描边
+                p.setBrush(QBrush(QColor("#ffffff")))
+                p.setPen(QPen(BORDER_COLOR, 2))
                 for pt in self._handle_points(sel):
-                    p.drawRect(
-                        QRect(
-                            pt.x() - HANDLE_SIZE // 2,
-                            pt.y() - HANDLE_SIZE // 2,
-                            HANDLE_SIZE,
-                            HANDLE_SIZE,
-                        )
-                    )
+                    p.drawEllipse(QPointF(pt), HANDLE_SIZE / 2.0, HANDLE_SIZE / 2.0)
                 # 6) 尺寸标签（字体度量按内容缓存，避免每帧重算）
                 label = f"{sel.width()} × {sel.height()}"
                 p.setFont(self._label_font)
@@ -4321,9 +4647,9 @@ class Overlay(QWidget):
                 ly = sel.top() - th - 4
                 if ly < 0:
                     ly = sel.top() + 4
-                p.setBrush(QColor(0, 0, 0, 170))
+                p.setBrush(QColor(24, 24, 26, 190))
                 p.setPen(Qt.NoPen)
-                p.drawRoundedRect(QRect(sel.left(), ly, tw, th), 4, 4)
+                p.drawRoundedRect(QRect(sel.left(), ly, tw, th), 8, 8)
                 p.setPen(QColor(255, 255, 255))
                 p.drawText(QRect(sel.left(), ly, tw, th), Qt.AlignCenter, label)
 

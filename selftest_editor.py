@@ -435,7 +435,7 @@ def test_overlay() -> None:
         f"size={b_img.size() if b_img else None} 期望={expect.size()}",
     )
 
-    # B2 确认模式：隐藏全部标注工具，只显示「确定 / 取消」
+    # B2 确认模式：隐藏全部标注工具，只留「复制 / 取字 / 钉在桌面 / ✕ / 确定」
     ov2 = Overlay(base, dpr=2.0)
     ov2.resize(200, 100)
     ov2.toolbar.set_confirm_mode(True)
@@ -446,13 +446,17 @@ def test_overlay() -> None:
         tools_hidden
         and ov2.toolbar._actions["确定"].isVisible()
         and ov2.toolbar._actions["✕"].isVisible()
+        and ov2.toolbar._actions["复制"].isVisible()
+        and ov2.toolbar._actions["取字"].isVisible()
+        and ov2.toolbar._actions["钉在桌面"].isVisible()
         and not ov2.toolbar._actions["撤销"].isVisible()
-        and not ov2.toolbar._actions["取字"].isVisible()
+        and not ov2.toolbar._actions["保存"].isVisible()
     )
     record(
-        "B2 确认模式只留确定/取消",
+        "B2 确认模式只留操作条(复制/取字/钉图/取消/确定)",
         ok_b2,
-        f"tools_hidden={tools_hidden} 确定={ov2.toolbar._actions['确定'].isVisible()} 取消={ov2.toolbar._actions['✕'].isVisible()}",
+        f"tools_hidden={tools_hidden} 确定={ov2.toolbar._actions['确定'].isVisible()} "
+        f"复制={ov2.toolbar._actions['复制'].isVisible()}",
     )
 
     # B3 全屏直开等价：sel=整屏 → 裁剪=整图
@@ -468,58 +472,57 @@ def test_overlay() -> None:
     ok_b3 = b3 is not None and b3.size() == base.size() and b3.pixel(0, 0) == base.pixel(0, 0)
     record("B3 全屏(整屏)裁剪=整图", ok_b3, f"size={b3.size() if b3 else None} base={base.size()}")
 
-    # B4 确定按钮浮在鼠标位置（near）；贴边收缩而非镜像到对角；确认后位置固定
+    # B4 确认条贴在选区外侧下方（设计稿：选区下方左侧），贴边时自动翻到上方
     ov4 = Overlay(base, dpr=2.0)
-    ov4.resize(200, 100)
+    ov4.resize(800, 600)
     ov4.toolbar.set_confirm_mode(True)
-    ov4.sel = QRect(50, 40, 60, 30)   # sel 仅用于早退出判断；near 决定位置
+    ov4._confirm_mode = True
+    ov4.sel = QRect(50, 40, 60, 30)
 
-    # B4a near 在屏内且离边足够远 → 工具条落在光标右下方(near+14,+14)
+    # B4a 选区下方有空位 → 条放选区左下外侧，与选区左边缘对齐
     ov4._place_toolbar(near=QPoint(20, 20))
     g = ov4.toolbar.geometry()
     ok_b4a = (
-        g.x() == 20 + 14
-        and g.y() == 20 + 14
+        g.x() == 50
+        and g.y() == ov4.sel.bottom() + 14
         and g.x() >= 0 and g.y() >= 0
-        and (g.x() + g.width()) <= 200
-        and (g.y() + g.height()) <= 100
+        and (g.x() + g.width()) <= 800
+        and (g.y() + g.height()) <= 600
     )
     record(
-        "B4a 确定按钮浮在鼠标右下方",
+        "B4a 确认条贴在选区下方左侧",
         ok_b4a,
-        f"geom=({g.x()},{g.y()},{g.width()},{g.height()}) 期望x=34 y=34",
+        f"geom=({g.x()},{g.y()},{g.width()},{g.height()}) 期望x=50 y={ov4.sel.bottom() + 14}",
     )
 
-    # B4b near 贴近右下角 → 贴边收缩，绝不镜像到左上角（不会漂到屏幕角落）
-    ov4._place_toolbar(near=QPoint(196, 96))
+    # B4b 选区贴近底边 → 翻到选区上方，且不越界
+    ov4.sel = QRect(50, 500, 200, 80)
+    ov4._place_toolbar()
     g2 = ov4.toolbar.geometry()
     ok_b4b = (
-        (g2.x() + g2.width()) == 200           # 右贴边
-        and (g2.y() + g2.height()) == 100       # 底贴边
-        and g2.x() >= 0 and g2.y() >= 0
-        and not (g2.x() == 196 - g2.width() - 14)   # 没有镜像到光标左上方
+        (g2.y() + g2.height()) <= 500
+        and g2.y() >= 0
+        and (g2.x() + g2.width()) <= 800
     )
     record(
-        "B4b 贴边收缩不镜像到对角",
+        "B4b 贴底边时确认条翻到选区上方",
         ok_b4b,
-        f"geom=({g2.x()},{g2.y()},{g2.width()},{g2.height()}) 期望右/底贴边,非镜像",
+        f"geom=({g2.x()},{g2.y()},{g2.width()},{g2.height()}) 选区top=500",
     )
 
-    # B4c 选择完成时 _apply_selection(near) 直接把按钮放到鼠标处并进入确认模式
-    #     v26 起确认模式多一个「复制」、v34 再加「钉在桌面」，工具条更宽；
-    #     小遮罩上 near+14 放不下时会被贴边收缩，因此 x 允许「光标右下」或「右贴边」两种。
-    ov4.sel = QRect(50, 40, 60, 30)
-    ov4._apply_selection(QRect(50, 40, 60, 30), near=QPoint(40, 40))
+    # B4c 选择完成时 _apply_selection 进入确认模式并把条放到选区下方
+    ov4.sel = QRect(300, 200, 200, 150)
+    ov4._apply_selection(QRect(300, 200, 200, 150), near=QPoint(340, 240))
     g3 = ov4.toolbar.geometry()
     ok_b4c = (
         ov4._confirm_mode is True
-        and g3.x() in (40 + 14, 200 - g3.width())
-        and g3.y() == 40 + 14
-        and (g3.x() + g3.width()) <= 200
-        and (g3.y() + g3.height()) <= 100
+        and g3.x() == 300
+        and g3.y() == ov4.sel.bottom() + 14
+        and (g3.x() + g3.width()) <= 800
+        and (g3.y() + g3.height()) <= 600
     )
     record(
-        "B4c _apply_selection 放置到鼠标处并确认",
+        "B4c _apply_selection 进入确认模式并贴选区下方",
         ok_b4c,
         f"geom=({g3.x()},{g3.y()},{g3.width()},{g3.height()}) confirm={ov4._confirm_mode}",
     )
@@ -2639,14 +2642,16 @@ def test_long_capture_v17() -> None:
     with TemporaryDirectory(prefix="snaptool-q-") as tmp:
         mw_q = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp))
         b_long_q = mw_q.findChild(QPushButton, "long")
-        zh_ok = b_long_q is not None and "点击窗口后自动滚动" in b_long_q.text()
+        zh_ok = (b_long_q is not None and "滚动" in b_long_q.text()
+                 and "自动滚屏" in mw_q._panel._b_long.desc_label.text())
         i18n.LANG.set_preference("en", persist=False)
         app.processEvents()
-        en_ok = b_long_q is not None and "Click a window" in b_long_q.text()
+        en_ok = (b_long_q is not None and b_long_q.text() == "Scrolling Capture…"
+                 and "auto-scroll" in mw_q._panel._b_long.desc_label.text())
         i18n.LANG.set_preference("zh_CN", persist=False)
         app.processEvents()
         mw_q.close()
-    record("Q17 主窗口按钮副标题改为点击窗口后自动滚动", zh_ok and en_ok,
+    record("Q17 主窗口长截图入口文案（标题+副标题）随语言刷新", zh_ok and en_ok,
            f"zh={zh_ok} en={en_ok}")
 
     for wgt in (ov_q, ov_q2, ov_q3, ov_pick, bar_q):
@@ -4370,12 +4375,23 @@ def test_v26_copy_button() -> None:
     ov.resize(200, 100)
     ov.toolbar.set_confirm_mode(True)
     shown = [k for k in ov.toolbar._actions if not ov.toolbar._actions[k].isHidden()]
+    # 按真实布局顺序（不是 dict 顺序）检查左右位置
+    lay = ov.toolbar._lay
+    order = []
+    for i in range(lay.count()):
+        w = lay.itemAt(i).widget()
+        if w is None:
+            continue
+        for k, b in ov.toolbar._actions.items():
+            if b is w:
+                order.append(k)
     ok_z1 = (
-        "复制" in shown
-        and shown.index("复制") < shown.index("确定") < shown.index("✕")
-        and all(k not in shown for k in ("撤销", "取字", "保存", "长截图"))
+        "复制" in order and "确定" in order and "✕" in order
+        and order.index("复制") < order.index("✕") < order.index("确定")
+        and order[-1] == "确定"
+        and all(k not in shown for k in ("撤销", "保存", "长截图"))
     )
-    record("Z1 确认模式显示复制按钮且排最左", ok_z1, f"shown={shown}")
+    record("Z1 确认模式复制在最左、确定在最右", ok_z1, f"order={order} shown={shown}")
     ov.toolbar.set_confirm_mode(False)
 
     # Z2/Z3 点复制：发原图（不含标注），不进编辑器
@@ -4541,15 +4557,24 @@ def test_v27_copy_closes_windows() -> None:
     # AA6 文档同步
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
-    marks = ("v27", "关闭截图编辑与截屏助手两个窗口", "合计 250 项", "dist/v16")
+    docs = Path("i18n_docs.py").read_text(encoding="utf-8")
+    marks = ("v27", "v38", "关闭截图编辑与截屏助手两个窗口",
+             "合计 250 项", "合计 353 项", "dist/v16", "dist/v38")
     missing = [m for m in marks if m not in readme]
+    # v38 新界面在 8 语言文档里都要出现对应说法
+    lang_marks = ("floating bar", "フローティング", "플로팅",
+                  "barre flottante", "schwebende Leiste",
+                  "barra flotante", "懸浮條")
+    missing_lang = [m for m in lang_marks if m not in docs]
     ok_aa6 = (
         not missing
+        and not missing_lang
         and "并关闭截图编辑与截屏助手两个窗口" in help_zh
-        and "点「确定」打开截图编辑窗口" in help_zh
+        and "才打开截图编辑窗口" in help_zh
+        and "悬浮条" in help_zh and "命令面板" in help_zh and "确认条" in help_zh
     )
-    record("AA6 README / 中文帮助同步 v27 窗口行为", ok_aa6,
-           f"missing={missing}")
+    record("AA6 README / 中文帮助同步 v27 复制即关 + v38 新界面", ok_aa6,
+           f"missing={missing} lang={missing_lang}")
 
 
 def test_v28_warmup_and_input_gate() -> None:
@@ -5846,6 +5871,274 @@ def test_v37_pen_arrow_joint() -> None:
            f"v37={'v37' in readme} arrow={'箭头' in readme}")
 
 
+# ---------------------------------------------------------------------------
+def test_v38_layout_redesign() -> None:
+    """Stage AJ：方案 E 界面改造（迷你悬浮条 / 命令面板 / 底部 Dock / 暖橙遮罩）。"""
+    import re as _re
+    import sys
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    import i18n
+    import ui_theme
+    from PySide6.QtCore import QPoint, QRect, Qt
+    from PySide6.QtGui import QColor, QFont, QImage, QPainter
+    from PySide6.QtWidgets import QApplication
+
+    import snap_editor
+    from hotkeys import Hotkey
+    from snapeditor import BORDER_SOFT, Overlay
+    from snapui import MainWindow, make_icon
+
+    print("\n--- Stage AJ: 方案 E 界面改造 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    tmp = TemporaryDirectory(prefix="snaptool-aj-")
+    mw = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp.name))
+    mw.show()
+    app.processEvents()
+
+    # AJ1 主窗口是贴底的迷你悬浮条，不再是带标题栏 / 菜单栏的方窗
+    ok_aj1 = (
+        bool(mw.windowFlags() & Qt.FramelessWindowHint)
+        and mw.card.height() == ui_theme.BAR_HEIGHT
+        and mw.card.height() <= 64
+        and mw.height() <= 120
+        and not mw.menuBar().isVisible()
+    )
+    record("AJ1 主窗口=无边框迷你悬浮条(<=64px 卡片)", ok_aj1,
+           f"card={mw.card.height()} win={mw.height()} menu={mw.menuBar().isVisible()}")
+
+    # AJ2 悬浮条五键：三种截图 + 长截图 + 贴图，点击各自发信号
+    fired: list = []
+    mw.capture_requested.connect(lambda m: fired.append(("cap", m)))
+    mw.long_capture_requested.connect(lambda: fired.append(("long", "")))
+    mw.pin_clipboard_requested.connect(lambda: fired.append(("pin", "")))
+    mw._quick["rect"].click()
+    mw._quick["window"].click()
+    mw._quick["fullscreen"].click()
+    mw._b_long.click()
+    mw._b_pin.click()
+    expect = [("cap", "rect"), ("cap", "window"), ("cap", "fullscreen"),
+              ("long", ""), ("pin", "")]
+    ok_aj2 = fired == expect
+    record("AJ2 悬浮条五键各发对应信号", ok_aj2, f"fired={fired}")
+
+    # AJ3 点模式按钮会把该模式记成默认模式
+    seen_modes: list = []
+    mw.mode_changed.connect(lambda m: seen_modes.append(m))
+    mw._quick["fullscreen"].click()
+    ok_aj3 = (mw._mode == "fullscreen" and seen_modes[-1] == "fullscreen"
+              and mw._quick["fullscreen"].isChecked()
+              and not mw._quick["rect"].isChecked())
+    record("AJ3 点模式按钮同时更新默认模式与高亮", ok_aj3,
+           f"mode={mw._mode} seen={seen_modes[-1:]}")
+
+    # AJ4 「⋯」展开完整命令面板：15 行、四组标题、再点收起
+    mw.toggle_panel()
+    app.processEvents()
+    panel = mw._panel
+    rows = list(panel._rows)
+    groups = (panel._lbl_now.text(), panel._lbl_edit.text(),
+              panel._lbl_hotkey.text(), panel._lbl_mode.text())
+    ok_aj4 = (
+        panel.isVisible() and len(rows) == 15
+        and groups == ("截图", "编辑与输出", "设置", "帮助")
+        and panel._b_long.objectName() == "long"
+    )
+    record("AJ4 命令面板 15 行 / 四组标题", ok_aj4, f"rows={len(rows)} groups={groups}")
+    mw.toggle_panel()
+    app.processEvents()
+    ok_aj4b = not panel.isVisible()
+    record("AJ4b 再点「⋯」收起面板", ok_aj4b, f"visible={panel.isVisible()}")
+
+    # AJ5 面板各行接到正确信号（关于与退出是二级菜单，不在此列）
+    hits: list = []
+    mw.ocr_capture_requested.connect(lambda: hits.append("ocr"))
+    mw.pin_clipboard_requested.connect(lambda: hits.append("pin"))
+    mw.open_dir_requested.connect(lambda: hits.append("dir"))
+    mw.hotkey_requested.connect(lambda: hits.append("hotkey"))
+    mw.pin_hotkey_requested.connect(lambda: hits.append("pinhk"))
+    mw.language_requested.connect(lambda: hits.append("lang"))
+    mw.help_requested.connect(lambda k: hits.append("help:" + k))
+    for key in ("ocr", "pin_clipboard", "dir", "hotkey", "pin_hotkey",
+                "language", "help_help", "help_cli"):
+        panel._rows[key].click()
+    ok_aj5 = hits == ["ocr", "pin", "dir", "hotkey", "pinhk", "lang",
+                      "help:help", "help:cli"]
+    record("AJ5 面板行 -> 对应命令信号", ok_aj5, f"hits={hits}")
+
+    # AJ6 画笔平滑度 / 默认模式两行是循环切换
+    smooth: list = []
+    mw.pen_smooth_changed.connect(lambda v: smooth.append(v))
+    mw.set_pen_smooth("medium")
+    panel._cycle_smooth()
+    panel._cycle_smooth()
+    modes_cycle: list = []
+    mw.mode_changed.connect(lambda v: modes_cycle.append(v))
+    mw.set_mode("rect")
+    panel._cycle_mode()
+    ok_aj6 = (smooth == ["high", "off"] and mw._pen_smooth == "off"
+              and modes_cycle[-1] == "window")
+    record("AJ6 平滑度/默认模式行可循环切换", ok_aj6,
+           f"smooth={smooth} mode={modes_cycle[-1:]}")
+
+    # AJ7 切到英文后面板 / 悬浮条无中文残留
+    i18n.LANG.set_preference("en", persist=False)
+    app.processEvents()
+    texts = [panel._title.text(), panel._sub.text(), panel._badge.text(),
+             panel._lbl_now.text(), panel._lbl_edit.text(),
+             panel._lbl_hotkey.text(), panel._lbl_mode.text()]
+    for row in panel._rows.values():
+        texts += [row.title_label.text(), row.desc_label.text(), row.key_label.text()]
+    texts += [mw._b_long.text(), mw._b_pin.toolTip(), mw._b_more.toolTip()]
+    cjk = [x for x in texts if _re.search(r"[\u4e00-\u9fff]", x)]
+    i18n.LANG.set_preference("zh_CN", persist=False)
+    app.processEvents()
+    record("AJ7 英文化后悬浮条/面板无中文残留", not cjk, f"残留={cjk[:3]}")
+
+    # AJ8 悬浮条默认贴在屏幕底部居中
+    mw.show()
+    app.processEvents()
+    avail = QApplication.primaryScreen().availableGeometry()
+    dx = abs((mw.x() + mw.width() // 2) - (avail.left() + avail.width() // 2))
+    dy = abs((mw.y() + mw.height()) - avail.bottom())
+    ok_aj8 = dx <= 8 and dy <= 16
+    record("AJ8 悬浮条贴屏幕底部居中", ok_aj8, f"dx={dx} dy={dy}")
+
+    # AJ9 遮罩顶部模式条：三个模式可点，就地切换
+    img = QImage(900, 560, QImage.Format_RGB32)
+    img.fill(QColor("#f4f1ec"))
+    ov = Overlay(img, 1.0)
+    ov.resize(900, 560)
+    ov.set_capture_mode("rect", lambda p: (QRect(0, 0, 200, 100), "w", 1))
+    ov.show()
+    app.processEvents()
+    strip_visible = ov.mode_strip.isVisible()
+    ov.mode_strip._btns["window"].click()
+    app.processEvents()
+    win_mode = ov.capture_mode == "window"
+    ov.mode_strip._btns["fullscreen"].click()
+    app.processEvents()
+    full_mode = (ov.capture_mode == "fullscreen" and ov.sel is not None
+                 and ov.sel.width() == 900)
+    ov.mode_strip._btns["rect"].click()
+    app.processEvents()
+    back_rect = ov.capture_mode == "rect" and ov.sel is None
+    ok_aj9 = strip_visible and win_mode and full_mode and back_rect
+    record("AJ9 遮罩模式条可就地切换三种模式", ok_aj9,
+           f"visible={strip_visible} win={win_mode} full={full_mode} rect={back_rect}")
+
+    # AJ10 确认条顺序：复制 -> 取字 -> 钉图 -> X -> 确定，确定是带文字的深色主按钮
+    ov._apply_selection(QRect(120, 120, 560, 300), near=QPoint(200, 180))
+    app.processEvents()
+    lay = ov.toolbar._lay
+    order = []
+    for i in range(lay.count()):
+        w = lay.itemAt(i).widget()
+        for k, b in ov.toolbar._actions.items():
+            if b is w:
+                order.append(k)
+    conf = ov.toolbar._actions["确定"]
+    ok_aj10 = (
+        order == ["复制", "取字", "钉在桌面", "✕", "确定"]
+        and conf.text() == "确定"
+        and conf.width() > conf.height()
+        and conf.property("kind") == "primary"
+    )
+    record("AJ10 确认条顺序与深色主按钮", ok_aj10, f"order={order} w={conf.width()}")
+
+    # AJ11 确认条贴在选区外侧（不压在选区里）
+    tb = ov.toolbar.geometry()
+    ok_aj11 = tb.top() > ov.sel.bottom()
+    record("AJ11 确认条在选区外侧下方", ok_aj11,
+           f"bar_top={tb.top()} sel_bottom={ov.sel.bottom()}")
+
+    # AJ12 选区描边是暖橙色（不是旧的蓝色）
+    shot = ov.grab().toImage()
+    ys = ov.sel.top()
+    hits = []
+    for x in range(ov.sel.left() + 10, ov.sel.left() + 120):
+        for y in (ys - 1, ys, ys + 1):
+            c = shot.pixelColor(x, y)
+            hits.append((c.red(), c.green(), c.blue()))
+    orange = [c for c in hits if c[0] >= 245 and 140 <= c[1] <= 235 and 90 <= c[2] <= 210]
+    blue = [c for c in hits if c[2] > 200 and c[0] < 120]
+    ok_aj12 = bool(orange) and not blue
+    record("AJ12 选区描边=暖橙色", ok_aj12,
+           f"orange={len(orange)} blue={len(blue)} 期望≈{BORDER_SOFT.name()}")
+
+    # AJ13 编辑器：无标题栏 + 隐藏菜单栏 + 底部 Dock + 顶部工具行
+    ed = snap_editor.EditorWindow(img, [], None)
+    ed.show()
+    app.processEvents()
+    dock = ed.canvas.toolbar
+    dg = dock.geometry()
+    ok_aj13 = (
+        bool(ed.windowFlags() & Qt.FramelessWindowHint)
+        and not ed.menuBar().isVisible()
+        and ed.topbar.height() == 54
+        and dock._phase == "dock"
+        and dg.top() > ed.canvas.height() // 2
+        and abs((dg.left() + dg.width() // 2) - ed.canvas.width() // 2) <= 12
+    )
+    record("AJ13 编辑器无标题栏 / 顶部行 / 底部 Dock", ok_aj13,
+           f"phase={dock._phase} dock_y={dg.top()} canvas_h={ed.canvas.height()}")
+
+    # AJ14 Dock 顺序：选择 + 7 工具 + 撤销 + 钉图 + 复制（带文字深色）
+    order2 = []
+    for i in range(dock._lay.count()):
+        w = dock._lay.itemAt(i).widget()
+        for k, b in dock._buttons.items():
+            if b is w:
+                order2.append(k)
+        for k, b in dock._actions.items():
+            if b is w:
+                order2.append(k)
+    copy_b = dock._actions["复制"]
+    ok_aj14 = (
+        order2[:8] == ["select", "rect", "ellipse", "arrow", "line", "pen",
+                       "mosaic", "text"]
+        and order2[-3:] == ["撤销", "钉在桌面", "复制"]
+        and copy_b.text() == "复制"
+        and copy_b.property("kind") == "primary"
+        and dock._buttons["select"].isChecked()
+    )
+    record("AJ14 Dock = 选择+7工具+撤销+钉图+复制", ok_aj14, f"order={order2}")
+
+    # AJ15 汉堡弹出合并菜单：三组 section + 图像变换子菜单
+    acts = ed._hamburger.actions()
+    subs = [a.menu() for a in acts if a.menu() is not None]
+    has_sections = all(any(a.isSeparator() and a.text() == sec for a in acts)
+                       for sec in ("文件(&F)", "编辑(&E)", "视图(&V)"))
+    has_transform = any(s is not None and s.title() == "图像变换" for s in subs)
+    has_view = any("适应窗口" in a.text() for a in acts)
+    ok_aj15 = has_sections and has_transform and has_view
+    record("AJ15 汉堡菜单含三组与子菜单", ok_aj15,
+           f"sections={has_sections} transform={has_transform} view={has_view}")
+
+    # AJ16 菜单栏隐藏后快捷键仍然生效（action 已挂到窗口）
+    shortcuts = [a for a in ed.actions() if not a.shortcut().isEmpty()]
+    ok_aj16 = len(shortcuts) >= 8 and any(
+        a.shortcut().toString() == "Ctrl+R" for a in shortcuts
+    )
+    record("AJ16 快捷键挂在窗口上仍可用", ok_aj16, f"actions={len(shortcuts)}")
+
+    # AJ17 三个窗口都引用同一套主题
+    ok_aj17 = all(
+        "from ui_theme import" in Path(f).read_text(encoding="utf-8")
+        for f in ("snapui.py", "snap_editor.py", "snapeditor.py")
+    )
+    record("AJ17 悬浮条/面板/编辑器共用 ui_theme", ok_aj17,
+           f"orange={ui_theme.ORANGE} cream={ui_theme.CREAM}")
+
+    for w in (ov, ed, mw):
+        w.hide()
+        w.deleteLater()
+    app.processEvents()
+    tmp.cleanup()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -5891,6 +6184,7 @@ if __name__ == "__main__":
     test_v35_window_capture_accuracy()
     test_v36_ocr_multiline_and_cursor()
     test_v37_pen_arrow_joint()
+    test_v38_layout_redesign()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

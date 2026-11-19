@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案 F · 三步向导 — 截屏助手 UI 设计</title>
+<style>
+  :root{
+    --bg:#f6f5fb;
+    --panel:#ffffff;
+    --ink:#221d33;
+    --ink-2:#6a6379;
+    --ink-3:#a29bb0;
+    --line:#e8e4f0;
+    --violet:#6d5ce7;
+    --violet-soft:#efecfd;
+    --green:#17a97b;
+    --shadow:0 18px 44px rgba(60,45,110,.12), 0 2px 6px rgba(60,45,110,.05);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:linear-gradient(180deg,#faf9fd,#f0edf7);color:var(--ink);
+    font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:44px 28px 80px;
+  }
+  .page{max-width:1000px;margin:0 auto}
+  .page-head{margin-bottom:38px}
+  .tag{display:inline-block;background:var(--violet);color:#fff;font-size:12px;font-weight:700;letter-spacing:.08em;
+    padding:5px 11px;border-radius:999px;margin-bottom:14px}
+  h1{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .lede{margin-top:10px;color:var(--ink-2);font-size:15px;line-height:1.75;max-width:780px}
+  .chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;color:var(--ink-2)}
+
+  .block{margin-top:44px}
+  .block h2{font-size:19px;font-weight:700;display:flex;align-items:center;gap:10px}
+  .block h2 .no{width:24px;height:24px;border-radius:8px;background:var(--violet-soft);color:var(--violet);
+    font-size:12.5px;display:grid;place-items:center;font-weight:800}
+  .desc{margin-top:8px;color:var(--ink-2);font-size:14px;line-height:1.8;max-width:800px}
+  .desc b{color:var(--ink)}
+
+  .stage{margin-top:18px;padding:26px;border-radius:18px;background:#e9e5f2;border:1px solid #e0daec;
+    display:flex;justify-content:center}
+
+  .win{width:900px;max-width:100%;background:var(--panel);border-radius:16px;overflow:hidden;
+    box-shadow:var(--shadow);border:1px solid rgba(60,45,110,.08)}
+  .titlebar{height:38px;display:flex;align-items:center;padding:0 12px 0 16px;background:#fcfbfe;
+    border-bottom:1px solid var(--line)}
+  .tb-title{font-size:12px;color:var(--ink-3);font-weight:600}
+  .tb-right{margin-left:auto;display:flex;gap:14px;color:#bcb4ca}
+  .tb-right svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.3}
+
+  /* 步骤条 */
+  .steps{display:flex;align-items:center;justify-content:center;gap:0;padding:22px 30px 6px}
+  .step{display:flex;align-items:center;gap:9px}
+  .sn{width:26px;height:26px;border-radius:50%;background:#f0edf6;color:var(--ink-3);font-size:12.5px;
+    font-weight:700;display:grid;place-items:center;flex:0 0 auto}
+  .step.on .sn{background:var(--violet);color:#fff;box-shadow:0 0 0 5px var(--violet-soft)}
+  .step.done .sn{background:var(--green);color:#fff}
+  .sn svg{width:13px;height:13px;stroke:#fff;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  .st{font-size:13.5px;color:var(--ink-3);font-weight:600}
+  .step.on .st{color:var(--ink)}
+  .step.done .st{color:var(--ink-2)}
+  .sline{width:74px;height:2px;background:#eae6f2;margin:0 16px;border-radius:2px}
+  .sline.done{background:var(--green)}
+
+  /* ---------- 主窗口（第 1 步） ---------- */
+  .wiz{padding:6px 40px 30px}
+  .wiz h3{text-align:center;font-size:22px;font-weight:800;margin-top:16px}
+  .wiz .lead{text-align:center;font-size:13.5px;color:var(--ink-2);margin-top:8px;line-height:1.7}
+  .modes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:24px}
+  .mode{border:1.5px solid var(--line);border-radius:16px;padding:20px 16px;text-align:center;background:#fff}
+  .mode.sel{border-color:var(--violet);background:var(--violet-soft);position:relative}
+  .mode.sel::after{content:"✓";position:absolute;right:12px;top:10px;width:20px;height:20px;border-radius:50%;
+    background:var(--violet);color:#fff;font-size:12px;display:grid;place-items:center;font-weight:700}
+  .mode .mi{width:46px;height:46px;border-radius:14px;background:#f4f2fa;display:grid;place-items:center;margin:0 auto}
+  .mode.sel .mi{background:#fff}
+  .mode .mi svg{width:24px;height:24px;stroke:var(--violet);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .mode h4{font-size:15px;font-weight:700;margin-top:13px}
+  .mode p{font-size:12px;color:var(--ink-2);margin-top:6px;line-height:1.6}
+  .longline{margin-top:14px;display:flex;align-items:center;gap:12px;border:1.5px dashed #ddd6ee;border-radius:14px;
+    padding:13px 16px;background:#fcfbfe}
+  .longline svg{width:20px;height:20px;stroke:var(--violet);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .longline h5{font-size:13.5px;font-weight:700}
+  .longline p{font-size:12px;color:var(--ink-3);margin-top:2px}
+  .longline .r{margin-left:auto;font-size:12px;color:var(--violet);font-weight:600}
+  .wizfoot{display:flex;align-items:center;gap:14px;margin-top:24px}
+  .ghost{font-size:13px;color:var(--ink-2);border:1px solid var(--line);border-radius:11px;padding:10px 16px;background:#fff}
+  .primary{margin-left:auto;font-size:14px;font-weight:700;color:#fff;background:var(--violet);border-radius:12px;
+    padding:12px 26px;box-shadow:0 8px 18px rgba(109,92,231,.30);display:flex;align-items:center;gap:9px}
+  .primary svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .tip{text-align:center;font-size:12px;color:var(--ink-3);margin-top:16px}
+
+  /* ---------- 编辑器（第 2 步） ---------- */
+  .edtop2{display:flex;align-items:center;gap:10px;padding:0 22px 14px;border-bottom:1px solid var(--line)}
+  .groups{display:flex;gap:10px;padding:16px 22px 0}
+  .gt{flex:1;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fcfbfe}
+  .gt h5{font-size:11.5px;color:var(--ink-3);font-weight:700;letter-spacing:.04em;margin-bottom:8px}
+  .gt .row{display:flex;gap:6px}
+  .tb{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--ink-2);background:#fff;
+    border:1px solid var(--line)}
+  .tb svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .tb.on{background:var(--violet);border-color:var(--violet);color:#fff}
+  .edbody{display:flex;height:392px;padding:16px 22px;gap:16px}
+  .edcanvas{flex:1;background:#f4f2f9;border-radius:14px;display:grid;place-items:center;position:relative}
+  .shot{width:470px;height:272px;background:#fff;border-radius:6px;overflow:hidden;position:relative;
+    box-shadow:0 10px 26px rgba(60,45,110,.16)}
+  .fake-top{height:26px;background:#f6f4fa;border-bottom:1px solid #ece8f2;display:flex;align-items:center;gap:5px;padding:0 10px}
+  .fake-top i{width:7px;height:7px;border-radius:50%;background:#ddd6e8;display:block}
+  .fake-body{display:flex;height:246px}
+  .fake-side{width:86px;background:#fbfafd;border-right:1px solid #f0edf5;padding:12px 10px}
+  .fake-side i{display:block;height:8px;border-radius:4px;background:#eae6f0;margin-bottom:9px}
+  .fake-main{flex:1;padding:14px 16px}
+  .fake-main i{display:block;height:9px;border-radius:4px;background:#f0edf5;margin-bottom:10px}
+  .fake-main i.t{height:13px;background:#e2dcee;width:54%}
+  .fake-main i.s{width:82%}
+  .fake-main i.s2{width:60%}
+  .anno{position:absolute;inset:0;pointer-events:none}
+  .anno svg{width:100%;height:100%}
+  .nextside{width:200px;display:flex;flex-direction:column;gap:10px}
+  .ns{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}
+  .ns h5{font-size:12px;color:var(--ink-3);font-weight:700;margin-bottom:9px}
+  .ns .row{display:flex;gap:6px;flex-wrap:wrap}
+  .pillbtn{font-size:12px;color:var(--ink-2);border:1px solid var(--line);border-radius:9px;padding:7px 11px;background:#fff}
+  .ns.done{background:var(--violet-soft);border-color:#ddd4f8}
+  .ns.done h5{color:var(--violet)}
+  .ns .desc2{font-size:11.5px;color:var(--ink-2);line-height:1.7}
+  .nextbtn{margin-top:auto;text-align:center;font-size:14px;font-weight:700;color:#fff;background:var(--violet);
+    border-radius:12px;padding:13px 0;box-shadow:0 8px 18px rgba(109,92,231,.28)}
+  .edstatus{height:32px;border-top:1px solid var(--line);display:flex;align-items:center;padding:0 20px;
+    font-size:11.5px;color:var(--ink-3);gap:16px;background:#fcfbfe}
+  .edstatus .r{margin-left:auto;display:flex;gap:14px}
+
+  /* ---------- 遮罩（第 1 步进行中） ---------- */
+  .mask{position:relative;width:900px;height:420px;background:#2e2a3a;overflow:hidden;border-radius:14px;box-shadow:var(--shadow)}
+  .mask .desk{position:absolute;inset:0;background:linear-gradient(150deg,#3a3450,#54496e 60%,#403a52)}
+  .mask .wl{position:absolute;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.16);border-radius:8px}
+  .coach{position:absolute;left:50%;transform:translateX(-50%);top:20px;display:flex;align-items:center;gap:12px;
+    background:rgba(255,255,255,.96);border-radius:14px;padding:11px 18px;box-shadow:0 10px 26px rgba(0,0,0,.3)}
+  .coach .sn{width:24px;height:24px;font-size:12px}
+  .coach .ct{font-size:13px;color:var(--ink);font-weight:600}
+  .coach .cs{font-size:11.5px;color:var(--ink-3)}
+  .sel{position:absolute;left:200px;top:96px;width:440px;height:210px;border:1.5px solid #b9a8ff;
+    box-shadow:0 0 0 9999px rgba(24,18,40,.5);border-radius:4px}
+  .cbar{position:absolute;left:200px;top:320px;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.96);
+    border-radius:14px;padding:8px 10px;box-shadow:0 10px 26px rgba(0,0,0,.3)}
+  .cbar .tb{width:32px;height:32px;border:none;background:transparent}
+  .cbar .sz{font-size:12px;color:var(--ink-2);padding:0 8px}
+  .cbar .go{height:34px;padding:0 18px;border-radius:11px;background:var(--violet);color:#fff;font-size:13px;
+    font-weight:700;display:flex;align-items:center;gap:7px}
+  .cbar .go svg{width:15px;height:15px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---------- 输出页（第 3 步） ---------- */
+  .out{padding:8px 40px 32px}
+  .previewbox{margin-top:20px;border:1px solid var(--line);border-radius:16px;background:#f7f5fc;
+    height:200px;display:grid;place-items:center;position:relative;overflow:hidden}
+  .previewbox .shot{width:300px;height:172px;box-shadow:0 10px 24px rgba(60,45,110,.18)}
+  .previewbox .fake-body{height:146px}
+  .outacts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:20px}
+  .oa{border:1.5px solid var(--line);border-radius:14px;padding:16px;background:#fff;display:flex;gap:12px;align-items:flex-start}
+  .oa.pri{border-color:var(--violet);background:var(--violet-soft)}
+  .oa .oi{width:36px;height:36px;border-radius:11px;background:#f2effa;display:grid;place-items:center;flex:0 0 auto}
+  .oa.pri .oi{background:#fff}
+  .oa .oi svg{width:19px;height:19px;stroke:var(--violet);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .oa h4{font-size:14px;font-weight:700}
+  .oa p{font-size:11.5px;color:var(--ink-2);margin-top:5px;line-height:1.6}
+  .oa .kbd2{margin-top:8px;font-size:11px;color:var(--ink-3)}
+
+  .note{margin-top:12px;font-size:12.5px;color:var(--ink-2);line-height:1.7}
+  .kicker{margin-top:22px;background:#fff;border:1px solid var(--line);border-left:3px solid var(--violet);
+    border-radius:10px;padding:14px 16px;font-size:13px;color:var(--ink-2);line-height:1.8}
+  .kicker b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="page-head">
+    <div class="tag">方案 F · 第二批</div>
+    <h1>三步向导 · 选区域 → 标注 → 输出</h1>
+    <p class="lede">
+      现有流程其实是「框选 → 确定 → 编辑器 → 复制」，但界面上没有任何地方告诉用户这件事。
+      这版把它显性化成<b>三步向导</b>：每个窗口顶部都有一条步骤条，当前步高亮、已完成步打勾，
+      编辑器右下角永远是同一个「下一步：输出」。用户随时知道自己在哪、还差几步。
+    </p>
+    <div class="chips">
+      <span class="chip">淡紫底 #F6F5FB</span>
+      <span class="chip">主紫 #6D5CE7</span>
+      <span class="chip">步骤条贯穿三个窗口</span>
+      <span class="chip">工具按用途分三组</span>
+      <span class="chip">每步只有一个主按钮</span>
+    </div>
+  </header>
+
+  <!-- 1. 主窗口 -->
+  <section class="block">
+    <h2><span class="no">1</span>主窗口 · 第 1 步「选区域」</h2>
+    <p class="desc">
+      窗口 <b>900×520</b>。步骤条在第 1 步，下面三张模式卡是单选（选中卡右上角打勾），
+      底部只有一个主按钮「开始截图」。滚动长截图单独放一行虚线卡——它是独立命令，
+      不进三步流程，视觉上就和三步分开。
+    </p>
+
+    <div class="stage">
+      <div class="win">
+        <div class="titlebar"><span class="tb-title">截屏助手</span>
+          <div class="tb-right">
+            <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+            <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+            <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+          </div>
+        </div>
+        <div class="steps">
+          <div class="step on"><span class="sn">1</span><span class="st">选区域</span></div>
+          <div class="sline"></div>
+          <div class="step"><span class="sn">2</span><span class="st">标注</span></div>
+          <div class="sline"></div>
+          <div class="step"><span class="sn">3</span><span class="st">输出</span></div>
+        </div>
+        <div class="wiz">
+          <h3>想怎么截？</h3>
+          <div class="lead">选一种方式，截完会进入标注；不需要标注的话，截完直接复制也可以。</div>
+          <div class="modes">
+            <div class="mode sel">
+              <div class="mi"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></div>
+              <h4>框选截图</h4><p>按住左键拖出矩形<br>松手后可微调选区</p>
+            </div>
+            <div class="mode">
+              <div class="mi"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></div>
+              <h4>窗口截图</h4><p>悬停高亮目标窗口<br>单击即完整截下</p>
+            </div>
+            <div class="mode">
+              <div class="mi"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+              <h4>全屏截图</h4><p>整块桌面一次截下<br>直接进入标注</p>
+            </div>
+          </div>
+          <div class="longline">
+            <svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg>
+            <div><h5>滚动长截图</h5><p>独立命令：点窗口自动滚拼，不走这三步</p></div>
+            <span class="r">开始 ›</span>
+          </div>
+          <div class="wizfoot">
+            <span class="ghost">热键 Ctrl+Shift+A</span>
+            <span class="ghost">贴图 Ctrl+Shift+P</span>
+            <span class="ghost">设置</span>
+            <span class="primary">开始截图<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+          </div>
+          <div class="tip">托盘常驻 · 关闭窗口不会退出程序 · 截图中按 Esc 取消</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 编辑器 -->
+  <section class="block">
+    <h2><span class="no">2</span>标注编辑器 · 第 2 步，工具按用途分组</h2>
+    <p class="desc">
+      步骤条第 1 步打勾、第 2 步高亮。7 个标注工具不再平铺，而是按用途分成三组：
+      <b>圈重点</b>（矩形 / 椭圆 / 箭头）、<b>写说明</b>（画笔 / 文字）、<b>遮隐私</b>（马赛克）。
+      右侧栏下半部分固定是「下一步：输出」按钮，位置永远不变。
+    </p>
+
+    <div class="stage">
+      <div class="win">
+        <div class="titlebar"><span class="tb-title">截屏助手 - 截图编辑</span>
+          <div class="tb-right">
+            <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+            <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+            <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+          </div>
+        </div>
+        <div class="steps" style="padding-top:16px">
+          <div class="step done"><span class="sn"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="st">选区域</span></div>
+          <div class="sline done"></div>
+          <div class="step on"><span class="sn">2</span><span class="st">标注</span></div>
+          <div class="sline"></div>
+          <div class="step"><span class="sn">3</span><span class="st">输出</span></div>
+        </div>
+        <div class="groups">
+          <div class="gt"><h5>圈重点</h5><div class="row">
+            <span class="tb on"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/></svg></span>
+            <span class="tb"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></span>
+            <span class="tb"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M15 4h5v5"/></svg></span>
+          </div></div>
+          <div class="gt"><h5>写说明</h5><div class="row">
+            <span class="tb"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/></svg></span>
+            <span class="tb"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></span>
+          </div></div>
+          <div class="gt"><h5>遮隐私</h5><div class="row">
+            <span class="tb"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+          </div></div>
+        </div>
+        <div class="edbody">
+          <div class="edcanvas">
+            <div class="shot">
+              <div class="fake-top"><i></i><i></i><i></i></div>
+              <div class="fake-body">
+                <div class="fake-side"><i></i><i></i><i></i></div>
+                <div class="fake-main">
+                  <i class="t"></i><i class="s"></i><i class="s2"></i>
+                  <i style="margin-top:14px"></i><i class="s"></i>
+                </div>
+              </div>
+              <div class="anno">
+                <svg viewBox="0 0 470 272">
+                  <rect x="150" y="36" width="230" height="78" rx="4" fill="none" stroke="#e5497a" stroke-width="2.5"/>
+                  <path d="M272 116 L356 168" stroke="#e5497a" stroke-width="3" stroke-linecap="round"/>
+                  <path d="M356 168 L330 154 L342 182 Z" fill="#e5497a"/>
+                  <text x="156" y="204" font-size="14" font-family="Microsoft YaHei" fill="#e5497a">这里有问题</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+          <div class="nextside">
+            <div class="ns"><h5>当前标注</h5>
+              <div class="row"><span class="pillbtn">颜色</span><span class="pillbtn">线宽</span><span class="pillbtn">填充</span><span class="pillbtn">旋转</span></div></div>
+            <div class="ns"><h5>图像</h5>
+              <div class="row"><span class="pillbtn">顺旋</span><span class="pillbtn">逆旋</span><span class="pillbtn">镜像</span><span class="pillbtn">撤销</span></div></div>
+            <div class="ns done"><h5>不想标注？</h5>
+              <div class="desc2">直接点「取字」识别图中文字，或跳到下一步复制原图。</div>
+              <div class="row" style="margin-top:9px"><span class="pillbtn">OCR 取字</span><span class="pillbtn">钉在桌面</span></div></div>
+            <div class="nextbtn">下一步：输出 →</div>
+          </div>
+        </div>
+        <div class="edstatus">
+          <span>缩放 100%</span><span>4 个标注</span><span>导出为原图分辨率</span>
+          <span class="r"><span>Ctrl+Z 撤销</span><span>Enter 直接复制</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 遮罩 -->
+  <section class="block">
+    <h2><span class="no">3</span>截图遮罩 · 顶部一句话引导</h2>
+    <p class="desc">
+      遮罩顶部浮一条<b>教练条</b>：「第 1 步 · 拖出要截的区域」，让用户知道现在做的是三步里的哪一步。
+      框选完成后教练条消失，选区下方浮出确认条，主按钮直接写「下一步：标注」，
+      而不是只有含义模糊的「确定」。
+    </p>
+
+    <div class="stage" style="padding:26px">
+      <div class="mask">
+        <div class="desk"></div>
+        <div class="wl" style="left:44px;top:60px;width:200px;height:120px"></div>
+        <div class="wl" style="left:700px;top:70px;width:150px;height:280px"></div>
+        <div class="coach">
+          <span class="sn" style="background:var(--violet);color:#fff">1</span>
+          <div><div class="ct">拖出要截的区域</div><div class="cs">松手后可拖动选区或拖控制点微调 · Esc 取消</div></div>
+        </div>
+        <div class="sel"></div>
+        <div class="cbar">
+          <span class="tb"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/></svg></span>
+          <span class="tb"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></span>
+          <span class="sz">440 × 210</span>
+          <span class="tb"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
+          <span class="go">下一步：标注<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+        </div>
+      </div>
+    </div>
+    <div class="note">「复制」图标仍在最左侧：点它直接复制原图并关闭，跳过第 2、3 步——老用户的捷径保留。</div>
+  </section>
+
+  <!-- 4. 输出页 -->
+  <section class="block">
+    <h2><span class="no">4</span>输出页 · 第 3 步，三种去处</h2>
+    <p class="desc">
+      这是三套第一批方案里没有的一屏。现在「复制 / 保存 / 贴图」都挤在工具条上，
+      这版单独给输出一屏：上面是成图预览，下面三张去向卡，
+      「复制到剪贴板」是默认主项（对应现有 Enter / Ctrl+Enter）。
+    </p>
+
+    <div class="stage">
+      <div class="win">
+        <div class="titlebar"><span class="tb-title">截屏助手 - 输出</span>
+          <div class="tb-right">
+            <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+            <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+            <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+          </div>
+        </div>
+        <div class="steps" style="padding-top:18px">
+          <div class="step done"><span class="sn"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="st">选区域</span></div>
+          <div class="sline done"></div>
+          <div class="step done"><span class="sn"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="st">标注</span></div>
+          <div class="sline"></div>
+          <div class="step on"><span class="sn">3</span><span class="st">输出</span></div>
+        </div>
+        <div class="out">
+          <div class="previewbox">
+            <div class="shot">
+              <div class="fake-top"><i></i><i></i><i></i></div>
+              <div class="fake-body">
+                <div class="fake-side" style="width:56px"><i></i><i></i></div>
+                <div class="fake-main"><i class="t"></i><i class="s"></i><i class="s2"></i></div>
+              </div>
+              <div class="anno"><svg viewBox="0 0 300 172">
+                <rect x="96" y="22" width="146" height="50" rx="3" fill="none" stroke="#e5497a" stroke-width="2"/>
+                <path d="M172 74 L226 108" stroke="#e5497a" stroke-width="2.4" stroke-linecap="round"/>
+                <path d="M226 108 L210 98 L218 116 Z" fill="#e5497a"/></svg></div>
+            </div>
+          </div>
+          <div class="outacts">
+            <div class="oa pri">
+              <span class="oi"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+              <div><h4>复制到剪贴板</h4><p>带标注的成图，直接粘贴到微信 / 文档</p><div class="kbd2">Ctrl+Enter · 复制后自动关闭</div></div>
+            </div>
+            <div class="oa">
+              <span class="oi"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg></span>
+              <div><h4>另存为文件</h4><p>PNG / JPG，导出始终为原图分辨率</p><div class="kbd2">Ctrl+S</div></div>
+            </div>
+            <div class="oa">
+              <span class="oi"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></span>
+              <div><h4>钉在桌面</h4><p>贴成置顶浮窗，方便对照着看</p><div class="kbd2">可拖动 / 滚轮缩放</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="kicker">
+    <b>这套方案适合谁：</b>偶尔用、每次都要想一下「接下来点哪」的用户；也适合做成给新手的第一印象界面。
+    <b>代价：</b>①多出一屏「输出页」，熟练用户会嫌多一次点击——必须保留
+    <b>Enter 直接复制、工具条复制跳过输出页</b>的捷径，否则是退步；
+    ②步骤条要跨主窗口 / 遮罩 / 编辑器三个窗口同步状态，得在 <code>snap.py</code> 里加一个流程状态对象；
+    ③本质是把现有流程「摆到明面上」，<b>不改任何截图与标注逻辑</b>，后端零改动。
+  </div>
+
+</div>
+</body>
+</html>

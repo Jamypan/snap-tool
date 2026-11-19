@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案 E · 功能完整版界面（8 屏）</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:linear-gradient(180deg,#faf8f5,#efeae3);color:#1c1c1e;
+    font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:48px 32px 90px;
+  }
+  .page{max-width:1180px;margin:0 auto}
+  .tag{display:inline-block;background:#f97316;color:#fff;font-size:12px;font-weight:700;letter-spacing:.08em;
+    padding:5px 11px;border-radius:999px;margin-bottom:14px}
+  h1{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .lede{margin-top:10px;color:#6b6660;font-size:15px;line-height:1.8;max-width:820px}
+  .lede b{color:#1c1c1e}
+  .chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:#fff;border:1px solid #e9e4dc;border-radius:999px;padding:6px 12px;font-size:12.5px;color:#6b6660}
+
+  .list{margin-top:38px;display:flex;flex-direction:column;gap:34px}
+  .item{background:#fff;border:1px solid #e9e4dc;border-radius:16px;overflow:hidden;
+    box-shadow:0 14px 36px rgba(60,45,30,.09)}
+  .cap2{display:flex;align-items:baseline;gap:12px;padding:16px 20px;border-bottom:1px solid #f2eee8}
+  .num{width:26px;height:26px;border-radius:9px;background:#ffefe2;color:#f97316;font-size:12.5px;
+    font-weight:800;display:grid;place-items:center;flex:0 0 auto;align-self:center}
+  .cap2 h2{font-size:16px;font-weight:700}
+  .cap2 p{font-size:12.5px;color:#8c8378}
+  .cap2 .r{margin-left:auto;font-size:11.5px;color:#a89e92}
+  img{display:block;width:100%;height:auto}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="tag">方案 E · 功能完整版</div>
+  <h1>迷你悬浮条 · 8 屏静态界面</h1>
+  <p class="lede">
+    按你选的方案 E 出的完整版：<b>原软件的功能一个没少</b>，只是换了摆放位置——
+    菜单栏拆成命令面板、样式面板改成右侧浮层、取字/长截图/贴图都保留独立界面。
+    八张图按实际操作顺序排：桌面 → 选命令 → 框选 → 标注 → 菜单 → 取字 → 长截图 → 贴图。
+  </p>
+  <div class="chips">
+    <span class="chip">1280 × 800 @2x</span>
+    <span class="chip">奶油白 #FBFAF7 + 暖橙 #F97316</span>
+    <span class="chip">悬浮条 / 底部 Dock / 浮层面板</span>
+    <span class="chip">含 8 种语言、热键、平滑度等低频项</span>
+  </div>
+
+  <div class="list">
+    <div class="item"><div class="cap2"><span class="num">1</span><h2>桌面常态</h2>
+      <p>程序不弹主窗口，只在底部留一条 64px 高的悬浮条</p><span class="r">png/01.png</span></div>
+      <img src="png/01.png" alt="桌面常态"></div>
+
+    <div class="item"><div class="cap2"><span class="num">2</span><h2>完整命令面板</h2>
+      <p>点「⋯」展开：三种截图 + 长截图 + 取字 + 贴图 + 热键 + 语言 + 平滑度 + 帮助与退出</p><span class="r">png/02.png</span></div>
+      <img src="png/02.png" alt="命令面板"></div>
+
+    <div class="item"><div class="cap2"><span class="num">3</span><h2>框选遮罩</h2>
+      <p>选区 + 八个控制柄 + 尺寸 + 模式切换条 + 确认条（含复制原图、钉在桌面）</p><span class="r">png/03.png</span></div>
+      <img src="png/03.png" alt="框选遮罩"></div>
+
+    <div class="item"><div class="cap2"><span class="num">4</span><h2>标注编辑器</h2>
+      <p>无标题栏、画布优先，底部 Dock 装 7 种工具，右侧浮层是完整样式面板</p><span class="r">png/04.png</span></div>
+      <img src="png/04.png" alt="标注编辑器"></div>
+
+    <div class="item"><div class="cap2"><span class="num">5</span><h2>菜单与子菜单</h2>
+      <p>原「文件 / 编辑 / 视图」全部命令都在，图像变换、端点箭头、视图放缩都有入口</p><span class="r">png/05.png</span></div>
+      <img src="png/05.png" alt="菜单"></div>
+
+    <div class="item"><div class="cap2"><span class="num">6</span><h2>OCR 取字</h2>
+      <p>逐行盖回原文位置，蓝色跨行选中，工具条显示行数与后端</p><span class="r">png/06.png</span></div>
+      <img src="png/06.png" alt="OCR 取字"></div>
+
+    <div class="item"><div class="cap2"><span class="num">7</span><h2>滚动长截图</h2>
+      <p>目标窗口高亮 + 帧数/高度/匹配度控制条 + 长图预览</p><span class="r">png/07.png</span></div>
+      <img src="png/07.png" alt="滚动长截图"></div>
+
+    <div class="item"><div class="cap2"><span class="num">8</span><h2>贴图浮窗</h2>
+      <p>置顶浮窗 + 右键菜单（复制/另存/透明度/置顶/重置/关闭）+ 缩放比例</p><span class="r">png/08.png</span></div>
+      <img src="png/08.png" alt="贴图浮窗"></div>
+  </div>
+</div>
+</body>
+</html>

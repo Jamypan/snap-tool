@@ -556,6 +556,10 @@ class App:
                                       self.pen_smooth)
         self.main_window.capture_requested.connect(self.start_capture)
         self.main_window.long_capture_requested.connect(self.start_long_capture)
+        self.main_window.ocr_capture_requested.connect(self.start_ocr_capture)
+        self.main_window.pin_clipboard_requested.connect(
+            lambda: self.pin_clipboard()
+        )
         self.main_window.mode_changed.connect(self._on_mode_changed)
         self.main_window.hotkey_requested.connect(self.open_hotkey_settings)
         self.main_window.pin_hotkey_requested.connect(self.open_pin_hotkey_settings)
@@ -957,6 +961,14 @@ class App:
         if not isinstance(mode, str) or mode not in CAPTURE_MODES:
             mode = self.capture_mode
         self._begin_capture(mode, long_mode=False)
+
+    def start_ocr_capture(self) -> None:
+        """v38：框选一个区域后直接取字（不打开编辑器）。"""
+        if self.overlay is not None or self.busy is not None:
+            return
+        self._begin_capture("rect", long_mode=False)
+        if self.overlay is not None:
+            self.overlay.set_auto_ocr(True)
 
     def start_long_capture(self) -> None:
         """独立命令「滚动长截图」：悬停选窗口 → 单击即自动向下滚屏拼接。

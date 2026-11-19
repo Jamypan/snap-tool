@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案 B · 极简启动器 — 截屏助手 UI 设计</title>
+<style>
+  :root{
+    --bg:#f6f6f5;
+    --panel:#ffffff;
+    --ink:#121212;
+    --ink-2:#6b6b6b;
+    --ink-3:#9e9e9e;
+    --line:#ececec;
+    --line-2:#f2f2f2;
+    --blue:#2f6bff;
+    --blue-soft:#eef3ff;
+    --shadow:0 24px 60px rgba(10,10,12,.14), 0 1px 2px rgba(10,10,12,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:linear-gradient(180deg,#fafafa 0%,#f1f1f0 100%);
+    color:var(--ink);
+    font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:44px 28px 80px;
+  }
+  .page{max-width:940px;margin:0 auto}
+  .page-head{margin-bottom:38px}
+  .tag{display:inline-block;background:#121212;color:#fff;font-size:12px;font-weight:700;letter-spacing:.08em;
+    padding:5px 11px;border-radius:999px;margin-bottom:14px}
+  h1{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .lede{margin-top:10px;color:var(--ink-2);font-size:15px;line-height:1.75;max-width:740px}
+  .chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;color:var(--ink-2)}
+
+  .block{margin-top:44px}
+  .block h2{font-size:19px;font-weight:700;display:flex;align-items:center;gap:10px}
+  .block h2 .no{width:24px;height:24px;border-radius:7px;background:#121212;color:#fff;font-size:12.5px;
+    display:grid;place-items:center;font-weight:800}
+  .desc{margin-top:8px;color:var(--ink-2);font-size:14px;line-height:1.8;max-width:760px}
+  .desc b{color:var(--ink)}
+
+  .stage{margin-top:18px;padding:26px;border-radius:18px;background:#ececeb;
+    border:1px solid #e2e2e0;display:flex;justify-content:center}
+
+  .win{width:700px;max-width:100%;background:var(--panel);border-radius:14px;overflow:hidden;
+    box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.06)}
+
+  /* 标题栏：与 Windows 11 一致的极简标题栏 */
+  .titlebar{height:36px;display:flex;align-items:center;padding:0 10px 0 14px;border-bottom:1px solid var(--line-2)}
+  .tb-title{font-size:12px;color:var(--ink-3);font-weight:600}
+  .tb-right{margin-left:auto;display:flex;gap:14px;color:#b5b5b5}
+  .tb-right svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.3}
+
+  /* ---------- 启动器主体 ---------- */
+  .launch{padding:0 0 10px}
+  .search{display:flex;align-items:center;gap:12px;padding:20px 22px 16px;border-bottom:1px solid var(--line-2)}
+  .search .mag{width:19px;height:19px;stroke:var(--ink-3);fill:none;stroke-width:1.7;flex:0 0 auto}
+  .search input{flex:1;border:none;outline:none;font-size:18px;font-family:inherit;color:var(--ink);background:transparent}
+  .search input::placeholder{color:#c2c2c2}
+  .cursor{display:inline-block;width:1.5px;height:19px;background:var(--ink);vertical-align:-3px;animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .esc{font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:5px;padding:2px 6px}
+
+  .group-label{padding:14px 22px 7px;font-size:11px;color:var(--ink-3);font-weight:700;letter-spacing:.08em}
+  .cmd{display:flex;align-items:center;gap:13px;padding:10px 22px;margin:0 8px;border-radius:9px}
+  .cmd.sel{background:var(--blue-soft)}
+  .cmd .ci{width:28px;height:28px;border-radius:8px;background:var(--line-2);display:grid;place-items:center;flex:0 0 auto}
+  .cmd.sel .ci{background:#fff;box-shadow:0 1px 3px rgba(47,107,255,.22)}
+  .cmd .ci svg{width:15px;height:15px;stroke:var(--ink-2);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .cmd.sel .ci svg{stroke:var(--blue)}
+  .cmd .ct{font-size:14.5px;color:var(--ink)}
+  .cmd.sel .ct{font-weight:600}
+  .cmd .cs{margin-left:auto;font-size:11.5px;color:var(--ink-3)}
+  .cmd .cs kbd{font-family:inherit;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;
+    padding:1px 5px;font-size:10.5px;color:var(--ink-2);background:#fff}
+  .cmd.sel .cs kbd{border-color:#c9dbff;color:var(--blue)}
+
+  .divider{height:1px;background:var(--line-2);margin:8px 22px}
+  .launch-foot{display:flex;align-items:center;gap:16px;padding:10px 22px 4px;font-size:11.5px;color:var(--ink-3)}
+  .launch-foot b{font-weight:600;color:var(--ink-2)}
+  .launch-foot .right{margin-left:auto;display:flex;gap:14px}
+  .dotlive{width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;margin-right:6px}
+
+  /* ---------- 极简编辑器 ---------- */
+  .ed{display:flex;flex-direction:column;height:470px}
+  .ed-bar{height:46px;display:flex;align-items:center;gap:4px;padding:0 12px;border-bottom:1px solid var(--line-2)}
+  .eb{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--ink-2)}
+  .eb svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .eb.on{background:var(--ink);color:#fff}
+  .ebv{width:1px;height:20px;background:var(--line);margin:0 5px}
+  .ed-bar .sp{flex:1}
+  .zoom{font-size:11.5px;color:var(--ink-3);padding:0 8px}
+  .act{height:32px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);
+    font-size:12.5px;padding:0 12px;font-family:inherit;display:flex;align-items:center;gap:6px}
+  .act.pri{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600}
+  .act svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .canvas{flex:1;background:#f0f0ef;display:grid;place-items:center;position:relative}
+  .shot{width:520px;height:296px;background:#fff;border-radius:4px;overflow:hidden;position:relative;
+    box-shadow:0 8px 24px rgba(0,0,0,.14)}
+  .fake-top{height:28px;background:#f3f3f3;border-bottom:1px solid #e8e8e8;display:flex;align-items:center;gap:5px;padding:0 10px}
+  .fake-top i{width:8px;height:8px;border-radius:50%;background:#dcdcdc;display:block}
+  .fake-body{display:flex;height:268px}
+  .fake-side{width:92px;background:#fafafa;border-right:1px solid #eee;padding:12px 10px}
+  .fake-side i{display:block;height:8px;border-radius:3px;background:#eaeaea;margin-bottom:9px}
+  .fake-main{flex:1;padding:14px 16px}
+  .fake-main i{display:block;height:9px;border-radius:3px;background:#f0f0f0;margin-bottom:10px}
+  .fake-main i.t{height:13px;background:#e2e2e2;width:54%}
+  .fake-main i.s{width:82%}
+  .fake-main i.s2{width:60%}
+  .anno{position:absolute;inset:0;pointer-events:none}
+  .anno svg{width:100%;height:100%}
+  .ed-status{height:30px;border-top:1px solid var(--line-2);display:flex;align-items:center;padding:0 14px;
+    font-size:11.5px;color:var(--ink-3);background:#fff}
+  .ed-status .right{margin-left:auto;display:flex;gap:14px}
+
+  /* 浮层样式面板 */
+  .pop{position:absolute;right:16px;top:60px;width:210px;background:#fff;border:1px solid var(--line);
+    border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.16);padding:14px}
+  .pop h4{font-size:11.5px;color:var(--ink-3);font-weight:700;letter-spacing:.05em;margin-bottom:11px}
+  .fld{margin-bottom:12px}
+  .fld label{display:block;font-size:11px;color:var(--ink-3);margin-bottom:6px}
+  .sw{display:flex;gap:6px}
+  .sw span{width:20px;height:20px;border-radius:6px;border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .sw span.on{box-shadow:0 0 0 2px var(--blue)}
+  .slider{height:4px;border-radius:99px;background:#eee;position:relative}
+  .slider i{position:absolute;left:0;top:0;bottom:0;width:45%;background:var(--ink);border-radius:99px}
+  .slider b{position:absolute;left:calc(45% - 6px);top:-4px;width:12px;height:12px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+
+  /* ---------- 遮罩 ---------- */
+  .mask{position:relative;width:700px;height:400px;background:#23262b;overflow:hidden}
+  .mask .desk{position:absolute;inset:0;background:linear-gradient(150deg,#2c3038,#3d434c 60%,#333941)}
+  .mask .wl{position:absolute;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.16);border-radius:8px}
+  .sel2{position:absolute;left:120px;top:70px;width:380px;height:200px;border:1.5px solid #fff;
+    box-shadow:0 0 0 9999px rgba(0,0,0,.5)}
+  .hud{position:absolute;left:50%;transform:translateX(-50%);bottom:22px;display:flex;align-items:center;gap:10px;
+    background:rgba(18,18,18,.86);backdrop-filter:blur(8px);border-radius:999px;padding:7px 9px 7px 16px;
+    color:#f2f2f2;font-size:12.5px}
+  .hud kbd{font-family:inherit;background:rgba(255,255,255,.14);border-radius:5px;padding:2px 6px;font-size:11px}
+  .hud button{width:30px;height:30px;border-radius:50%;border:none;background:rgba(255,255,255,.14);color:#fff;
+    display:grid;place-items:center;cursor:default}
+  .hud button svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+  .hud button.ok{background:#fff;color:#121212}
+  .hud .dim{opacity:.55}
+
+  .note{margin-top:12px;font-size:12.5px;color:var(--ink-2);line-height:1.7}
+  .kicker{margin-top:22px;background:#fff;border:1px solid var(--line);border-left:3px solid #121212;
+    border-radius:10px;padding:14px 16px;font-size:13px;color:var(--ink-2);line-height:1.8}
+  .kicker b{color:var(--ink)}
+  .kbd{background:#f3f3f3;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;
+    font-size:12px;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="page-head">
+    <div class="tag">方案 B</div>
+    <h1>极简启动器 · 键盘优先</h1>
+    <p class="lede">
+      假设主力用户是「一秒钟截图、复制、关掉」的效率党。整套界面砍到只剩一个输入框和一张命令表：
+      打开就是搜索框，输「框」「滚」「取」直接过滤，回车执行，Esc 关闭。视觉上接近纯黑白，
+      只在选中项留一点蓝。功能不减少——七个常用命令摆在首页，低频命令靠输入唤出。
+    </p>
+    <div class="chips">
+      <span class="chip">黑白灰 + 单一蓝 #2F6BFF</span>
+      <span class="chip">无卡片、无分割线堆砌</span>
+      <span class="chip">键盘可达（↑↓ / Enter / Esc）</span>
+      <span class="chip">窗口更小更快</span>
+    </div>
+  </header>
+
+  <!-- 1. 启动器 -->
+  <section class="block">
+    <h2><span class="no">1</span>主窗口 · 变成一个搜索框</h2>
+    <p class="desc">
+      窗口缩到 <b>700×520</b>，启动即聚焦输入框。第一组是四个截图命令（框选 / 窗口 / 全屏 / 滚动长截图），
+      第二组是编辑与输出（OCR 取字 / 贴图到桌面 / 打开保存目录），
+      第三组折叠成「更多命令」一行，输「热」「语言」「平滑」等关键词才出现。
+      底部一行常驻快捷键提示和托盘状态。
+    </p>
+
+    <div class="stage">
+      <div class="win">
+        <div class="titlebar">
+          <span class="tb-title">截屏助手</span>
+          <div class="tb-right">
+            <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+            <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+            <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+          </div>
+        </div>
+        <div class="launch">
+          <div class="search">
+            <svg class="mag" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+            <input value="截" readonly>
+            <span class="cursor"></span>
+            <span class="esc">Esc 关闭</span>
+          </div>
+
+          <div class="group-label">截图</div>
+          <div class="cmd sel">
+            <span class="ci"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="4 3"/></svg></span>
+            <span class="ct">框选截图</span>
+            <span class="cs">默认模式 <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></span>
+          </div>
+          <div class="cmd">
+            <span class="ci"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></span>
+            <span class="ct">窗口截图</span>
+            <span class="cs"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>W</kbd></span>
+          </div>
+          <div class="cmd">
+            <span class="ci"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+            <span class="ct">全屏截图</span>
+            <span class="cs"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></span>
+          </div>
+          <div class="cmd">
+            <span class="ci"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="13" rx="2"/><path d="M12 18v3"/><path d="M9 19.5l3 2.5 3-2.5"/></svg></span>
+            <span class="ct">滚动长截图</span>
+            <span class="cs">点窗口自动滚拼</span>
+          </div>
+
+          <div class="divider"></div>
+          <div class="group-label">编辑与输出</div>
+          <div class="cmd">
+            <span class="ci"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></span>
+            <span class="ct">OCR 取字</span>
+            <span class="cs">从剪贴板图片识别</span>
+          </div>
+          <div class="cmd">
+            <span class="ci"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></span>
+            <span class="ct">贴图到桌面</span>
+            <span class="cs"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>
+          </div>
+          <div class="cmd">
+            <span class="ci"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+            <span class="ct">打开保存目录</span>
+            <span class="cs">Pictures / SnapTool</span>
+          </div>
+
+          <div class="cmd" style="opacity:.72">
+            <span class="ci"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg></span>
+            <span class="ct">更多命令…</span>
+            <span class="cs">热键 / 语言 / 画笔平滑度 / 退出</span>
+          </div>
+
+          <div class="launch-foot">
+            <span><span class="dotlive"></span>托盘常驻中</span>
+            <span><b>↑↓</b> 选择</span><span><b>Enter</b> 执行</span><span><b>Esc</b> 关闭</span>
+            <span class="right"><b>Ctrl</b>+<b>Shift</b>+<b>A</b> 随时唤起</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 编辑器 -->
+  <section class="block">
+    <h2><span class="no">2</span>标注编辑器 · 一条工具栏 + 浮动样式面板</h2>
+    <p class="desc">
+      工具栏压到 <b>46px 一行</b>：左边是绘图工具（选中态用黑底反白，视觉最强），
+      右边是「取字 / 撤销 / 旋转 / 复制 / 保存」。样式面板继续做成浮动小窗，
+      但改成白底 + 更圆角 + 更轻阴影，跟在光标附近，避免像现在这样遮住画面。
+    </p>
+
+    <div class="stage">
+      <div class="win">
+        <div class="titlebar">
+          <span class="tb-title">截屏助手 - 截图编辑</span>
+          <div class="tb-right">
+            <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+            <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+            <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+          </div>
+        </div>
+        <div class="ed">
+          <div class="ed-bar">
+            <div class="eb on"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M15 4h5v5"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><path d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+            <div class="ebv"></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></div>
+            <div class="eb"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></svg></div>
+            <div class="sp"></div>
+            <span class="zoom">100%</span>
+            <div class="ebv"></div>
+            <div class="act"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>取字</div>
+            <div class="act"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>保存</div>
+            <div class="act pri"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>复制</div>
+          </div>
+          <div class="canvas">
+            <div class="shot">
+              <div class="fake-top"><i></i><i></i><i></i></div>
+              <div class="fake-body">
+                <div class="fake-side"><i></i><i></i><i></i><i></i><i></i></div>
+                <div class="fake-main">
+                  <i class="t"></i><i class="s"></i><i class="s2"></i>
+                  <i style="margin-top:16px"></i><i class="s"></i><i class="s2"></i>
+                </div>
+              </div>
+              <div class="anno">
+                <svg viewBox="0 0 520 296">
+                  <rect x="168" y="40" width="250" height="86" rx="4" fill="none" stroke="#ff4d4f" stroke-width="2.5"/>
+                  <path d="M300 128 L392 186" stroke="#ff4d4f" stroke-width="3" stroke-linecap="round"/>
+                  <path d="M392 186 L366 172 L378 199 Z" fill="#ff4d4f"/>
+                  <text x="176" y="222" font-size="15" font-family="Microsoft YaHei" fill="#ff4d4f">标注</text>
+                </svg>
+              </div>
+            </div>
+            <div class="pop">
+              <h4>矩形 · 样式</h4>
+              <div class="fld">
+                <label>线条颜色</label>
+                <div class="sw"><span style="background:#ff4d4f"></span><span class="on" style="background:#111"></span><span style="background:#2f6bff"></span><span style="background:#22c55e"></span></div>
+              </div>
+              <div class="fld"><label>线宽 2 px</label><div class="slider"><i style="width:30%"></i><b style="left:calc(30% - 6px)"></b></div></div>
+              <div class="fld"><label>填充透明度 0%</label><div class="slider"><i style="width:6%"></i><b style="left:calc(6% - 6px)"></b></div></div>
+              <div class="fld"><label>旋转角度 0°</label><div class="slider"><i style="width:4%"></i><b style="left:calc(4% - 6px)"></b></div></div>
+            </div>
+          </div>
+          <div class="ed-status">
+            <span>4 个标注</span><span>导出为原图分辨率</span>
+            <span class="right"><span>Ctrl+Z 撤销</span><span>Ctrl+Enter 复制</span><span>Esc 关闭</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 遮罩 HUD -->
+  <section class="block">
+    <h2><span class="no">3</span>截图遮罩 · 底部半透明 HUD</h2>
+    <p class="desc">
+      框选完成后，选区下方浮出一条<b>深色半透明胶囊 HUD</b>（Windows 11 截图工具同款观感）：
+      左边显示选区尺寸，右边是「复制 / 编辑 / 取消 / 确定」四个圆形按钮。
+      深色浮层压在亮色桌面上，识别度最高，且不遮住选区内容。
+    </p>
+
+    <div class="stage" style="padding:26px">
+      <div class="mask" style="border-radius:12px;box-shadow:var(--shadow)">
+        <div class="desk"></div>
+        <div class="wl" style="left:34px;top:38px;width:200px;height:118px"></div>
+        <div class="wl" style="left:540px;top:52px;width:140px;height:300px"></div>
+        <div class="wl" style="left:48px;top:286px;width:190px;height:76px"></div>
+        <div class="sel2"></div>
+        <div class="hud">
+          <span>520 × 300</span>
+          <button><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/></svg></button>
+          <button><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
+          <button class="dim"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          <button class="ok"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="note">按钮顺序：复制原图（不打开编辑器）→ 进编辑器 → 取消 → 确定 ✓。选区四角保留 8 个控制柄可调大小。</div>
+  </section>
+
+  <div class="kicker">
+    <b>这套方案适合谁：</b>把截图当「系统级快捷操作」的重度用户，一天按几十次。
+    <b>代价：</b>鼠标用户没有大按钮可点，所有命令都得先打字或方向键，
+    对完全不懂快捷键的新手反而更难用；并且现有「菜单栏 + 三模式按钮 + 热键卡」的结构基本要重写，
+    <code>snapui.py</code> 的 <code>_build_body</code> 需要整体重做。
+  </div>
+
+</div>
+</body>
+</html>
