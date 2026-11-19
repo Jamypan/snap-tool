@@ -5484,8 +5484,200 @@ def test_v35_window_capture_accuracy() -> None:
            f"v35={'v35' in readme} window={'窗口截图' in readme}")
 
 
+# ---------------------------------------------------------------------------
+# Stage AH — v36 取字跨行选择 + 编辑器光标「不画图显示箭头」
+# ---------------------------------------------------------------------------
+def test_v36_ocr_multiline_and_cursor() -> None:
+    print("\n--- Stage AH: v36 取字跨行选择 + 光标修复 ---")
+    import inspect
+    from pathlib import Path
+
+    from PySide6.QtCore import QEvent, QPointF, QRect, Qt
+    from PySide6.QtGui import QKeyEvent, QMouseEvent
+
+    from snapeditor import OcrLayer, Overlay
+
+    def raw_mouse(typ: QEvent.Type, widget, lp: QPointF) -> QMouseEvent:
+        """在 widget 本地坐标系造鼠标事件（取字层/遮罩都是本地坐标）。"""
+        return QMouseEvent(typ, lp, lp, Qt.LeftButton, Qt.LeftButton,
+                           Qt.NoModifier)
+
+    base = make_image(1600, 900)
+    ed = EditorWindow(base, [], None)
+    ed.resize(1000, 680)
+    ed.show()
+    cv = ed.canvas
+    cv._fit()
+
+    lines = [
+        {"text": "第一行文字", "box": [100, 80, 420, 120], "score": 0.98},
+        {"text": "第二行文字", "box": [100, 200, 420, 240], "score": 0.95},
+        {"text": "末行", "box": [600, 700, 900, 745], "score": 0.90},
+    ]
+    cv.show_ocr_lines(lines, "rapidocr")
+    lay = cv.ocr_layer
+    blocks = lay._ordered_blocks()
+    ok_ah1 = (
+        len(blocks) == 3
+        and blocks[0].geometry().top() <= blocks[1].geometry().top()
+        <= blocks[2].geometry().top()
+    )
+    record("AH1 行块按阅读顺序排列", ok_ah1,
+           f"tops={[b.geometry().top() for b in blocks]}")
+
+    # AH2 行块鼠标/焦点穿透，拖选统一由层接管
+    ok_ah2 = (
+        all(bool(b.testAttribute(Qt.WA_TransparentForMouseEvents)) for b in blocks)
+        and all(b.focusPolicy() == Qt.NoFocus for b in blocks)
+        and lay.focusPolicy() == Qt.StrongFocus
+        and lay.cursor().shape() == Qt.IBeamCursor
+    )
+    record("AH2 行块鼠标穿透、层接管拖选", ok_ah2,
+           f"transparent={[bool(b.testAttribute(Qt.WA_TransparentForMouseEvents)) for b in blocks]} "
+           f"layer_cursor={lay.cursor().shape()}")
+
+    # AH3 跨行拖选：按下→拖到第三行文字末端，三行都被选中，文本按行拼接
+    # （取点贴文字：离屏/回退字体下块可能比文字宽，中心点会落在文字外）
+    p0 = QPointF(blocks[0].geometry().left() + 6,
+                 blocks[0].geometry().center().y())
+    p2 = QPointF(blocks[2].geometry().right() - 4,
+                 blocks[2].geometry().center().y())
+    lay.mousePressEvent(raw_mouse(QEvent.Type.MouseButtonPress, lay, p0))
+    lay.mouseMoveEvent(raw_mouse(QEvent.Type.MouseMove, lay, p2))
+    sel_counts = [len(b.extraSelections()) for b in blocks]
+    txt = lay._selection_text()
+    ok_ah3 = (
+        all(c == 1 for c in sel_counts)
+        and txt == "第一行文字\n第二行文字\n末行"
+    )
+    record("AH3 跨行拖选高亮并按行拼接", ok_ah3,
+           f"sel_counts={sel_counts} txt={txt!r}")
+
+    # AH4 复制选区：内容进剪贴板并触发收起反馈
+    lay.copy_selection()
+    clip = QApplication.clipboard().text()
+    ok_ah4 = clip == "第一行文字\n第二行文字\n末行" and lay._closing
+    record("AH4 复制跨行选区到剪贴板", ok_ah4, f"clip={clip!r} closing={lay._closing}")
+
+    # AH5 反向拖选（从下往上）与部分选区顺序无关
+    cv.show_ocr_lines(lines, "rapidocr")
+    lay2 = cv.ocr_layer
+    b = lay2._ordered_blocks()
+    lay2.mousePressEvent(raw_mouse(QEvent.Type.MouseButtonPress, lay2,
+                                   QPointF(b[2].geometry().right() - 4,
+                                           b[2].geometry().center().y())))
+    lay2.mouseMoveEvent(raw_mouse(QEvent.Type.MouseMove, lay2,
+                                  QPointF(b[0].geometry().left() + 6,
+                                          b[0].geometry().center().y())))
+    ok_ah5 = lay2._selection_text() == "第一行文字\n第二行文字\n末行"
+    record("AH5 反向拖选结果一致", ok_ah5, f"txt={lay2._selection_text()!r}")
+
+    # AH6 Ctrl+A 全选
+    lay2.select_all()
+    ok_ah6 = len(lay2._selection_text().splitlines()) == 3 and all(
+        len(e.extraSelections()) == 1 for e in lay2._blocks
+    )
+    record("AH6 Ctrl+A 全选", ok_ah6, f"txt={lay2._selection_text()!r}")
+
+    # AH7 双击选词：只选中所在行
+    cv.show_ocr_lines(lines, "rapidocr")
+    lay3 = cv.ocr_layer
+    b3 = lay3._ordered_blocks()
+    dbl = QMouseEvent(QEvent.Type.MouseButtonDblClick,
+                      QPointF(b3[1].geometry().center()),
+                      QPointF(b3[1].geometry().center()),
+                      Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    lay3.mouseDoubleClickEvent(dbl)
+    mid_sels = b3[1].extraSelections()
+    mid_sel = len(mid_sels) == 1
+    others_clear = len(b3[0].extraSelections()) == 0 and len(b3[2].extraSelections()) == 0
+    word_txt = mid_sels[0].cursor.selectedText() if mid_sel else ""
+    ok_ah7 = mid_sel and others_clear and len(word_txt) > 0
+    record("AH7 双击选词（仅所在行高亮）", ok_ah7, f"word={word_txt!r}")
+
+    # AH8 空白处定位：取竖直方向最近的行块（Word 式隔空选行）
+    gap_pt = QPointF((b3[0].geometry().left() + b3[1].geometry().left()) // 2 + 10,
+                     (b3[0].geometry().bottom() + b3[1].geometry().top()) // 2)
+    loc = lay3._locate(gap_pt.toPoint())
+    ok_ah8 = loc is not None and loc[0] in (b3[0], b3[1])
+    record("AH8 行间空白定位到最近行块", ok_ah8,
+           f"nearest={'第一行' if loc and loc[0] is b3[0] else '第二行'}")
+
+    # AH9 层级按键：Esc 关闭 / Ctrl+A 全选（焦点在层上）
+    cv.show_ocr_lines(lines, "rapidocr")
+    lay4 = cv.ocr_layer
+    lay4.select_all()
+    lay4.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key_A,
+                                 Qt.ControlModifier))
+    ok_ah9a = all(len(e.extraSelections()) == 1 for e in lay4._blocks)
+    lay4.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key_Escape,
+                                 Qt.NoModifier))
+    ok_ah9b = not cv._ocr_active()
+    record("AH9 层内 Ctrl+A 全选 / Esc 关闭", ok_ah9a and ok_ah9b,
+           f"ctrl_a={ok_ah9a} esc={ok_ah9b}")
+
+    # AH10 画布光标：初始与悬停都是箭头，绘制按下时十字，松开回箭头
+    ok_ah10a = cv.cursor().shape() == Qt.ArrowCursor
+    cv._tool = "arrow"
+    cv.mouseMoveEvent(mouse_event(QEvent.Type.MouseMove, cv, QPoint(300, 300)))
+    ok_ah10b = cv.cursor().shape() == Qt.ArrowCursor
+    cv.mousePressEvent(mouse_event(QEvent.Type.MouseButtonPress, cv,
+                                   QPoint(100, 100)))
+    ok_ah10c = cv.cursor().shape() == Qt.CrossCursor and cv._mode == "drawing"
+    cv.mouseReleaseEvent(mouse_event(QEvent.Type.MouseButtonRelease, cv,
+                                     QPoint(400, 300)))
+    ok_ah10d = cv.cursor().shape() == Qt.ArrowCursor
+    record("AH10 画布：绘制时“+”，不画图箭头",
+           ok_ah10a and ok_ah10b and ok_ah10c and ok_ah10d,
+           f"init={ok_ah10a} hover={ok_ah10b} drawing={ok_ah10c} released={ok_ah10d}")
+
+    # AH11 选择工具悬停空区域也用箭头（不再显示十字）
+    cv._tool = "select"
+    cv.mouseMoveEvent(mouse_event(QEvent.Type.MouseMove, cv, QPoint(500, 500)))
+    ok_ah11 = cv.cursor().shape() == Qt.ArrowCursor
+    record("AH11 选择工具空区域箭头", ok_ah11, f"cursor={cv.cursor().shape()}")
+
+    # AH12 遮罩：绘图工具悬停箭头、按下十字、松开箭头；无选区框选仍十字
+    ov = Overlay(base, dpr=1.0)
+    ov.resize(400, 300)
+    ov._ready = True
+    ov.sel = QRect(30, 30, 260, 200)
+    ov._mode = "editing"
+    ov._confirm_mode = False
+    ov._set_tool("arrow")
+    ok_ah12a = ov.cursor().shape() == Qt.ArrowCursor
+    ov.mousePressEvent(raw_mouse(QEvent.Type.MouseButtonPress, ov,
+                                 QPointF(80, 80)))
+    ok_ah12b = ov.cursor().shape() == Qt.CrossCursor and ov._mode == "drawing"
+    ov.mouseReleaseEvent(raw_mouse(QEvent.Type.MouseButtonRelease, ov,
+                                   QPointF(200, 160)))
+    ok_ah12c = ov.cursor().shape() == Qt.ArrowCursor
+    ov._set_tool("select")
+    ok_ah12d = ov.cursor().shape() == Qt.SizeAllCursor  # 有选区的选择态
+    record("AH12 遮罩：绘图箭头/绘制十字/松开箭头/框选仍十字",
+           ok_ah12a and ok_ah12b and ok_ah12c and ok_ah12d,
+           f"set={ok_ah12a} draw={ok_ah12b} rel={ok_ah12c} select={ok_ah12d}")
+
+    # AH13 提示文案更新为跨行说法
+    from i18n import t as _t
+    import snapeditor as se_mod
+    src = inspect.getsource(se_mod.OcrLayer.copy_selection)
+    ok_ah13 = "可跨行" in src and "某一行" not in src
+    record("AH13 复制提示文案更新（可跨行）", ok_ah13,
+           f"hint={_t('请先用鼠标拖选文字（可跨行），或点「复制全部」')!r}")
+
+    # AH14 README 同步 v36
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ah14 = "v36" in readme and "跨行" in readme
+    record("AH14 README 同步 v36", ok_ah14,
+           f"v36={'v36' in readme} cross={'跨行' in readme}")
+
+    ed.close()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
+
 
     print("=" * 66)
     print("窗口化编辑器离屏自测")
@@ -5526,6 +5718,7 @@ if __name__ == "__main__":
     test_v33_pen_smooth_levels()
     test_v34_pin_to_desktop()
     test_v35_window_capture_accuracy()
+    test_v36_ocr_multiline_and_cursor()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

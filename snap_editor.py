@@ -107,7 +107,7 @@ class Canvas(QWidget):
         super().__init__(parent)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setCursor(Qt.CrossCursor)
+        self.setCursor(Qt.ArrowCursor)   # v36：默认选择态用普通箭头
 
         self.base = image if not image.isNull() else QImage(800, 600, QImage.Format_RGB32)
         self.shapes: list[Shape] = [self._clone(s) for s in (shapes or [])]
@@ -862,6 +862,8 @@ class Canvas(QWidget):
         else:
             self._draft.rect = QRect(pos, pos)
         self._mode = "drawing"
+        # v36：真正开始绘制才显示“+”，松开鼠标后回到箭头
+        self.setCursor(Qt.CrossCursor)
         self.update()
 
     def mouseMoveEvent(self, ev) -> None:
@@ -943,7 +945,7 @@ class Canvas(QWidget):
             self._repaint()
             return
 
-        # 悬停光标提示
+        # 悬停光标提示（v36：不画图时一律普通箭头，绘制按下时才显示“+”）
         if self._tool == "select":
             corner = self._hit_shape_corner(pos)
             if self._hit_arrow_endpoint(pos):
@@ -955,11 +957,11 @@ class Canvas(QWidget):
             elif self._select_shape_at_hint(pos):
                 self.setCursor(Qt.SizeAllCursor)
             else:
-                self.setCursor(Qt.CrossCursor)
+                self.setCursor(Qt.ArrowCursor)
         elif self._tool == "text":
             self.setCursor(Qt.IBeamCursor)
         else:
-            self.setCursor(Qt.CrossCursor)
+            self.setCursor(Qt.ArrowCursor)
 
     def _select_shape_at_hint(self, pos: QPoint) -> bool:
         for s in reversed(self.shapes):
@@ -1008,6 +1010,8 @@ class Canvas(QWidget):
                 self._selected = d
             self._draft = None
             self._mode = "idle"
+            # v36：绘制结束回到箭头光标（工具保持粘滞，悬停也是箭头）
+            self.setCursor(Qt.ArrowCursor)
             # v31 粘滞工具：画完保持当前工具，可连续画同类型标注；
             # 再次点该工具 / 点别的工具 / 右键才切回「选择」态。
             if self._selected is not None:
@@ -1200,7 +1204,7 @@ class Canvas(QWidget):
             self.style_panel.raise_()
         else:
             self.style_panel.hide()
-        self.setCursor(Qt.CrossCursor)
+        self.setCursor(Qt.ArrowCursor)   # v36：退出取字回到箭头（按工具悬停态再更新）
         self.setFocus()
         self.update()
 

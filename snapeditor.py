@@ -24,6 +24,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
+    QTextCursor,
     QTransform,
 )
 from PySide6.QtWidgets import (
@@ -31,10 +32,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QStyle,
     QStyleOptionFrame,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -2006,9 +2009,10 @@ class OcrBar(QWidget):
 class OcrLayer(QWidget):
     """方案 B：把 OCR 每一行按 bbox 盖回原文在截图里的位置。
 
-    每行一个只读 QPlainTextEdit —— 可拖选、Ctrl+A、Ctrl+C、右键复制；
-    近不透明浅色底把原来的字盖住，避免「同一行字叠两遍」发糊。
-    复制（按钮或 Ctrl+C）后自动收起，回到正常截图编辑态。
+    v36：每行仍是一个只读 QPlainTextEdit（不透明浅底盖住原来的字，避免
+    「同一行字叠两遍」发糊），但行块对鼠标穿透，拖选由本层统一接管——
+    像 Word 一样跨行拖选：按行块几何顺序拼接选区，双击选词、Ctrl+A
+    全选、Ctrl+C / 右键菜单 / 按钮复制后自动收起，回到正常截图编辑态。
     """
 
     closed = Signal()
@@ -2033,7 +2037,9 @@ class OcrLayer(QWidget):
         super().__init__(parent)
         self.setObjectName("OcrLayer")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setCursor(Qt.ArrowCursor)
+        # 拖选文字：用文本光标提示；块已对鼠标穿透，整层都可发起拖选
+        self.setCursor(Qt.IBeamCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setStyleSheet(self.BLOCK_STYLE)
 
         self.bar = OcrBar(self)
@@ -2045,14 +2051,18 @@ class OcrLayer(QWidget):
         self._lines: list[dict] = []
         self._closing = False
         self._armed = False
+        # v36 跨行选择状态：锚点与当前端点，均为 (块, 文本位置)
+        self._anchor = None
+        self._head = None
 
     # ------------------------------------------------------------ 行文本块
     def clear_blocks(self) -> None:
         for e in self._blocks:
-            e.removeEventFilter(self)
             e.hide()
             e.deleteLater()
         self._blocks = []
+        self._anchor = None
+        self._head = None
 
     def set_lines(
         self, lines: list[dict], sel: QRect, dpr: float, backend: str = ""
@@ -2096,9 +2106,11 @@ class OcrLayer(QWidget):
             e.setContentsMargins(0, 0, 0, 0)
             e.document().setDocumentMargin(0)
             e.setFont(f)
-            e.setCursor(Qt.IBeamCursor)
+            # v36：行块对鼠标/焦点穿透，拖选统一由 OcrLayer 接管，
+            # 才能像 Word 一样跨行选择；高亮走 ExtraSelection
+            e.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            e.setFocusPolicy(Qt.NoFocus)
             e.setGeometry(gx, gy, w, h)
-            e.installEventFilter(self)
             e.show()
             self._blocks.append(e)
 
@@ -2179,34 +2191,191 @@ class OcrLayer(QWidget):
         QTimer.singleShot(420, self.closed.emit)
 
     def copy_selection(self) -> None:
-        for e in self._blocks:
-            cur = e.textCursor()
-            if cur.hasSelection():
-                self._copy(cur.selectedText())
-                return
-        fw = QApplication.focusWidget()
-        if isinstance(fw, QPlainTextEdit) and fw in self._blocks:
-            self._copy(fw.toPlainText())
+        """复制当前跨行选区：按行块几何顺序拼接，行与行之间换行。"""
+        txt = self._selection_text()
+        if txt.strip():
+            self._copy(txt)
             return
-        self.bar.feedback("请先用鼠标拖选某一行文字，或点「复制全部」")
+        self.bar.feedback("请先用鼠标拖选文字（可跨行），或点「复制全部」")
 
     def copy_all(self) -> None:
         self._copy("\n".join(_reading_order(self._lines)))
 
+    # ------------------------------------------------------- 跨行选择（v36）
+    def _ordered_blocks(self) -> list:
+        """阅读顺序：先上后下，同一排先左后右。"""
+        return sorted(
+            self._blocks,
+            key=lambda e: (e.geometry().top(), e.geometry().left()),
+        )
+
+    def _locate(self, layer_pos: QPoint):
+        """层坐标 → (块, 文本位置)。
+
+        点落在行块之间/之外时取竖直方向最近的块；行内位置用字符宽度
+        累加手工计算——不用 cursorForPosition，它依赖排版器完成布局，
+        在离屏自测 / 尚未绘制时会把任意 x 都收敛到行尾。
+        """
+        if not self._blocks:
+            return None
+        best, best_d = None, None
+        for e in self._blocks:
+            g = e.geometry()
+            if g.contains(layer_pos):
+                best, best_d = e, 0
+                break
+            if layer_pos.y() < g.top():
+                dy = g.top() - layer_pos.y()
+            elif layer_pos.y() > g.bottom():
+                dy = layer_pos.y() - g.bottom()
+            else:
+                dy = 0
+            if best_d is None or dy < best_d:
+                best, best_d = e, dy
+        if best is None:
+            best = self._blocks[0]
+        e = best
+        # 文本区原点 = 块内边框/滚动区偏移（viewport 相对块的原点）
+        vp_off = e.viewport().geometry().topLeft()
+        lx = layer_pos.x() - e.geometry().x() - vp_off.x()
+        text = e.toPlainText()
+        fm = QFontMetrics(e.font())
+        acc = 0
+        pos_i = len(text)
+        for i, ch in enumerate(text):
+            cw = fm.horizontalAdvance(ch)
+            if lx < acc + cw / 2:
+                pos_i = i
+                break
+            acc += cw
+        return (e, pos_i)
+
+    def _apply_selection(self) -> None:
+        """把锚点→当前端点的跨行选区渲染成每个行块的 ExtraSelection。"""
+        if self._anchor is None or self._head is None:
+            return
+        ordered = self._ordered_blocks()
+        try:
+            ia = ordered.index(self._anchor[0])
+            ih = ordered.index(self._head[0])
+        except ValueError:
+            return
+        lo, hi = min(ia, ih), max(ia, ih)
+        for i, e in enumerate(ordered):
+            if i < lo or i > hi:
+                e.setExtraSelections([])
+                continue
+            cur = QTextCursor(e.document())
+            if lo == hi:
+                p1, p2 = self._anchor[1], self._head[1]
+                cur.setPosition(min(p1, p2))
+                cur.setPosition(max(p1, p2), QTextCursor.KeepAnchor)
+            elif i == lo:
+                start = self._anchor[1] if ia == lo else self._head[1]
+                cur.setPosition(start)
+                cur.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+            elif i == hi:
+                end = self._head[1] if ih == hi else self._anchor[1]
+                cur.setPosition(0)
+                cur.setPosition(end, QTextCursor.KeepAnchor)
+            else:
+                cur.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+            es = QTextEdit.ExtraSelection()
+            es.cursor = cur
+            es.format.setBackground(QColor("#0a84ff"))
+            es.format.setForeground(QColor("#ffffff"))
+            e.setExtraSelections([es])
+
+    def _clear_selection(self) -> None:
+        self._anchor = None
+        self._head = None
+        for e in self._blocks:
+            e.setExtraSelections([])
+
+    def _selection_text(self) -> str:
+        parts = []
+        for e in self._ordered_blocks():
+            sels = e.extraSelections()
+            if not sels:
+                continue
+            txt = sels[0].cursor.selectedText()
+            if txt:
+                parts.append(txt.replace("\u2029", "\n"))
+        return "\n".join(parts)
+
+    def select_all(self) -> None:
+        ordered = self._ordered_blocks()
+        if not ordered:
+            return
+        first, last = ordered[0], ordered[-1]
+        self._anchor = (first, 0)
+        self._head = (last, max(0, last.document().characterCount() - 1))
+        self._apply_selection()
+
     # ------------------------------------------------------------ 事件
-    def eventFilter(self, obj, ev):  # noqa: N802
-        if isinstance(obj, QPlainTextEdit) and ev.type() == QEvent.KeyPress:
-            if ev.key() == Qt.Key_Escape:
-                self.closed.emit()
-                return True
-        return super().eventFilter(obj, ev)
+    def showEvent(self, ev) -> None:  # noqa: N802
+        super().showEvent(ev)
+        # 显示即拿焦点：不点鼠标也能直接 Ctrl+C / Ctrl+A / Esc
+        self.setFocus()
+
+    def keyPressEvent(self, ev) -> None:  # noqa: N802
+        k = ev.key()
+        mods = ev.modifiers()
+        if k == Qt.Key_Escape:
+            self.closed.emit()
+            return
+        if k == Qt.Key_C and mods & Qt.ControlModifier:
+            self.copy_selection()
+            return
+        if k == Qt.Key_A and mods & Qt.ControlModifier:
+            self.select_all()
+            return
+        super().keyPressEvent(ev)
 
     def mousePressEvent(self, ev) -> None:  # noqa: N802
-        # 空白处的点击就地吞掉，不冒泡给 Overlay，避免误重新框选/加标注
+        # 所有点击就地吞掉，不冒泡给 Overlay，避免误重新框选/加标注
+        if ev.button() == Qt.LeftButton:
+            self.setFocus()
+            loc = self._locate(ev.position().toPoint())
+            if loc is not None:
+                self._anchor = loc
+                self._head = loc
+                self._apply_selection()
+        elif ev.button() == Qt.RightButton:
+            self._show_context_menu(ev.position().toPoint())
         ev.accept()
 
-    def mouseDoubleClickEvent(self, ev) -> None:  # noqa: N802
+    def mouseMoveEvent(self, ev) -> None:  # noqa: N802
+        if self._anchor is not None and (ev.buttons() & Qt.LeftButton):
+            loc = self._locate(ev.position().toPoint())
+            if loc is not None:
+                self._head = loc
+                self._apply_selection()
         ev.accept()
+
+    def mouseReleaseEvent(self, ev) -> None:  # noqa: N802
+        ev.accept()   # 保留选中状态，等复制或重新拖选
+
+    def mouseDoubleClickEvent(self, ev) -> None:  # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            loc = self._locate(ev.position().toPoint())
+            if loc is not None:
+                e, pos_i = loc
+                cur = QTextCursor(e.document())
+                cur.setPosition(pos_i)
+                cur.select(QTextCursor.WordUnderCursor)
+                self._anchor = (e, cur.selectionStart())
+                self._head = (e, cur.selectionEnd())
+                self._apply_selection()
+        ev.accept()
+
+    def _show_context_menu(self, pos: QPoint) -> None:
+        m = QMenu(self)
+        m.addAction(t("复制选中"), self.copy_selection)
+        m.addAction(t("复制全部"), self.copy_all)
+        m.addSeparator()
+        m.addAction(t("关闭"), lambda: self.closed.emit())
+        m.exec(self.mapToGlobal(pos))
 
     def hideEvent(self, ev) -> None:  # noqa: N802
         self.disarm()
@@ -2728,7 +2897,9 @@ class Overlay(QWidget):
         elif key == "select":
             cur = Qt.SizeAllCursor if self.sel else Qt.CrossCursor
         else:
-            cur = Qt.CrossCursor
+            # v36：绘图工具未按下时不显示“+”，用普通箭头；
+            # 实际按下开始绘制时才临时切回十字
+            cur = Qt.ArrowCursor
         if cur != self._cursor_cache:
             self.setCursor(cur)
             self._cursor_cache = cur
@@ -3397,6 +3568,10 @@ class Overlay(QWidget):
                 else:
                     self._draft.rect = QRect(start, start)
                 self._mode = "drawing"
+                # v36：真正开始绘制才显示“+”，松开鼠标后回到箭头
+                if self._cursor_cache != Qt.CrossCursor:
+                    self.setCursor(Qt.CrossCursor)
+                    self._cursor_cache = Qt.CrossCursor
                 self.update()
                 return
 
@@ -3581,7 +3756,8 @@ class Overlay(QWidget):
                     elif self._tool == "text":
                         cur = Qt.IBeamCursor
                     else:
-                        cur = Qt.CrossCursor
+                        # v36：绘图工具悬停不显示“+”，用普通箭头
+                        cur = Qt.ArrowCursor
             if cur != self._cursor_cache:
                 self.setCursor(cur)
                 self._cursor_cache = cur
@@ -3618,6 +3794,10 @@ class Overlay(QWidget):
                 self._selected = d
             self._draft = None
             self._mode = "editing"
+            # v36：绘制结束回到箭头光标（工具保持粘滞，悬停也是箭头）
+            if self._cursor_cache != Qt.ArrowCursor:
+                self.setCursor(Qt.ArrowCursor)
+                self._cursor_cache = Qt.ArrowCursor
             # v31 粘滞工具：画完保持当前绘制工具与按钮亮起，可继续画下一个；
             # 只有再次点该工具 / 点别的工具 / 右键才切回「选择」态。
             if self._selected is not None:
