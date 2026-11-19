@@ -3142,6 +3142,10 @@ class Overlay(QWidget):
                     self.update()
             return
 
+        if ev.button() == Qt.RightButton:
+            # v29：遮罩内右键 = 取消当前命令；宿主据此同时解除粘滞状态。
+            self.cancel()
+            return
         if ev.button() != Qt.LeftButton:
             return
 

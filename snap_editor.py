@@ -1407,6 +1407,7 @@ class EditorWindow(QMainWindow):
     save_requested = Signal(QImage)
     ocr_requested = Signal(QImage)
     closed = Signal()
+    sticky_cancel_requested = Signal()   # v29：右键 = 取消粘滞命令
 
     def __init__(self, image: QImage, shapes: list[Shape], save_dir, parent=None) -> None:
         super().__init__(parent)
@@ -1563,3 +1564,8 @@ class EditorWindow(QMainWindow):
         self.hide()
         self.closed.emit()
         ev.ignore()
+
+    def contextMenuEvent(self, ev) -> None:  # noqa: N802
+        # v29：编辑器内右键 = 取消粘滞命令（不拦截，保留子控件原生菜单）
+        self.sticky_cancel_requested.emit()
+        super().contextMenuEvent(ev)

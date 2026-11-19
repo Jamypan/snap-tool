@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
     minimize_requested = Signal()
     quit_requested = Signal()
     language_requested = Signal()
+    sticky_cancel_requested = Signal()   # v29：主窗口右键 = 取消粘滞命令
 
     STYLE = (
         "QMainWindow, QWidget#central { background:#f7f8fa; }"
@@ -305,6 +306,11 @@ class MainWindow(QMainWindow):
         "QPushButton#mode { background:#ffffff; border:1px solid #d1d5db; border-radius:8px;"
         " padding:14px 6px; color:#111827; font-size:13px; }"
         "QPushButton#mode:hover { border-color:#0a84ff; background:#f0f7ff; }"
+        # v29 粘滞命令激活态：按钮亮起（蓝底白字），一直保持到命令被取消
+        "QPushButton#mode[active=\"true\"], QPushButton#long[active=\"true\"] {"
+        " background:#0a84ff; border-color:#0a84ff; color:#ffffff; font-weight:bold; }"
+        "QPushButton#mode[active=\"true\"]:hover, QPushButton#long[active=\"true\"]:hover {"
+        " background:#0969cc; border-color:#0969cc; color:#ffffff; }"
         "QPushButton#long { background:#f0f7ff; border:1px solid #b6d7fb; border-radius:8px;"
         " padding:10px 8px; color:#0a6ed1; font-size:13px; font-weight:bold; }"
         "QPushButton#long:hover { border-color:#0a84ff; background:#e2f0ff; }"
@@ -329,9 +335,32 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(self.STYLE)
         self._build_menu()
         self._build_body(save_dir)
+        # v29：主窗口内右键统一视为「取消粘滞命令」，与遮罩右键行为一致
+        self.centralWidget().installEventFilter(self)
         self.set_hotkey(hotkey)
         self.set_mode(mode)
         LANG.changed.connect(self.retranslate_ui)
+
+    def eventFilter(self, obj, ev) -> bool:  # noqa: N802
+        if (
+            ev.type() == QEvent.Type.MouseButtonPress
+            and ev.button() == Qt.RightButton
+        ):
+            self.sticky_cancel_requested.emit()
+        return super().eventFilter(obj, ev)
+
+    def set_active_command(self, cmd) -> None:
+        """v29：高亮粘滞命令对应的按钮；cmd=None 表示全部熄灭。"""
+        active_mode = cmd[1] if cmd and cmd[0] == "capture" else None
+        active_long = bool(cmd and cmd[0] == "long")
+        for mode, button in self._mode_buttons.items():
+            button.setProperty("active", "true" if mode == active_mode else "false")
+            button.style().unpolish(button)
+            button.style().polish(button)
+        if hasattr(self, "_b_long"):
+            self._b_long.setProperty("active", "true" if active_long else "false")
+            self._b_long.style().unpolish(self._b_long)
+            self._b_long.style().polish(self._b_long)
 
     def _build_menu(self) -> None:
         mb = self.menuBar()

@@ -4672,9 +4672,185 @@ def test_v28_warmup_and_input_gate() -> None:
 
     # AB11 README 版本记录同步到 v28 / 260 项
     readme = Path("README.md").read_text(encoding="utf-8")
-    ok_ab11 = "v28" in readme and "合计 261 项" in readme
+    ok_ab11 = "v28" in readme and "输入门闩" in readme
     record("AB11 README 同步 v28 版本记录", ok_ab11,
-           f"v28={'v28' in readme} total={'合计 261 项' in readme}")
+           f"v28={'v28' in readme} gate={'输入门闩' in readme}")
+
+
+def test_v29_sticky_commands() -> None:
+    print("\n--- Stage AC: v29 粘滞命令（结束自动重开） ---")
+    import inspect
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QIcon, QMouseEvent
+    from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+
+    import snap as snapmod
+    from hotkeys import load_hotkey, load_mode
+    from snapui import MainWindow
+
+    def holder_app():
+        h = snapmod.App.__new__(snapmod.App)
+        h.overlay = None
+        h.busy = None
+        h.preview = None
+        h.editor = None
+        h.capture_mode = "rect"
+        h.main_window = MagicMock()
+        h._sticky = None
+        h._sticky_pending = None
+        h._sticky_timer = MagicMock()
+        h._begin_capture = MagicMock()
+        h._restore_own_windows = MagicMock()
+        return h
+
+    # AC1 按钮亮起：set_active_command 切换 active 属性，None 全部熄灭
+    mw = MainWindow(QIcon(), load_hotkey(), load_mode(), Path("."))
+    mw.set_active_command(snapmod.capture_command("window"))
+    lit_rect = [b.property("active") for b in mw._mode_buttons.values()]
+    ok_ac1a = (
+        lit_rect.count("true") == 1
+        and mw._mode_buttons["window"].property("active") == "true"
+        and mw._b_long.property("active") == "false"
+    )
+    mw.set_active_command(snapmod.LONG_COMMAND)
+    ok_ac1b = (
+        mw._b_long.property("active") == "true"
+        and all(b.property("active") == "false" for b in mw._mode_buttons.values())
+    )
+    mw.set_active_command(None)
+    ok_ac1c = mw._b_long.property("active") == "false"
+    record("AC1 命令按钮亮起 / 切换 / 熄灭", ok_ac1a and ok_ac1b and ok_ac1c,
+           f"rect={lit_rect} long={mw._b_long.property('active')}")
+
+    # AC2 用户触发命令 → 设置粘滞 + 按钮亮起 + 真正开始截图
+    h = holder_app()
+    h.start_capture("rect")
+    ok_ac2 = (
+        h._sticky == snapmod.capture_command("rect")
+        and h.main_window.set_active_command.called
+        and h._begin_capture.call_count == 1
+    )
+    record("AC2 点命令后进入粘滞态且按钮亮起", ok_ac2,
+           f"sticky={h._sticky} calls={h._begin_capture.call_count}")
+
+    # AC3 再点同一个按钮 → 取消粘滞，不再启动新截图
+    h._begin_capture.reset_mock()
+    h.start_capture("rect")
+    ok_ac3 = (
+        h._sticky is None
+        and h._begin_capture.call_count == 0
+        and h._sticky_timer.stop.called
+    )
+    record("AC3 再点同一按钮取消粘滞", ok_ac3,
+           f"sticky={h._sticky} calls={h._begin_capture.call_count}")
+
+    # AC4 执行别的命令 → 切换到新命令（不是叠加）
+    h2 = holder_app()
+    h2.start_capture("rect")
+    h2.start_long_capture()
+    ok_ac4 = h2._sticky == snapmod.LONG_COMMAND
+    record("AC4 执行其他命令切换到该命令", ok_ac4, f"sticky={h2._sticky}")
+
+    # AC5 命令正常结束 → 定时重开同一命令
+    h3 = holder_app()
+    h3._sticky = snapmod.capture_command("window")
+    h3._command_finished()
+    ok_ac5 = (
+        h3._sticky_pending == snapmod.capture_command("window")
+        and h3._sticky_timer.start.called
+        and h3._sticky_timer.start.call_args.args[0] == snapmod.STICKY_RESTART_DELAY_MS
+    )
+    record("AC5 命令结束后调度自动重开", ok_ac5,
+           f"pending={h3._sticky_pending} delay={h3._sticky_timer.start.call_args}")
+
+    # AC6 取消粘滞 → 停掉待执行重开
+    h3._sticky_timer.reset_mock()
+    h3.cancel_sticky()
+    ok_ac6 = (
+        h3._sticky is None
+        and h3._sticky_pending is None
+        and h3._sticky_timer.stop.called
+        and not h3._sticky_timer.start.called
+    )
+    record("AC6 取消后不再自动重开", ok_ac6,
+           f"sticky={h3._sticky} pending={h3._sticky_pending}")
+
+    # AC7 定时到点 → 用 _auto 重开原命令，粘滞状态不变
+    h4 = holder_app()
+    h4._sticky = snapmod.capture_command("window")
+    h4._sticky_pending = snapmod.capture_command("window")
+    h4._on_sticky_restart()
+    ok_ac7 = (
+        h4._begin_capture.call_args.args[0] == "window"
+        and h4._begin_capture.call_args.kwargs.get("long_mode") is False
+        and h4._sticky == snapmod.capture_command("window")
+        and h4._sticky_pending is None
+    )
+    record("AC7 自动重开原命令且保持按钮亮起", ok_ac7,
+           f"call={h4._begin_capture.call_args} sticky={h4._sticky}")
+
+    # AC8 遮罩内右键 → 发 cancelled（宿主据此解除粘滞）
+    ov = Overlay(QImage(200, 120, QImage.Format_RGB32), 1.0)
+    ov.setGeometry(0, 0, 200, 120)
+    fired: list[int] = []
+    ov.cancelled.connect(lambda: fired.append(1))
+    ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPoint(30, 20), QPoint(30, 20),
+                     Qt.RightButton, Qt.RightButton, Qt.NoModifier)
+    ov.mousePressEvent(ev)
+    ok_ac8 = len(fired) == 1
+    record("AC8 遮罩右键发出取消信号", ok_ac8, f"fired={len(fired)}")
+    ov.close()
+
+    # AC9 主窗口右键 → 发粘滞取消信号
+    mw2 = MainWindow(QIcon(), load_hotkey(), load_mode(), Path("."))
+    fired2: list[int] = []
+    mw2.sticky_cancel_requested.connect(lambda: fired2.append(1))
+    rev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(20, 20), QPointF(20, 20),
+                      Qt.RightButton, Qt.RightButton, Qt.NoModifier)
+    mw2.eventFilter(mw2.centralWidget(), rev)
+    src_ed = inspect.getsource(EditorWindow.contextMenuEvent)
+    src_pv = inspect.getsource(snapmod.PreviewWindow.contextMenuEvent)
+    ok_ac9 = (
+        len(fired2) == 1
+        and "sticky_cancel_requested.emit()" in src_ed
+        and "sticky_cancel_requested.emit()" in src_pv
+    )
+    record("AC9 右键取消覆盖主窗口 / 编辑器 / 预览", ok_ac9,
+           f"mw={len(fired2)} editor={src_ed.count('sticky_cancel_requested.emit()')} "
+           f"preview={src_pv.count('sticky_cancel_requested.emit()')}")
+
+    # AC10 托盘右键 → 解除粘滞
+    h5 = holder_app()
+    h5._sticky = snapmod.LONG_COMMAND
+    h5._on_tray(QSystemTrayIcon.Context)
+    record("AC10 托盘右键解除粘滞", h5._sticky is None, f"sticky={h5._sticky}")
+
+    # AC11 所有命令出口都接了统一结束入口
+    src_done = inspect.getsource(snapmod.App._on_done)
+    src_copy = inspect.getsource(snapmod.App._on_copy_only)
+    src_save = inspect.getsource(snapmod.App._save_image)
+    src_editor = inspect.getsource(snapmod.App._on_editor_closed)
+    src_preview = inspect.getsource(snapmod.App._on_preview_closed)
+    src_cancel = inspect.getsource(snapmod.App._on_cancel)
+    src_long = inspect.getsource(snapmod.App._on_long_shot)
+    ok_ac11 = (
+        all("_command_finished()" in s for s in
+            (src_done, src_copy, src_save, src_editor, src_preview))
+        and "cancel_sticky()" in src_cancel
+        and "preview.closed.connect" in src_long
+    )
+    record("AC11 命令结束出口全部接线", ok_ac11,
+           f"done={src_done.count('_command_finished()')} "
+           f"cancel={src_cancel.count('cancel_sticky()')}")
+
+    # AC12 README 版本记录同步
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ac12 = "v29" in readme and "合计 273 项" in readme
+    record("AC12 README 同步 v29 版本记录", ok_ac12,
+           f"v29={'v29' in readme} total={'合计 273 项' in readme}")
 
 
 if __name__ == "__main__":
@@ -4714,6 +4890,7 @@ if __name__ == "__main__":
     test_v26_copy_button()
     test_v27_copy_closes_windows()
     test_v28_warmup_and_input_gate()
+    test_v29_sticky_commands()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
