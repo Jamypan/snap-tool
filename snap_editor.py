@@ -928,7 +928,10 @@ class Canvas(QWidget):
         if self._mode == "drawing" and self._draft:
             d = self._draft
             if d.kind == "pen":
-                d.points.append(pos)
+                # 丢弃几乎重合的采样点（微抖/停住时相邻事件只差 1px），
+                # 配合 _smooth_polyline 的中点平滑消除锯齿
+                if not d.points or (pos - d.points[-1]).manhattanLength() >= 2:
+                    d.points.append(pos)
             elif d.kind in ("arrow", "line"):
                 d.end = pos
             else:

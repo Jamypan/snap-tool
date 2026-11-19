@@ -777,6 +777,29 @@ def _draw_line_arrows(p, a, b, color, width, line_style, with_start, with_end) -
         _arrow_head(p, a.x(), a.y(), -ux, -uy, color, width, head * scale)
 
 
+def _smooth_polyline(anchor_start, mid_points, anchor_end) -> QPainterPath:
+    """把折线转成平滑曲线：采样点作二次贝塞尔控制点，相邻点中点作锚点。
+
+    逐点 lineTo 的折线会把鼠标手抖造成的 1~2px 偏移原样画成锯齿；这里改用
+    中点平滑——曲线经过每对相邻采样点的中点、以采样点为控制点，既削掉小
+    尖角，又基本贴合原始轨迹（偏差不超过半个采样间距）。首尾锚点会被精确
+    经过，保证截取端点与箭头位置准确。
+    """
+    path = QPainterPath(QPointF(anchor_start))
+    pts = ([QPointF(anchor_start)] + [QPointF(pt) for pt in mid_points]
+           + [QPointF(anchor_end)])
+    if len(pts) <= 2:
+        path.lineTo(QPointF(anchor_end))
+        return path
+    for i in range(1, len(pts) - 1):
+        ctrl = pts[i]
+        nxt = pts[i + 1]
+        path.quadTo(ctrl, QPointF(
+            (ctrl.x() + nxt.x()) * 0.5, (ctrl.y() + nxt.y()) * 0.5))
+    path.lineTo(QPointF(anchor_end))
+    return path
+
+
 def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) -> None:
     """画画笔路径，并在两端（可选）加箭头。
 
@@ -828,15 +851,13 @@ def _draw_pen_arrows(p, points, color, width, line_style, with_start, with_end) 
     lp.setJoinStyle(Qt.RoundJoin)
     lp.setStyle(LINE_STYLES.get(line_style, Qt.SolidLine))
     lp.setCapStyle(Qt.FlatCap if need_trim else Qt.RoundCap)
-    path = QPainterPath(s0)
     # 只保留落在两个截断点之间的原始采样点；被裁掉的尾部不再画，
     # 避免「最后一段很短、却要从它硬连到截断点」造成方向突然折一下
     lo = hs if with_start else 0.0
     hi = (total - he) if with_end else total
-    for i in range(1, n - 1):
-        if lo < cum[i] < hi:
-            path.lineTo(QPointF(points[i]))
-    path.lineTo(e0)
+    mid = [points[i] for i in range(1, n - 1) if lo < cum[i] < hi]
+    # 中点平滑：把采样点连成平顺曲线，消除手抖带来的小锯齿
+    path = _smooth_polyline(s0, mid, e0)
     p.setPen(lp)
     p.setBrush(Qt.NoBrush)
     p.drawPath(path)
@@ -3392,7 +3413,10 @@ class Overlay(QWidget):
         if self._mode == "drawing" and self._draft:
             d = self._draft
             if d.kind == "pen":
-                d.points.append(pos)
+                # 丢弃几乎重合的采样点：鼠标停住/微抖时相邻事件只差 1px，
+                # 全存下来会变成锯齿；保留首尾点由 _smooth_polyline 负责平滑。
+                if not d.points or (pos - d.points[-1]).manhattanLength() >= 2:
+                    d.points.append(pos)
             elif d.kind in ("arrow", "line"):
                 d.end = pos
             else:

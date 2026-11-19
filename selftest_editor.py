@@ -4817,6 +4817,106 @@ def test_v31_sticky_tools_and_single_instance() -> None:
            f"nodlg={'不再弹' in readme}")
 
 
+# ---------------------------------------------------------------------------
+def test_v32_pen_smoothing() -> None:
+    print("\n--- Stage AD: v32 画笔笔迹平滑 ---")
+    from pathlib import Path
+    import random
+
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    from snapeditor import _smooth_polyline
+
+    def mk_ev(typ, p: QPoint, button=Qt.LeftButton):
+        return QMouseEvent(typ, QPoint(p), QPoint(p), button,
+                           button, Qt.NoModifier)
+
+    # AD1 平滑函数存在，返回 QPainterPath 且首尾锚点精确
+    path = _smooth_polyline(QPointF(0, 0), [QPointF(10, 5), QPointF(20, 0)],
+                            QPointF(30, 5))
+    ok_ad1 = (
+        hasattr(path, "elementCount") and path.elementCount() > 0
+        and path.pointAtPercent(0) == QPointF(0, 0)
+        and path.pointAtPercent(1) == QPointF(30, 5)
+    )
+    record("AD1 平滑路径首尾锚点精确保留", ok_ad1,
+           f"start={path.pointAtPercent(0)} end={path.pointAtPercent(1)}")
+
+    # AD2 路径含有曲线段（不再是逐点直线折线）
+    types = [path.elementAt(i).type for i in range(path.elementCount())]
+    has_curve = any("CurveTo" in str(t) for t in types)
+    record("AD2 画笔路径使用贝塞尔曲线段", has_curve,
+           f"types={[str(t).split('.')[-1] for t in types]}")
+
+    # AD3 行为级：模拟真实手抖（水平线 ±2px 高频抖动），平滑后相邻抖动明显下降
+    random.seed(7)
+    shaky = [QPointF(0, 100)]
+    x = 0
+    for _ in range(30):
+        x += 3
+        shaky.append(QPointF(x, 100 + random.choice([-2, -1, -1, 0, 0, 0, 1, 1, 2])))
+    sm = _smooth_polyline(shaky[0], shaky[1:-1], shaky[-1])
+    curve_pts = [sm.pointAtPercent(i / 60) for i in range(61)]
+
+    def avg_dy(seq):
+        return sum(abs(seq[i + 1].y() - seq[i].y()) for i in range(len(seq) - 1)) / (len(seq) - 1)
+
+    raw_jitter, smooth_jitter = avg_dy(shaky), avg_dy(curve_pts)
+    ok_ad3 = smooth_jitter < raw_jitter * 0.5
+    record("AD3 手抖锯齿被平顺（相邻抖动降幅>50%）", ok_ad3,
+           f"raw={raw_jitter:.2f}px smooth={smooth_jitter:.2f}px")
+
+    # AD4 两个编辑器 mouseMove 都做了最小间距过滤（丢弃几乎重合的采样点）
+    import inspect
+    from snapeditor import Overlay as Ovl
+    from snap_editor import Canvas as Cvs
+    src_ov = inspect.getsource(Ovl.mouseMoveEvent)
+    src_cv = inspect.getsource(Cvs.mouseMoveEvent)
+    ok_ad4 = (
+        "manhattanLength() >= 2" in src_ov and "manhattanLength() >= 2" in src_cv
+    )
+    record("AD4 两编辑器采集端都过滤重合抖动点", ok_ad4,
+           f"overlay={'manhattanLength' in src_ov} canvas={'manhattanLength' in src_cv}")
+
+    # AD5 行为级：密集微抖点被真实丢弃（1px 步进只保留间隔>=2的点）
+    cv = Canvas(make_image(200, 120), [], None)
+    cv._set_tool("pen")
+    cv.mousePressEvent(mk_ev(QEvent.Type.MouseButtonPress, QPoint(20, 20)))
+    for dx in range(1, 11):  # 每步只移动 1px
+        cv.mouseMoveEvent(mk_ev(QEvent.Type.MouseMove, QPoint(20 + dx, 20)))
+    cv.mouseReleaseEvent(mk_ev(QEvent.Type.MouseButtonRelease, QPoint(30, 20)))
+    stored = cv.shapes[0].points if cv.shapes else []
+    # 起点 + 每隔 2px 一个 ≈ 6 个点，而非 11 个
+    ok_ad5 = 4 <= len(stored) <= 7
+    record("AD5 1px 微抖采样点被丢弃", ok_ad5,
+           f"stored={len(stored)} pts={[ (p.x(),p.y()) for p in stored ]}")
+    cv.close()
+
+    # AD6 画笔箭头仍可用（平滑没有破坏端点切线/箭头）
+    base = make_image(200, 120)
+    pts = [QPointF(30, 60), QPointF(80, 40), QPointF(160, 60)]
+    plain = Canvas(base, [__import__("snapeditor").Shape(
+        kind="pen", points=[QPoint(int(p.x()), int(p.y())) for p in pts],
+        color=QColor(255, 0, 0), width=3)], None).compose()
+    arrow = Canvas(base, [__import__("snapeditor").Shape(
+        kind="pen", points=[QPoint(int(p.x()), int(p.y())) for p in pts],
+        color=QColor(255, 0, 0), width=3, pen_arrow_end=True)], None).compose()
+    diff = 0
+    for yy in range(35, 85):
+        for xx in range(140, 180):
+            if plain.pixelColor(xx, yy) != arrow.pixelColor(xx, yy):
+                diff += 1
+    record("AD6 平滑后画笔端点箭头仍正常", diff > 20, f"箭头差异像素={diff}")
+
+    # AD7 README 同步到 v32
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_ad7 = "v32" in readme and "平滑" in readme and "锯齿" in readme
+    record("AD7 README 同步 v32 画笔平滑", ok_ad7,
+           f"v32={'v32' in readme} smooth={'平滑' in readme}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -4855,6 +4955,7 @@ if __name__ == "__main__":
     test_v27_copy_closes_windows()
     test_v28_warmup_and_input_gate()
     test_v31_sticky_tools_and_single_instance()
+    test_v32_pen_smoothing()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
