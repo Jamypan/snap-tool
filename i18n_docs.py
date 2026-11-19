@@ -267,6 +267,12 @@ def help_html(lang: str | None = None) -> str:
         return HELP_HTML
     sections = _HELP.get(code) or _HELP["en"]
     body = "".join(f"<h2>{title}</h2>{text}" for title, text in sections)
+    # v34 贴图钉在桌面：新增章节用 i18n 文案统一渲染，避免维护多份长 HTML
+    body += (
+        f"<h2>10. {t('钉在桌面')}</h2>"
+        f"<p>{t('贴图用法')}</p>"
+        f"<p class='hint'>{t('贴图操作')}</p>"
+    )
     return f"<html><head>{_CSS}</head><body>{body}</body></html>"
 
 

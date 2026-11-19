@@ -506,14 +506,14 @@ def test_overlay() -> None:
     )
 
     # B4c 选择完成时 _apply_selection(near) 直接把按钮放到鼠标处并进入确认模式
-    #     v26 起确认模式多一个「复制」按钮、工具条更宽，near 改到 (40,40)
-    #     仍保证右下方有余量，不触发贴边收缩
+    #     v26 起确认模式多一个「复制」、v34 再加「钉在桌面」，工具条更宽；
+    #     小遮罩上 near+14 放不下时会被贴边收缩，因此 x 允许「光标右下」或「右贴边」两种。
     ov4.sel = QRect(50, 40, 60, 30)
     ov4._apply_selection(QRect(50, 40, 60, 30), near=QPoint(40, 40))
     g3 = ov4.toolbar.geometry()
     ok_b4c = (
         ov4._confirm_mode is True
-        and g3.x() == 40 + 14
+        and g3.x() in (40 + 14, 200 - g3.width())
         and g3.y() == 40 + 14
         and (g3.x() + g3.width()) <= 200
         and (g3.y() + g3.height()) <= 100
@@ -2235,11 +2235,11 @@ def test_long_capture() -> None:
     bad_help = []
     for code in i18n.LANGS:
         html = help_html(code)
-        if (html.count("<h2>") != 9
+        if (html.count("<h2>") != 10       # v34 新增第 10 节「贴图钉在桌面」
                 or "9." not in html
                 or "工具条「长截图」" in html):
             bad_help.append(code)
-    ok_p12 = HELP_HTML.count("<h2>") == 9 and not bad_help
+    ok_p12 = HELP_HTML.count("<h2>") == 10 and not bad_help
     record("P12 帮助 8 语言均含独立长截图章节且无旧入口", ok_p12,
            f"异常语言={bad_help} zh_h2={HELP_HTML.count('<h2>')}")
 
@@ -2604,7 +2604,7 @@ def test_long_capture_v17() -> None:
     bad_help_q = []
     for code in i18n.LANGS:
         h = help_html(code) if code != "zh_CN" else HELP_HTML
-        if (h.count("<h2>") != 9
+        if (h.count("<h2>") != 10          # v34 新增第 10 节贴图
                 or not any(k in h for k in keywords)
                 or any(s in h for s in stale)):
             bad_help_q.append(code)
@@ -5062,6 +5062,207 @@ def test_v33_pen_smooth_levels() -> None:
            f"v33={'v33' in readme} level={'平滑度' in readme}")
 
 
+# ---------------------------------------------------------------------------
+def test_v34_pin_to_desktop() -> None:
+    print("\n--- Stage AF: v34 贴图钉在桌面 ---")
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QImage, QColor
+
+    from pinwindow import PinWindow, MIN_SCALE, MAX_SCALE, OPACITY_STEPS
+    from snapeditor import Overlay, Toolbar
+    import hotkeys
+
+    img = make_image(400, 300)
+
+    # AF1 PinWindow 基本属性：尺寸、缩放、透明度、置顶、关闭信号
+    pin = PinWindow(img)
+    ok_af1a = (pin.width() >= 400 and pin.height() >= 300 and pin.scale == 1.0
+               and pin.opacity_pct == 100 and pin.always_on_top is True)
+    closed = []
+    pin.closed.connect(lambda: closed.append(1))
+    pin.zoom(1)
+    zin = pin.scale
+    pin.zoom(-1)
+    zout = pin.scale
+    pin.set_opacity(50)
+    op50 = pin.opacity_pct
+    pin.set_always_on_top(False)
+    top_off = pin.always_on_top
+    pin.close()
+    ok_af1b = (zin > 1.0 and abs(zout - 1.0) < 1e-6 and op50 == 50
+               and top_off is False and closed == [1])
+    record("AF1 浮窗属性/缩放/透明度/置顶/关闭信号", ok_af1a and ok_af1b,
+           f"zin={zin:.2f} zout={zout:.2f} op={op50} top={top_off} closed={closed}")
+
+    # AF2 缩放钳制在 [MIN_SCALE, MAX_SCALE]
+    pin2 = PinWindow(img)
+    pin2.set_scale(9999)
+    hi = pin2.scale
+    pin2.set_scale(0.0001)
+    lo = pin2.scale
+    pin2.close()
+    record("AF2 缩放上下限钳制", abs(hi - MAX_SCALE) < 1e-6 and abs(lo - MIN_SCALE) < 1e-6,
+           f"hi={hi} lo={lo} range=[{MIN_SCALE},{MAX_SCALE}]")
+
+    # AF3 透明度档位齐全且 set_opacity 钳制
+    pin3 = PinWindow(img)
+    applied = [pin3.set_opacity(p) for p in OPACITY_STEPS]
+    clamped_hi = pin3.set_opacity(500)
+    clamped_lo = pin3.set_opacity(-5)
+    pin3.close()
+    ok_af3 = (applied == list(OPACITY_STEPS) and clamped_hi == 100 and clamped_lo == 5)
+    record("AF3 透明度档位与钳制", ok_af3,
+           f"applied={applied} clamp=({clamped_hi},{clamped_lo})")
+
+    # AF4 拖动移动改窗口位置
+    pin4 = PinWindow(img)
+    pin4.move(100, 100)
+    before = pin4.pos()
+    from PySide6.QtGui import QMouseEvent
+    press = QMouseEvent(QEvent.Type.MouseButtonPress, QPoint(20, 20), QPoint(20, 20),
+                        QPoint(120, 120), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    pin4.mousePressEvent(press)
+    move = QMouseEvent(QEvent.Type.MouseMove, QPoint(60, 50), QPoint(60, 50),
+                       QPoint(160, 150), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    pin4.mouseMoveEvent(move)
+    after = pin4.pos()
+    pin4.close()
+    ok_af4 = after.x() == before.x() + 40 and after.y() == before.y() + 30
+    record("AF4 左键拖动移动浮窗", ok_af4,
+           f"before=({before.x()},{before.y()}) after=({after.x()},{after.y()})")
+
+    # AF5 右键菜单含全部动作
+    pin5 = PinWindow(img)
+    menu = pin5._build_menu()
+    texts = [a.text() for a in menu.actions()]
+    submenus = [a.menu() for a in menu.actions() if a.menu() is not None]
+    op_texts = [a.text() for a in submenus[0].actions()] if submenus else []
+    pin5.close()
+    ok_af5 = (
+        any("复制" in x for x in texts)
+        and any("另存" in x for x in texts)
+        and any("置顶" in x for x in texts)
+        and any("重置" in x for x in texts)
+        and any("关闭" in x for x in texts)
+        and op_texts == [f"{p}%" for p in OPACITY_STEPS]
+    )
+    record("AF5 右键菜单动作齐全", ok_af5,
+           f"actions={texts} op={op_texts}")
+
+    # AF6 工具条/遮罩：确认阶段有「钉在桌面」按钮，且连接 pin_requested
+    tb = Toolbar(None, exclude=("顺旋", "逆旋", "左右", "上下"))
+    tb.set_confirm_mode(True)
+    pin_btn = tb._actions.get("钉在桌面")
+    # 父工具条未 show，isVisible() 恒 False；用 isHidden() 判断显式显隐
+    ok_af6a = pin_btn is not None and not pin_btn.isHidden()
+    # 编辑器工具条从不调用 set_confirm_mode，钉按钮默认显示
+    from snap_editor import Canvas as _Canvas
+    ed_tb = _Canvas(make_image(20, 20), [], None).toolbar
+    ed_pin = ed_tb._actions.get("钉在桌面")
+    ok_af6b = ed_pin is not None and not ed_pin.isHidden()
+    ov = Overlay(img, 1.0)
+    ok_af6c = hasattr(ov, "pin_requested") and "钉在桌面" in tb._tip_keys.get("action:钉在桌面", "钉在桌面")
+    # 行为级：模拟选区后点钉按钮 → 发 pin_requested
+    ov.resize(600, 500)
+    ov.sel = __import__("PySide6").QtCore.QRect(50, 50, 200, 150)
+    fired = []
+    ov.pin_requested.connect(lambda q: fired.append((q.width(), q.height())))
+    ov._pin_only()
+    ok_af6d = len(fired) == 1 and fired[0] == (200, 150)
+    record("AF6 工具条/遮罩钉在桌面按钮与信号",
+           ok_af6a and ok_af6b and ok_af6c and ok_af6d,
+           f"btn={ok_af6a}/{ok_af6b} sig={ok_af6c} fired={fired}")
+
+    # AF7 编辑器：Canvas/EditorWindow 有 pin_requested 且菜单项存在
+    from snap_editor import Canvas, EditorWindow
+    cv = Canvas(img, [], None)
+    ok_af7a = hasattr(cv, "pin_requested")
+    ew = EditorWindow(img, [], Path("."))
+    ok_af7b = hasattr(ew, "pin_requested") and "钉在桌面" in ew._FILE_TEXTS
+    ew.close()
+    record("AF7 编辑器钉在桌面接线", ok_af7a and ok_af7b,
+           f"canvas={ok_af7a} editor={ok_af7b}")
+
+    # AF8 贴图热键持久化往返 + 默认值
+    with tempfile.TemporaryDirectory() as td:
+        os.environ["SNAPTOOL_HOME"] = td
+        try:
+            default_pin = hotkeys.load_pin_hotkey()
+            hk = hotkeys.Hotkey(hotkeys.MOD_CONTROL | hotkeys.MOD_ALT, 0x50)
+            saved = hotkeys.save_pin_hotkey(hk)
+            loaded = hotkeys.load_pin_hotkey()
+            (Path(td) / "settings.json").write_text(
+                '{"pin_hotkey":{"mods":999,"vk":0}}', encoding="utf-8")
+            fallback = hotkeys.load_pin_hotkey()
+        finally:
+            os.environ.pop("SNAPTOOL_HOME", None)
+    ok_af8 = (
+        default_pin.vk == 0x50 and default_pin.mods == (hotkeys.MOD_CONTROL | hotkeys.MOD_SHIFT)
+        and saved is True and loaded == hk and fallback.vk == 0x50
+    )
+    record("AF8 贴图热键默认/持久化/非法回退", ok_af8,
+           f"default={default_pin.label()} roundtrip={loaded.label()} fallback={fallback.label()}")
+
+    # AF9 App 四入口接线（源码级）+ PinWindow 列表管理
+    import inspect
+    import snap as snapmod
+    src_init = inspect.getsource(snapmod.App.__init__)
+    src_begin = inspect.getsource(snapmod.App._begin_capture)
+    src_open_ed = inspect.getsource(snapmod.App._open_editor)
+    ok_af9a = (
+        "pin_hotkey" in src_init
+        and "self.pins" in src_init
+        and "self.overlay.pin_requested.connect(self._on_pin_requested)" in src_begin
+        and "editor.pin_requested.connect(self._on_editor_pin)" in src_open_ed
+        and "pin_clipboard" in src_init
+    )
+    # 行为级：_pin_image 建浮窗并加入列表，关闭后从列表移除
+    #   用 __new__ 避免完整构造（注册全局热键 / 显示窗口 / 单实例锁干扰）
+    q = snapmod.App.__new__(snapmod.App)
+    q.app = QApplication.instance()
+    q.pins = []
+    before_n = len(q.pins)
+    pinx = q._pin_image(make_image(50, 40))
+    after_n = len(q.pins)
+    pinx.close()
+    q.app.processEvents()
+    after_close = len(q.pins)
+    ok_af9b = before_n == 0 and after_n == 1 and after_close == 0
+    record("AF9 App 四入口接线与浮窗列表管理", ok_af9a and ok_af9b,
+           f"wiring={ok_af9a} list={before_n}->{after_n}->{after_close}")
+
+    # AF10 i18n：新文案 8 语言齐全且占位符一致
+    from i18n_data import _ROWS, LANGS
+    need_keys = (
+        "钉在桌面", "贴图", "贴出剪贴板图片", "设置贴图热键…", "设置贴图热键 - {app}",
+        "贴图热键已改为 {label}", "已把截图钉在桌面  {w}×{h}",
+        "已把剪贴板图片钉在桌面  {w}×{h}", "剪贴板里没有图片，无法贴图。",
+        "复制图片", "另存为…", "透明度", "保持置顶", "重置大小", "关闭贴图",
+        "贴图用法", "贴图操作",
+    )
+    bad = []
+    for k in need_keys:
+        row = _ROWS.get(k)
+        if not row or len(row) != len(LANGS) or any(not s for s in row):
+            bad.append(k)
+    for k, ph in (("设置贴图热键 - {app}", "{app}"),
+                  ("贴图热键已改为 {label}", "{label}"),
+                  ("已把截图钉在桌面  {w}×{h}", "{w}")):
+        if any(ph not in s for s in _ROWS.get(k, ())):
+            bad.append(k + ph)
+    record("AF10 贴图相关文案 8 语言齐全且占位符一致", not bad, f"bad={bad}")
+
+    # AF11 README 同步 v34
+    readme = Path("README.md").read_text(encoding="utf-8")
+    ok_af11 = "v34" in readme and "贴图钉在桌面" in readme
+    record("AF11 README 同步 v34 贴图钉在桌面", ok_af11,
+           f"v34={'v34' in readme} pin={'贴图钉在桌面' in readme}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -5102,6 +5303,7 @@ if __name__ == "__main__":
     test_v31_sticky_tools_and_single_instance()
     test_v32_pen_smoothing()
     test_v33_pen_smooth_levels()
+    test_v34_pin_to_desktop()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

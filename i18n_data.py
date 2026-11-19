@@ -42,6 +42,129 @@ _ROWS: dict[str, tuple[str, ...]] = {
     "使用说明…": ("使用说明…", "使用說明…", "User Guide…", "使い方…", "사용 설명서…", "Guide…", "Handbuch…", "Guía…"),
     "命令行参数…": ("命令行参数…", "命令列參數…", "Command Line…", "コマンドライン…", "명령줄 옵션…", "Ligne de commande…", "Befehlszeile…", "Línea de comandos…"),
     "设置热键…": ("设置热键…", "設定熱鍵…", "Set Hotkey…", "ショートカット設定…", "단축키 설정…", "Raccourci…", "Tastenkürzel…", "Atajo de teclado…"),
+    # v34 贴图钉在桌面
+    "钉在桌面": ("钉在桌面", "釘在桌面", "Pin to Desktop", "デスクトップにピン留め", "데스크톱에 고정", "Épingler au bureau", "Auf Desktop anheften", "Fijar al escritorio"),
+    "钉在桌面：把当前截图贴成可移动的浮窗": (
+        "钉在桌面：把当前截图贴成可移动的浮窗", "釘在桌面：把目前截圖貼成可移動的浮窗",
+        "Pin to Desktop: paste the current capture as a movable overlay",
+        "デスクトップにピン留め：現在のキャプチャを移動可能な浮遊ウィンドウにします",
+        "데스크톱에 고정: 현재 캡처를 이동 가능한 플로팅 창으로 붙입니다",
+        "Épingler au bureau : coller la capture actuelle comme un volet mobile",
+        "Auf Desktop anheften: aktuellen Screenshot als verschiebbares Fenster anzeigen",
+        "Fijar al escritorio: pegar la captura actual como una ventana flotante",
+    ),
+    "贴图": ("贴图", "貼圖", "Pinned Image", "ピン留め画像", "고정 이미지", "Image épinglée", "Angeheftetes Bild", "Imagen fijada"),
+    "贴出剪贴板图片": ("贴出剪贴板图片", "貼出剪貼簿圖片", "Paste Clipboard Image", "クリップボード画像を貼り付け", "클립보드 이미지 붙여넣기", "Coller l'image du presse-papiers", "Zwischenablagebild einfügen", "Pegar imagen del portapapeles"),
+    "贴出剪贴板图片  {label}": (
+        "贴出剪贴板图片  {label}", "貼出剪貼簿圖片  {label}", "Paste Clipboard Image  {label}",
+        "クリップボード画像を貼り付け  {label}", "클립보드 이미지 붙여넣기  {label}",
+        "Coller l'image du presse-papiers  {label}", "Zwischenablagebild einfügen  {label}",
+        "Pegar imagen del portapapeles  {label}",
+    ),
+    "设置贴图热键…": ("设置贴图热键…", "設定貼圖熱鍵…", "Set Pin Hotkey…", "貼り付け熱鍵の設定…", "고정 단축키 설정…", "Raccourci d'épinglage…", "Pin-Tastenkürzel…", "Atajo de fijar…"),
+    "设置贴图热键 - {app}": (
+        "设置贴图热键 - {app}", "設定貼圖熱鍵 - {app}", "Set Pin Hotkey - {app}",
+        "貼り付け熱鍵の設定 - {app}", "고정 단축키 설정 - {app}",
+        "Raccourci d'épinglage - {app}", "Pin-Tastenkürzel - {app}",
+        "Atajo de fijar - {app}",
+    ),
+    "贴图热键已改为 {label}": (
+        "贴图热键已改为 {label}", "貼圖熱鍵已改為 {label}", "Pin hotkey changed to {label}",
+        "貼り付け熱鍵を {label} に変更しました", "고정 단축키가 {label}(으)로 변경되었습니다",
+        "Raccourci d'épinglage changé pour {label}", "Pin-Tastenkürzel geändert zu {label}",
+        "Atajo de fijar cambiado a {label}",
+    ),
+    "已把截图钉在桌面  {w}×{h}": (
+        "已把截图钉在桌面  {w}×{h}", "已把截圖釘在桌面  {w}×{h}",
+        "Pinned capture to desktop  {w}×{h}", "キャプチャをデスクトップにピン留めしました  {w}×{h}",
+        "캡처를 데스크톱에 고정했습니다  {w}×{h}", "Capture épinglée au bureau  {w}×{h}",
+        "Screenshot auf Desktop angeheftet  {w}×{h}", "Captura fijada al escritorio  {w}×{h}",
+    ),
+    "已把剪贴板图片钉在桌面  {w}×{h}": (
+        "已把剪贴板图片钉在桌面  {w}×{h}", "已把剪貼簿圖片釘在桌面  {w}×{h}",
+        "Pinned clipboard image to desktop  {w}×{h}", "クリップボード画像をデスクトップにピン留めしました  {w}×{h}",
+        "클립보드 이미지를 데스크톱에 고정했습니다  {w}×{h}", "Image du presse-papiers épinglée au bureau  {w}×{h}",
+        "Zwischenablagebild auf Desktop angeheftet  {w}×{h}", "Imagen del portapapeles fijada al escritorio  {w}×{h}",
+    ),
+    "剪贴板里没有图片，无法贴图。": (
+        "剪贴板里没有图片，无法贴图。", "剪貼簿裡沒有圖片，無法貼圖。",
+        "No image in the clipboard; nothing to pin.",
+        "クリップボードに画像がないため、貼り付けできません。",
+        "클립보드에 이미지가 없어 붙여넣을 수 없습니다.",
+        "Aucune image dans le presse-papiers ; rien à épingler.",
+        "Kein Bild in der Zwischenablage – nichts anzuheften.",
+        "No hay imagen en el portapapeles; no se puede fijar.",
+    ),
+    "复制图片": ("复制图片", "複製圖片", "Copy Image", "画像をコピー", "이미지 복사", "Copier l'image", "Bild kopieren", "Copiar imagen"),
+    "另存为…": ("另存为…", "另存為…", "Save As…", "名前を付けて保存…", "다른 이름으로 저장…", "Enregistrer sous…", "Speichern unter…", "Guardar como…"),
+    "透明度": ("透明度", "透明度", "Opacity", "不透明度", "불투명도", "Opacité", "Deckkraft", "Opacidad"),
+    "保持置顶": ("保持置顶", "保持置頂", "Keep on Top", "常に最前面", "항상 위에", "Toujours au-dessus", "Immer oben", "Siempre encima"),
+    "重置大小": ("重置大小", "重設大小", "Reset Size", "サイズをリセット", "크기 재설정", "Réinitialiser la taille", "Größe zurücksetzen", "Restablecer tamaño"),
+    "关闭贴图": ("关闭贴图", "關閉貼圖", "Close Pin", "ピン留めを閉じる", "고정 닫기", "Fermer l'épinglage", "Anheftung schließen", "Cerrar fijación"),
+    "保存贴图": ("保存贴图", "儲存貼圖", "Save Pinned Image", "ピン留め画像を保存", "고정 이미지 저장", "Enregistrer l'image épinglée", "Angeheftetes Bild speichern", "Guardar imagen fijada"),
+    "贴图用法": (
+        "把当前截图（含标注）贴成一张<b>无边框、可置顶的图片浮窗</b>，像便利贴一样钉在桌面。"
+        "四个入口：框选后的「钉在桌面」按钮、编辑器「文件 → 钉在桌面」、"
+        "托盘「贴出剪贴板图片」、贴图热键（默认 Ctrl + Shift + P，可在设置中修改）。",
+        "把目前截圖（含標註）貼成一張<b>無邊框、可置頂的圖片浮窗</b>，像便利貼一樣釘在桌面。"
+        "四個入口：框選後的「釘在桌面」按鈕、編輯器「檔案 → 釘在桌面」、"
+        "系統匣「貼出剪貼簿圖片」、貼圖熱鍵（預設 Ctrl + Shift + P，可在設定中修改）。",
+        "Pins the current capture (with annotations) as a <b>borderless, always-on-top image overlay</b>, "
+        "like a sticky note on your desktop. Four entry points: the Pin to Desktop button after selecting, "
+        "Editor → File → Pin to Desktop, the tray's Paste Clipboard Image, and the pin hotkey "
+        "(default Ctrl + Shift + P, configurable in Settings).",
+        "現在のキャプチャ（注釈を含む）を<b>枠なし・最前面表示の画像浮遊ウィンドウ</b>として貼り付け、"
+        "付箋のようにデスクトップに留めます。4 つの入口：範囲選択後の「ピン留め」ボタン、"
+        "エディターの「ファイル → ピン留め」、トレイの「クリップボード画像を貼り付け」、"
+        "ピン留め熱鍵（既定 Ctrl + Shift + P、設定で変更可）。",
+        "현재 캡처(주석 포함)를 <b>테두리 없는 항상 위 이미지 창</b>으로 붙여 메모처럼 데스크톱에 고정합니다. "
+        "네 가지 진입점: 영역 선택 후 '데스크톱에 고정' 버튼, 편집기 '파일 → 데스크톱에 고정', "
+        "트레이 '클립보드 이미지 붙여넣기', 고정 단축키(기본 Ctrl+Shift+P, 설정에서 변경 가능).",
+        "Épingle la capture actuelle (avec annotations) comme un <b>volet d'image sans bordure, toujours au-dessus</b>, "
+        "tel un pense-bête sur le bureau. Quatre entrées : le bouton Épingler après sélection, "
+        "Éditeur → Fichier → Épingler, le menu Coller l'image du presse-papiers, et le raccourci d'épinglage "
+        "(par défaut Ctrl + Maj + P, modifiable dans les paramètres).",
+        "Hält den aktuellen Screenshot (mit Anmerkungen) als <b>rahmenloses, immer oben liegendes Bildfenster</b> "
+        "wie einen Haftzettel auf dem Desktop fest. Vier Zugänge: die Schaltfläche „Auf Desktop anheften“ nach der "
+        "Auswahl, Editor → Datei → Auf Desktop anheften, das Tray-Menü „Zwischenablagebild einfügen“ und die "
+        "Pin-Taste (Standard Strg+Umschalt+P, in den Einstellungen änderbar).",
+        "Fija la captura actual (con anotaciones) como una <b>ventana de imagen flotante sin borde y siempre encima</b>, "
+        "como una nota adhesiva en el escritorio. Cuatro entradas: el botón Fijar al escritorio tras seleccionar, "
+        "Editor → Archivo → Fijar al escritorio, el menú Pegar imagen del portapapeles y el atajo de fijar "
+        "(predeterminado Ctrl+Mayús+P, configurable en Ajustes).",
+    ),
+    "贴图操作": (
+        "浮窗操作：<b>左键拖动</b>移动，<b>滚轮</b>缩放（0.1~8 倍），<b>右键菜单</b>可复制图片 / 另存为 / "
+        "调透明度（100/75/50/25%）/ 开关保持置顶 / 重置大小 / 关闭；<b>双击</b>或 <b>Esc</b> 关闭，"
+        "<b>Ctrl+C</b> 复制原图。可同时钉多张，鼠标悬停时右上角出现关闭按钮。",
+        "浮窗操作：<b>左鍵拖動</b>移動，<b>滾輪</b>縮放（0.1~8 倍），<b>右鍵選單</b>可複製圖片 / 另存為 / "
+        "調整透明度（100/75/50/25%）/ 開關保持置頂 / 重設大小 / 關閉；<b>雙擊</b>或 <b>Esc</b> 關閉，"
+        "<b>Ctrl+C</b> 複製原圖。可同時釘多張，滑鼠懸停時右上角出現關閉按鈕。",
+        "Overlay controls: <b>left-drag</b> to move, <b>mouse wheel</b> to zoom (0.1–8x), <b>right-click menu</b> "
+        "to copy / save as / set opacity (100/75/50/25%) / toggle keep-on-top / reset size / close; "
+        "<b>double-click</b> or <b>Esc</b> to close, <b>Ctrl+C</b> to copy the original. Multiple pins are allowed; "
+        "hover to reveal a close button in the top-right corner.",
+        "浮遊ウィンドウの操作：<b>左ドラッグ</b>で移動、<b>ホイール</b>で拡大縮小（0.1〜8 倍）、"
+        "<b>右クリックメニュー</b>で画像コピー / 名前を付けて保存 / 不透明度変更（100/75/50/25%）/ "
+        "常に最前面の切替 / サイズリセット / 閉じる；<b>ダブルクリック</b>または <b>Esc</b> で閉じ、"
+        "<b>Ctrl+C</b> で元画像をコピー。複数同時に留められ、カーソルを合わせると右上に閉じるボタンが表示されます。",
+        "플로팅 창 조작: <b>왼쪽 드래그</b>로 이동, <b>휠</b>로 확대/축소(0.1~8배), <b>오른쪽 클릭 메뉴</b>에서 "
+        "이미지 복사 / 다른 이름으로 저장 / 불투명도 조절(100/75/50/25%) / 항상 위 켜기·끄기 / 크기 재설정 / 닫기; "
+        "<b>더블클릭</b> 또는 <b>Esc</b>로 닫고, <b>Ctrl+C</b>로 원본 복사. 여러 개를 동시에 고정할 수 있고, "
+        "마우스를 올리면 오른쪽 위에 닫기 버튼이 나타납니다.",
+        "Contrôles du volet : <b>glisser à gauche</b> pour déplacer, <b>molette</b> pour zoomer (0,1–8x), "
+        "<b>menu contextuel</b> pour copier / enregistrer / régler l'opacité (100/75/50/25%) / basculer "
+        "« toujours au-dessus » / réinitialiser la taille / fermer ; <b>double-clic</b> ou <b>Échap</b> pour fermer, "
+        "<b>Ctrl+C</b> pour copier l'original. Plusieurs épingles sont possibles ; survolez pour afficher le bouton de fermeture en haut à droite.",
+        "Steuerung des Fensters: <b>linksziehen</b> zum Verschieben, <b>Mausrad</b> zum Zoomen (0,1–8x), "
+        "<b>Rechtsklick-Menü</b> zum Kopieren / Speichern / Deckkraft ändern (100/75/50/25%) / Immer-oben umschalten / "
+        "Größe zurücksetzen / Schließen; <b>Doppelklick</b> oder <b>Esc</b> zum Schließen, <b>Strg+C</b> kopiert das Original. "
+        "Mehrere Pins sind möglich; beim Überfahren erscheint oben rechts eine Schaltfläche zum Schließen.",
+        "Controles de la ventana: <b>arrastrar con el botón izquierdo</b> para mover, <b>rueda del ratón</b> para ampliar "
+        "(0,1–8x), <b>menú contextual</b> para copiar / guardar como / ajustar opacidad (100/75/50/25%) / activar o "
+        "desactivar «siempre encima» / restablecer tamaño / cerrar; <b>doble clic</b> o <b>Esc</b> para cerrar, "
+        "<b>Ctrl+C</b> para copiar la imagen original. Se pueden fijar varias; al pasar el ratón aparece un botón de cierre arriba a la derecha.",
+    ),
     "语言…": ("语言…", "語言…", "Language…", "言語…", "언어…", "Langue…", "Sprache…", "Idioma…"),
     "使用说明": ("使用说明", "使用說明", "User Guide", "使い方", "사용 설명서", "Guide d'utilisation", "Handbuch", "Guía de uso"),
     "命令行参数": ("命令行参数", "命令列參數", "Command Line", "コマンドライン", "명령줄 옵션", "Ligne de commande", "Befehlszeile", "Línea de comandos"),

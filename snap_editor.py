@@ -99,6 +99,7 @@ class Canvas(QWidget):
     copy_requested = Signal(QImage)
     save_requested = Signal(QImage)
     ocr_requested = Signal(QImage)
+    pin_requested = Signal(QImage)    # v34 钉在桌面：当前画布结果（含标注）
     close_requested = Signal()
     zoom_changed = Signal(float)      # 当前显示比例（1.0 = 原始像素 100%）
 
@@ -175,6 +176,7 @@ class Canvas(QWidget):
         self.toolbar.undo_clicked.connect(self.undo)
         self.toolbar.close_clicked.connect(self.close_requested.emit)
         self.toolbar.copy_clicked.connect(lambda: self.copy_requested.emit(self.compose()))
+        self.toolbar.pin_clicked.connect(lambda: self.pin_requested.emit(self.compose()))
         self.toolbar.save_clicked.connect(lambda: self.save_requested.emit(self.compose()))
         self.toolbar.ocr_clicked.connect(lambda: self.ocr_requested.emit(self.base.copy()))
         self.toolbar.style_clicked.connect(self._toggle_style_panel)
@@ -1417,6 +1419,7 @@ class EditorWindow(QMainWindow):
     copy_requested = Signal(QImage)
     save_requested = Signal(QImage)
     ocr_requested = Signal(QImage)
+    pin_requested = Signal(QImage)
     closed = Signal()
 
     def __init__(self, image: QImage, shapes: list[Shape], save_dir, parent=None) -> None:
@@ -1433,6 +1436,7 @@ class EditorWindow(QMainWindow):
         self.canvas.copy_requested.connect(self.copy_requested.emit)
         self.canvas.save_requested.connect(self.save_requested.emit)
         self.canvas.ocr_requested.connect(self.ocr_requested.emit)
+        self.canvas.pin_requested.connect(self.pin_requested.emit)
         self.canvas.close_requested.connect(self.closed.emit)
 
         self._build_menu()
@@ -1441,7 +1445,8 @@ class EditorWindow(QMainWindow):
         self.canvas.toolbar.raise_()
 
     # 菜单文案的简体中文 key，retranslate_ui 与构造共用
-    _FILE_TEXTS = ("复制到剪贴板\tCtrl+Enter", "另存为…\tCtrl+S", "关闭编辑器\tEsc")
+    _FILE_TEXTS = ("复制到剪贴板\tCtrl+Enter", "另存为…\tCtrl+S",
+                   "钉在桌面", "关闭编辑器\tEsc")
     _EDIT_TEXTS = ("撤销\tCtrl+Z", "OCR 取字", "样式面板")
     _TRANSFORM_TEXTS = ("顺时针旋转 90°", "逆时针旋转 90°", "左右镜像", "上下镜像")
     # 只旋转「选中的矩形 / 椭圆 / 文字」，与上面的整图旋转区分开
@@ -1456,6 +1461,7 @@ class EditorWindow(QMainWindow):
         for i, (text_key, slot) in enumerate(zip(self._FILE_TEXTS, (
             lambda: self.copy_requested.emit(self.canvas.compose()),
             lambda: self.save_requested.emit(self.canvas.compose()),
+            lambda: self.pin_requested.emit(self.canvas.compose()),
             self.closed.emit,
         ))):
             a = QAction(t(text_key), self)

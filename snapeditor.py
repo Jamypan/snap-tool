@@ -567,6 +567,13 @@ def _draw_icon(name: str, p: QPainter) -> None:
     elif name == "复制":
         p.drawRect(6, 6, 12, 12)
         p.drawRect(11, 11, 12, 12)
+    elif name == "钉在桌面":
+        # 图钉：帽 + 针身 + 尖
+        p.drawLine(8, 6, 18, 6)
+        p.drawLine(13, 6, 13, 14)
+        p.drawEllipse(9, 4, 8, 4)
+        p.drawLine(13, 14, 10, 19)
+        p.drawLine(13, 14, 16, 19)
     elif name == "确定":
         p.drawLine(7, 14, 11, 18)
         p.drawLine(11, 18, 19, 8)
@@ -2214,6 +2221,7 @@ class Toolbar(QWidget):
     undo_clicked = Signal()
     save_clicked = Signal()
     copy_clicked = Signal()
+    pin_clicked = Signal()   # v34 钉在桌面：把当前图像贴成桌面浮窗
     long_clicked = Signal()
     ocr_clicked = Signal()
     style_clicked = Signal()
@@ -2291,6 +2299,7 @@ class Toolbar(QWidget):
         add_action("取字", "识别选区文字 (OCR)", self.ocr_clicked)
         add_action("保存", "另存为文件 (Ctrl+S)", self.save_clicked)
         add_action("复制", "复制到剪贴板 (Enter)", self.copy_clicked)
+        add_action("钉在桌面", "钉在桌面：把当前截图贴成可移动的浮窗", self.pin_clicked)
         add_action("确定", "确认选区，进入程序窗口继续编辑 (Enter)", self.confirm_clicked)
         add_action("✕", "取消 (Esc)", self.close_clicked)
 
@@ -2349,7 +2358,7 @@ class Toolbar(QWidget):
         for s in self._separators:
             s.setVisible(not on)
         for key, b in self._actions.items():
-            if key in ("复制", "确定", "✕"):
+            if key in ("复制", "钉在桌面", "确定", "✕"):
                 b.setVisible(on)
             else:
                 b.setVisible((not on) and key not in self._excluded)
@@ -2375,6 +2384,8 @@ class Overlay(QWidget):
     save_requested = Signal(QImage)
     # 确认阶段点「复制」：只把原图交给宿主放进剪贴板并关闭遮罩，不打开编辑器
     copy_only = Signal(QImage)
+    # v34 钉在桌面：把「当前截图结果（含标注）」贴成桌面浮窗并收起截图界面
+    pin_requested = Signal(QImage)
     # 全屏模式双击：把整张截图（物理图 + 已转物理坐标的标注）交给窗口化编辑器
     to_editor = Signal(QImage, list)
 
@@ -2471,6 +2482,7 @@ class Overlay(QWidget):
         self.toolbar.undo_clicked.connect(self.undo)
         self.toolbar.close_clicked.connect(self.cancel)
         self.toolbar.copy_clicked.connect(self._copy_only)
+        self.toolbar.pin_clicked.connect(self._pin_only)
         self.toolbar.save_clicked.connect(lambda: self.save_requested.emit(self.compose()))
         # 旧工具条「长截图」按钮：确认模式下被 set_confirm_mode(True) 隐藏，
         # 现已由主窗口 / 托盘的独立命令取代。保留作兼容入口：它同样发
@@ -3076,6 +3088,19 @@ class Overlay(QWidget):
             return
         self._teardown()
         self.copy_only.emit(img)
+
+    def _pin_only(self) -> None:
+        """确认阶段点「钉在桌面」（v34）：取当前截图结果（含标注）交给宿主
+        贴成桌面浮窗，随后直接收起遮罩，不打开程序窗口编辑器。"""
+        self._commit_text()
+        if not self.sel:
+            self.cancel()
+            return
+        img = self.compose()
+        if img.isNull():
+            return
+        self._teardown()
+        self.pin_requested.emit(img)
 
     def _confirm(self) -> None:
         """选择阶段点「确定」/ 回车。

@@ -31,6 +31,7 @@ from i18n import LANG, app_name, t
 # Win32 常量（RegisterHotKey）
 # ---------------------------------------------------------------------------
 HOTKEY_ID = 0xA001
+PIN_HOTKEY_ID = 0xA002          # v34 贴图热键：把剪贴板图片贴到桌面
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
@@ -39,6 +40,10 @@ MOD_NOREPEAT = 0x4000  # 长按不重复触发
 
 DEFAULT_MODS = MOD_CONTROL | MOD_SHIFT
 DEFAULT_VK = 0x41  # A
+
+# v34 贴图热键默认 Ctrl+Shift+P（P = Pin），与截图热键可各自独立修改
+DEFAULT_PIN_MODS = MOD_CONTROL | MOD_SHIFT
+DEFAULT_PIN_VK = 0x50  # P
 
 # 截图模式（热键 / 托盘「截图」使用的默认模式）
 CAPTURE_MODES = ("rect", "window", "fullscreen")
@@ -196,6 +201,28 @@ def save_hotkey(hk: Hotkey) -> bool:
         return False
     raw = _load_raw()
     raw["capture"] = hk.to_dict()
+    return _save_raw(raw)
+
+
+def _default_pin_hotkey() -> Hotkey:
+    return Hotkey(DEFAULT_PIN_MODS, DEFAULT_PIN_VK)
+
+
+def load_pin_hotkey() -> Hotkey:
+    """v34：读取贴图热键；缺失/损坏/非法时回退到默认 Ctrl+Shift+P。"""
+    raw = _load_raw().get("pin_hotkey")
+    if not isinstance(raw, dict) or not raw:
+        return _default_pin_hotkey()
+    hk = Hotkey.from_dict(raw)
+    return hk if hk.is_valid() else _default_pin_hotkey()
+
+
+def save_pin_hotkey(hk: Hotkey) -> bool:
+    """v34：保存贴图热键（保留其它配置）。"""
+    if not hk.is_valid():
+        return False
+    raw = _load_raw()
+    raw["pin_hotkey"] = hk.to_dict()
     return _save_raw(raw)
 
 
@@ -397,13 +424,16 @@ class HotkeyDialog(QDialog):
     )
 
     def __init__(self, current: Hotkey, parent=None, app_title: str | None = None,
-                 error: str = "") -> None:
+                 error: str = "", *, title_key: str = "设置截图热键 - {app}",
+                 default: Hotkey | None = None) -> None:
         super().__init__(parent)
-        self.hotkey = current if current.is_valid() else Hotkey()
+        self._default = default if default is not None else Hotkey()
+        self.hotkey = current if current.is_valid() else self._default
         self._capturing = False
         self._grabbed = False
         self._app_title = app_title or app_name()
-        self.setWindowTitle(t("设置截图热键 - {app}", app=self._app_title))
+        self._title_key = title_key
+        self.setWindowTitle(t(title_key, app=self._app_title))
         self.setMinimumWidth(430)
         self.setStyleSheet(self.STYLE)
 
@@ -484,7 +514,7 @@ class HotkeyDialog(QDialog):
 
     def retranslate_ui(self, _code: str = "") -> None:
         """语言切换后刷新改键对话框的静态文案（不打断正在录制的按键）。"""
-        self.setWindowTitle(t("设置截图热键 - {app}", app=self._app_title))
+        self.setWindowTitle(t(self._title_key, app=self._app_title))
         self.current_label.setText(t("当前热键：<b>{label}</b>", label=self.hotkey.label()))
         self.capture_btn.setToolTip(t("点这里后直接按下想要的组合键"))
         self._tip.setText(
@@ -532,8 +562,8 @@ class HotkeyDialog(QDialog):
 
     def _restore_default(self) -> None:
         self._stop_capture()
-        self._set_hotkey(Hotkey())
-        self._show_status(t("已恢复为 {label}，点「保存」生效。", label=Hotkey().label()))
+        self._set_hotkey(self._default)
+        self._show_status(t("已恢复为 {label}，点「保存」生效。", label=self._default.label()))
 
     # ------------------------------------------------------------ 按键录制
     def _start_capture(self) -> None:

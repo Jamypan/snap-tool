@@ -62,20 +62,24 @@ from PySide6.QtWidgets import (  # noqa: E402
 from hotkeys import (  # noqa: E402
     CAPTURE_MODES,
     HOTKEY_ID,
+    PIN_HOTKEY_ID,
     Hotkey,
     HotkeyDialog,
     load_hotkey,
     load_mode,
     load_pen_smooth,
+    load_pin_hotkey,
     mode_label,
     save_hotkey,
     save_mode,
     save_pen_smooth,
+    save_pin_hotkey,
 )
 from i18n import LANG, app_name, t  # noqa: E402
 from i18n_docs import cli_help  # noqa: E402
 from snapeditor import Overlay, set_pen_smooth  # noqa: E402
 from snap_editor import EditorWindow  # noqa: E402
+from pinwindow import PinWindow  # noqa: E402
 from snapui import (  # noqa: E402
     AboutDialog,
     HelpWindow,
@@ -487,6 +491,7 @@ class App:
         self.overlay: Overlay | None = None
         self.preview: PreviewWindow | None = None
         self.editor: EditorWindow | None = None
+        self.pins: list[PinWindow] = []   # v34 钉在桌面的贴图浮窗（可多张）
         self.busy: BusyBar | None = None
         self._ocr_busy = False          # 已有取字任务在跑时忽略重复点击
         self._workers: list[QThread] = []
@@ -497,10 +502,12 @@ class App:
         self._quitting = False          # 正在退出：屏蔽一切托盘提示 / 窗口提示
 
         self.hotkey: Hotkey = load_hotkey()
+        self.pin_hotkey: Hotkey = load_pin_hotkey()   # v34 贴图热键
         self.capture_mode = load_mode()
         self.pen_smooth = load_pen_smooth()
         set_pen_smooth(self.pen_smooth)   # 应用画笔平滑档位到绘制模块
         self._hotkey_registered = False
+        self._pin_hotkey_registered = False
         self._hk_error = ""
 
         icon = make_icon()
@@ -510,6 +517,7 @@ class App:
         self.main_window.long_capture_requested.connect(self.start_long_capture)
         self.main_window.mode_changed.connect(self._on_mode_changed)
         self.main_window.hotkey_requested.connect(self.open_hotkey_settings)
+        self.main_window.pin_hotkey_requested.connect(self.open_pin_hotkey_settings)
         self.main_window.help_requested.connect(self.show_help)
         self.main_window.about_requested.connect(self.show_about)
         self.main_window.open_dir_requested.connect(self._open_save_dir)
@@ -529,6 +537,10 @@ class App:
         self.act_capture.triggered.connect(lambda: self.start_capture())
         self.menu.addAction(self.act_capture)
         self._tray_actions["capture"] = self.act_capture
+        self.act_pin_clipboard = QAction(t("贴出剪贴板图片"), self.menu)
+        self.act_pin_clipboard.triggered.connect(lambda _checked=False: self.pin_clipboard())
+        self.menu.addAction(self.act_pin_clipboard)
+        self._tray_actions["pin_clipboard"] = self.act_pin_clipboard
         self.menu.addSeparator()
         for mode in CAPTURE_MODES:
             act = QAction(mode_label(mode), self.menu)
@@ -581,6 +593,7 @@ class App:
         self.filter = HotkeyFilter(self._on_hotkey)
         app.installNativeEventFilter(self.filter)
         self._hotkey_ok = self._try_register(self.hotkey)
+        self._pin_hotkey_ok = self._try_register_pin(self.pin_hotkey)
         self._update_hotkey_texts()
         self.main_window.show()
 
@@ -634,13 +647,34 @@ class App:
                 pass
         self._hotkey_registered = False
 
+    def _try_register_pin(self, hk: Hotkey) -> bool:
+        """v34：注册贴图热键（PIN_HOTKEY_ID）；失败时不影响截图热键。"""
+        self._unregister_pin_hotkey()
+        if not hk.is_valid():
+            return False
+        ok = bool(user32.RegisterHotKey(None, PIN_HOTKEY_ID, hk.win_mods, hk.vk))
+        self._pin_hotkey_registered = ok
+        return ok
+
+    def _unregister_pin_hotkey(self) -> None:
+        if getattr(self, "_pin_hotkey_registered", False):
+            try:
+                user32.UnregisterHotKey(None, PIN_HOTKEY_ID)
+            except Exception:  # noqa: BLE001
+                pass
+        self._pin_hotkey_registered = False
+
     def _update_hotkey_texts(self) -> None:
         label = self.hotkey.label()
         self.act_capture.setText(t("截图  {label}", label=label))
+        self.act_pin_clipboard.setText(
+            t("贴出剪贴板图片  {label}", label=self.pin_hotkey.label())
+        )
         self.tray.setToolTip(
             t("{app}（{label} 截图 · 右键可改热键）", app=app_name(), label=label)
         )
         self.main_window.set_hotkey(self.hotkey)
+        self.main_window.set_pin_hotkey(self.pin_hotkey)
 
     def _retranslate_tray(self, _code: str = "") -> None:
         """语言切换后重建托盘菜单文案（截图项由 _update_hotkey_texts 带快捷键）。"""
@@ -828,9 +862,45 @@ class App:
                         6000,
                     )
 
+    def open_pin_hotkey_settings(self) -> None:
+        """v34：设置贴图热键（把剪贴板图片贴到桌面）。录制期间注销该热键。"""
+        from hotkeys import DEFAULT_PIN_MODS, DEFAULT_PIN_VK
+        if self.overlay is not None:
+            return
+        self._unregister_pin_hotkey()
+        default_pin = Hotkey(DEFAULT_PIN_MODS, DEFAULT_PIN_VK)
+        try:
+            for _ in range(10):
+                dlg = HotkeyDialog(
+                    self.pin_hotkey, None, app_name(), self._hk_error,
+                    title_key="设置贴图热键 - {app}", default=default_pin,
+                )
+                if dlg.exec() != QDialog.Accepted:
+                    break
+                hk = dlg.hotkey
+                if self._try_register_pin(hk):
+                    self.pin_hotkey = hk
+                    saved = save_pin_hotkey(hk)
+                    self._update_hotkey_texts()
+                    msg = t("贴图热键已改为 {label}", label=hk.label())
+                    if not saved:
+                        msg += t("（配置未能写入磁盘，重启后会恢复旧设置）")
+                    self._tray_message(app_name(), msg, QSystemTrayIcon.Information, 3000)
+                    break
+                self._hk_error = t(
+                    "{label} 无法注册：可能已被其他程序占用，或属于系统保留组合。请换一个。",
+                    label=hk.label(),
+                )
+        finally:
+            self._hk_error = ""
+            if not self._pin_hotkey_registered:
+                self._pin_hotkey_ok = self._try_register_pin(self.pin_hotkey)
+
     def _on_hotkey(self, hk_id: int) -> None:
         if hk_id == HOTKEY_ID:
             self.start_capture()
+        elif hk_id == PIN_HOTKEY_ID:
+            self.pin_clipboard()
 
     def _on_tray(self, reason) -> None:
         if reason == QSystemTrayIcon.Trigger:
@@ -922,6 +992,7 @@ class App:
         self.overlay.save_requested.connect(self._save_image)
         self.overlay.to_editor.connect(self._on_to_editor)
         self.overlay.copy_only.connect(self._on_copy_only)
+        self.overlay.pin_requested.connect(self._on_pin_requested)
 
         # v28 输入门闩：show 之前先上闩，屏蔽鼠标并显示等待光标。
         self.overlay.lock_input()
@@ -1015,6 +1086,58 @@ class App:
             t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
             QSystemTrayIcon.Information,
             1800,
+        )
+
+    # ------------------------------------------------------------ 贴图钉在桌面（v34）
+    def _pin_image(self, img: QImage) -> PinWindow | None:
+        """把当前图像贴成桌面浮窗。四入口（工具条/编辑器/托盘/热键）统一走这里。"""
+        if img.isNull():
+            return None
+        dpr = self.app.primaryScreen().devicePixelRatio() or 1.0
+        pin = PinWindow(img, dpr)
+        pin.closed.connect(lambda: self._on_pin_closed(pin))
+        self.pins.append(pin)
+        pin.show()
+        pin.raise_()
+        return pin
+
+    def _on_pin_closed(self, pin: PinWindow) -> None:
+        if pin in self.pins:
+            self.pins.remove(pin)
+
+    def _on_pin_requested(self, img: QImage) -> None:
+        """截图确认阶段点「钉在桌面」：贴图并收起截图界面 / 编辑器 / 主窗口。"""
+        self._pin_image(img)
+        self._close_overlay(restore=False)
+        self._close_editor_silently()
+        self.main_window.hide()
+        self._hidden_windows = []
+        self._tray_message(
+            app_name(), t("已把截图钉在桌面  {w}×{h}", w=img.width(), h=img.height()),
+            QSystemTrayIcon.Information, 1800,
+        )
+
+    def _on_editor_pin(self, img: QImage) -> None:
+        """窗口化编辑器里点「钉在桌面」：贴图，编辑器保持打开可继续编辑。"""
+        self._pin_image(img)
+        self._tray_message(
+            app_name(), t("已把截图钉在桌面  {w}×{h}", w=img.width(), h=img.height()),
+            QSystemTrayIcon.Information, 1800,
+        )
+
+    def pin_clipboard(self) -> None:
+        """托盘「贴出剪贴板图片」/ 贴图热键：把剪贴板里的图片贴到桌面。"""
+        img = QApplication.clipboard().image()
+        if img.isNull():
+            self._tray_message(
+                app_name(), t("剪贴板里没有图片，无法贴图。"),
+                QSystemTrayIcon.Warning, 2200,
+            )
+            return
+        self._pin_image(img)
+        self._tray_message(
+            app_name(), t("已把剪贴板图片钉在桌面  {w}×{h}", w=img.width(), h=img.height()),
+            QSystemTrayIcon.Information, 1800,
         )
 
     def _on_done(self, img: QImage) -> None:
@@ -1249,6 +1372,7 @@ class App:
         editor.copy_requested.connect(self._on_editor_copy)
         editor.save_requested.connect(self._on_editor_save)
         editor.ocr_requested.connect(self._on_editor_ocr)
+        editor.pin_requested.connect(self._on_editor_pin)
         editor.closed.connect(self._on_editor_closed)
         editor.show()
         editor.raise_()
@@ -1344,8 +1468,16 @@ class App:
             self.tray.setVisible(False)
         except Exception:  # noqa: BLE001
             pass
-        # 3) 注销全局热键后退出事件循环
+        # 3) 收起所有贴图浮窗、注销全局热键后退出事件循环
+        #    （部分自测会不完全构造 App，用 getattr 兜底避免 AttributeError）
+        for pin in list(getattr(self, "pins", [])):
+            try:
+                pin.close()
+            except RuntimeError:  # noqa: BLE001
+                pass
+        self.pins = []
         self._unregister_hotkey()
+        self._unregister_pin_hotkey()
         self.app.quit()
 
 

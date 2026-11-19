@@ -182,6 +182,16 @@ code { background:#f3f4f6; padding:1px 4px; }
 </ol>
 <p class="hint">拼接期间本程序窗口保持隐藏、控制条也会避开窗口区域（窗口占满屏幕时会在抓帧瞬间临时隐藏），避免被拍进长图；结束后自动恢复。若页面含固定悬浮元素或动画导致无法自动对齐，会提示结果可能不完整，可改用普通截图。</p>
 <p class="hint"><b>网页不易中途截断</b>：单帧几乎没滚动不会立刻判「到底」，而是连续确认 3 帧；模板匹配失败会减小步长、多等一拍重试 2 次；模板从画面中部取以避开固定顶栏；滚轮步长按上一帧新增行数自适应；每次滚轮前把光标重新锁定到目标窗口，避免鼠标移动后滚错窗口。控制条实时显示帧数、高度与匹配分数，结束时托盘提示会说明共拼了多少帧以及结束原因（到底 / 无法对齐 / 帧数或高度上限 / 手动结束）。</p>
+
+<h2>10. 贴图钉在桌面</h2>
+<p>把当前截图（含标注）贴成一张<b>无边框、可置顶的图片浮窗</b>，像便利贴一样钉在桌面上，方便对着它长时间参考 / 比对。共有四个入口：</p>
+<ul>
+<li>框选后确认阶段的「<b>钉在桌面</b>」按钮：贴当前截图，并收起截图界面与编辑器，只留浮窗；</li>
+<li>编辑器「<b>文件 → 钉在桌面</b>」：贴当前带标注的成图，编辑器保持打开可继续编辑；</li>
+<li>托盘右键「<b>贴出剪贴板图片</b>」：把剪贴板里的任意图片贴到桌面；</li>
+<li>贴图热键（默认 <b>Ctrl + Shift + P</b>，可在「设置 → 设置贴图热键…」修改）：同样贴剪贴板图片。</li>
+</ul>
+<p>浮窗操作：<b>左键拖动</b>移动，<b>滚轮</b>缩放（0.1~8 倍），<b>右键菜单</b>可复制图片 / 另存为 / 调透明度（100/75/50/25%）/ 开关保持置顶 / 重置大小 / 关闭；<b>双击</b>或 <b>Esc</b> 关闭，<b>Ctrl+C</b> 复制原图。可同时钉多张，鼠标悬停时右上角出现关闭按钮。程序退出时会一并收起所有贴图。</p>
 </body></html>
 """
 
@@ -298,6 +308,7 @@ class MainWindow(QMainWindow):
     long_capture_requested = Signal()    # 独立命令：滚动长截图（框选→确定→自动拼接）
     mode_changed = Signal(str)           # 用户改了「默认模式」
     hotkey_requested = Signal()
+    pin_hotkey_requested = Signal()      # v34 设置贴图热键
     help_requested = Signal(str)         # help / cli
     about_requested = Signal()
     open_dir_requested = Signal()
@@ -382,6 +393,9 @@ class MainWindow(QMainWindow):
         a_hk = QAction(t("设置热键…"), self)
         a_hk.triggered.connect(lambda _checked=False: self.hotkey_requested.emit())
         m_set.addAction(a_hk)
+        a_pinhk = QAction(t("设置贴图热键…"), self)
+        a_pinhk.triggered.connect(lambda _checked=False: self.pin_hotkey_requested.emit())
+        m_set.addAction(a_pinhk)
         a_lang = QAction(
             f"{t('语言…')}  [{language_label(LANG.preference)}]", self
         )
@@ -400,7 +414,7 @@ class MainWindow(QMainWindow):
             )
             m_smooth.addAction(a)
             self._pen_smooth_actions[level] = a
-        self._actions.update(hotkey=a_hk, language=a_lang)
+        self._actions.update(hotkey=a_hk, pin_hotkey=a_pinhk, language=a_lang)
 
         m_help = mb.addMenu(t("帮助(&H)"))
         self._menus["help"] = m_help
@@ -531,6 +545,7 @@ class MainWindow(QMainWindow):
         for key, text_key in (
             ("dir", "打开保存目录"), ("minimize", "最小化到托盘"),
             ("quit", "退出"), ("hotkey", "设置热键…"),
+            ("pin_hotkey", "设置贴图热键…"),
             ("help_help", "使用说明…"), ("help_cli", "命令行参数…"),
             ("about", "关于…"), ("long_capture", "滚动长截图…"),
         ):
@@ -574,6 +589,10 @@ class MainWindow(QMainWindow):
     def set_hotkey(self, hk: Hotkey) -> None:
         self._hotkey = hk
         self.hotkey_label.setText(f"<b>{hk.label()}</b>")
+
+    def set_pin_hotkey(self, hk: Hotkey) -> None:
+        """v34：记住贴图热键，用于「设置贴图热键…」菜单提示。"""
+        self._pin_hotkey = hk
 
     def set_mode(self, mode: str) -> None:
         idx = self.mode_combo.findData(mode)
