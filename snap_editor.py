@@ -734,8 +734,7 @@ class Canvas(QWidget):
             self._op_stack.append("shape")
             self._selected = s
         self._editing_shape = None
-        self._set_tool("select")
-        self.toolbar._on_tool("select")
+        # v31 粘滞工具：文字提交后保持文字工具，可连续输入下一个
         if self._selected is not None:
             self._on_select_changed()
         self.setFocus()
@@ -791,6 +790,13 @@ class Canvas(QWidget):
             self._pan_origin = ev.position().toPoint()
             self._pan_off = (self.off_x, self.off_y)
             self.setCursor(Qt.ClosedHandCursor)
+            ev.accept()
+            return
+        if ev.button() == Qt.RightButton:
+            # v31：右键结束当前粘滞工具，回到「选择」态（不关闭编辑器）
+            if self._tool != "select":
+                self._set_tool("select")
+                self.toolbar._on_tool("select")
             ev.accept()
             return
         pos = self._to_image(ev.position().toPoint())
@@ -995,8 +1001,8 @@ class Canvas(QWidget):
                 self._selected = d
             self._draft = None
             self._mode = "idle"
-            self._set_tool("select")
-            self.toolbar._on_tool("select")
+            # v31 粘滞工具：画完保持当前工具，可连续画同类型标注；
+            # 再次点该工具 / 点别的工具 / 右键才切回「选择」态。
             if self._selected is not None:
                 self._on_select_changed()
             self.update()
@@ -1407,7 +1413,6 @@ class EditorWindow(QMainWindow):
     save_requested = Signal(QImage)
     ocr_requested = Signal(QImage)
     closed = Signal()
-    sticky_cancel_requested = Signal()   # v29：右键 = 取消粘滞命令
 
     def __init__(self, image: QImage, shapes: list[Shape], save_dir, parent=None) -> None:
         super().__init__(parent)
@@ -1564,8 +1569,3 @@ class EditorWindow(QMainWindow):
         self.hide()
         self.closed.emit()
         ev.ignore()
-
-    def contextMenuEvent(self, ev) -> None:  # noqa: N802
-        # v29：编辑器内右键 = 取消粘滞命令（不拦截，保留子控件原生菜单）
-        self.sticky_cancel_requested.emit()
-        super().contextMenuEvent(ev)

@@ -4670,261 +4670,151 @@ def test_v28_warmup_and_input_gate() -> None:
            f"ready={ov2._ready} cursor={ov2.cursor().shape()}")
     ov2.close()
 
-    # AB11 README 版本记录同步到 v28 / 260 项
+    # AB11 README 仍保留 v28 预热特性描述（历史版本记录，不写死当前总数）
     readme = Path("README.md").read_text(encoding="utf-8")
-    ok_ab11 = "v28" in readme and "输入门闩" in readme
-    record("AB11 README 同步 v28 版本记录", ok_ab11,
-           f"v28={'v28' in readme} gate={'输入门闩' in readme}")
+    ok_ab11 = "v28" in readme and "预热" in readme
+    record("AB11 README 保留 v28 预热特性记录", ok_ab11,
+           f"v28={'v28' in readme} warmup={'预热' in readme}")
 
 
-def test_v29_sticky_commands() -> None:
-    print("\n--- Stage AC: v29 粘滞命令（结束自动重开） ---")
+def test_v31_sticky_tools_and_single_instance() -> None:
+    print("\n--- Stage AC: v31 工具粘滞 + 单实例不弹框 ---")
     import inspect
     from pathlib import Path
-    from unittest.mock import MagicMock
 
-    from PySide6.QtCore import QEvent, QPointF
-    from PySide6.QtGui import QIcon, QMouseEvent
-    from PySide6.QtWidgets import QApplication, QSystemTrayIcon
-
-    import snap as snapmod
-    from hotkeys import load_hotkey, load_mode
-    from snapui import MainWindow
-
-    def holder_app():
-        h = snapmod.App.__new__(snapmod.App)
-        h.overlay = None
-        h.busy = None
-        h.preview = None
-        h.editor = None
-        h.capture_mode = "rect"
-        h.main_window = MagicMock()
-        h._sticky = None
-        h._sticky_pending = None
-        h._sticky_timer = MagicMock()
-        h._begin_capture = MagicMock()
-        h._restore_own_windows = MagicMock()
-        return h
-
-    # AC1 按钮亮起：set_active_command 切换 active 属性，None 全部熄灭
-    mw = MainWindow(QIcon(), load_hotkey(), load_mode(), Path("."))
-    mw.set_active_command(snapmod.capture_command("window"))
-    lit_rect = [b.property("active") for b in mw._mode_buttons.values()]
-    ok_ac1a = (
-        lit_rect.count("true") == 1
-        and mw._mode_buttons["window"].property("active") == "true"
-        and mw._b_long.property("active") == "false"
-    )
-    mw.set_active_command(snapmod.LONG_COMMAND)
-    ok_ac1b = (
-        mw._b_long.property("active") == "true"
-        and all(b.property("active") == "false" for b in mw._mode_buttons.values())
-    )
-    mw.set_active_command(None)
-    ok_ac1c = mw._b_long.property("active") == "false"
-    record("AC1 命令按钮亮起 / 切换 / 熄灭", ok_ac1a and ok_ac1b and ok_ac1c,
-           f"rect={lit_rect} long={mw._b_long.property('active')}")
-
-    # AC2 用户触发命令 → 设置粘滞 + 按钮亮起 + 真正开始截图
-    h = holder_app()
-    h.start_capture("rect")
-    ok_ac2 = (
-        h._sticky == snapmod.capture_command("rect")
-        and h.main_window.set_active_command.called
-        and h._begin_capture.call_count == 1
-    )
-    record("AC2 点命令后进入粘滞态且按钮亮起", ok_ac2,
-           f"sticky={h._sticky} calls={h._begin_capture.call_count}")
-
-    # AC3 再点同一个按钮 → 取消粘滞，不再启动新截图
-    h._begin_capture.reset_mock()
-    h.start_capture("rect")
-    ok_ac3 = (
-        h._sticky is None
-        and h._begin_capture.call_count == 0
-        and h._sticky_timer.stop.called
-    )
-    record("AC3 再点同一按钮取消粘滞", ok_ac3,
-           f"sticky={h._sticky} calls={h._begin_capture.call_count}")
-
-    # AC4 执行别的命令 → 切换到新命令（不是叠加）
-    h2 = holder_app()
-    h2.start_capture("rect")
-    h2.start_long_capture()
-    ok_ac4 = h2._sticky == snapmod.LONG_COMMAND
-    record("AC4 执行其他命令切换到该命令", ok_ac4, f"sticky={h2._sticky}")
-
-    # AC5 命令正常结束 → 定时重开同一命令
-    h3 = holder_app()
-    h3._sticky = snapmod.capture_command("window")
-    h3._command_finished()
-    ok_ac5 = (
-        h3._sticky_pending == snapmod.capture_command("window")
-        and h3._sticky_timer.start.called
-        and h3._sticky_timer.start.call_args.args[0] == snapmod.STICKY_RESTART_DELAY_MS
-    )
-    record("AC5 命令结束后调度自动重开", ok_ac5,
-           f"pending={h3._sticky_pending} delay={h3._sticky_timer.start.call_args}")
-
-    # AC6 取消粘滞 → 停掉待执行重开
-    h3._sticky_timer.reset_mock()
-    h3.cancel_sticky()
-    ok_ac6 = (
-        h3._sticky is None
-        and h3._sticky_pending is None
-        and h3._sticky_timer.stop.called
-        and not h3._sticky_timer.start.called
-    )
-    record("AC6 取消后不再自动重开", ok_ac6,
-           f"sticky={h3._sticky} pending={h3._sticky_pending}")
-
-    # AC7 定时到点 → 用 _auto 重开原命令，粘滞状态不变
-    h4 = holder_app()
-    h4._sticky = snapmod.capture_command("window")
-    h4._sticky_pending = snapmod.capture_command("window")
-    h4._on_sticky_restart()
-    ok_ac7 = (
-        h4._begin_capture.call_args.args[0] == "window"
-        and h4._begin_capture.call_args.kwargs.get("long_mode") is False
-        and h4._sticky == snapmod.capture_command("window")
-        and h4._sticky_pending is None
-    )
-    record("AC7 自动重开原命令且保持按钮亮起", ok_ac7,
-           f"call={h4._begin_capture.call_args} sticky={h4._sticky}")
-
-    # AC8 遮罩内右键 → 发 cancelled（宿主据此解除粘滞）
-    ov = Overlay(QImage(200, 120, QImage.Format_RGB32), 1.0)
-    ov.setGeometry(0, 0, 200, 120)
-    fired: list[int] = []
-    ov.cancelled.connect(lambda: fired.append(1))
-    ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPoint(30, 20), QPoint(30, 20),
-                     Qt.RightButton, Qt.RightButton, Qt.NoModifier)
-    ov.mousePressEvent(ev)
-    ok_ac8 = len(fired) == 1
-    record("AC8 遮罩右键发出取消信号", ok_ac8, f"fired={len(fired)}")
-    ov.close()
-
-    # AC9 主窗口右键 → 发粘滞取消信号
-    mw2 = MainWindow(QIcon(), load_hotkey(), load_mode(), Path("."))
-    fired2: list[int] = []
-    mw2.sticky_cancel_requested.connect(lambda: fired2.append(1))
-    rev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(20, 20), QPointF(20, 20),
-                      Qt.RightButton, Qt.RightButton, Qt.NoModifier)
-    mw2.eventFilter(mw2.centralWidget(), rev)
-    src_ed = inspect.getsource(EditorWindow.contextMenuEvent)
-    src_pv = inspect.getsource(snapmod.PreviewWindow.contextMenuEvent)
-    ok_ac9 = (
-        len(fired2) == 1
-        and "sticky_cancel_requested.emit()" in src_ed
-        and "sticky_cancel_requested.emit()" in src_pv
-    )
-    record("AC9 右键取消覆盖主窗口 / 编辑器 / 预览", ok_ac9,
-           f"mw={len(fired2)} editor={src_ed.count('sticky_cancel_requested.emit()')} "
-           f"preview={src_pv.count('sticky_cancel_requested.emit()')}")
-
-    # AC10 托盘右键 → 解除粘滞
-    h5 = holder_app()
-    h5._sticky = snapmod.LONG_COMMAND
-    h5._on_tray(QSystemTrayIcon.Context)
-    record("AC10 托盘右键解除粘滞", h5._sticky is None, f"sticky={h5._sticky}")
-
-    # AC11 所有命令出口都接了统一结束入口
-    src_done = inspect.getsource(snapmod.App._on_done)
-    src_copy = inspect.getsource(snapmod.App._on_copy_only)
-    src_save = inspect.getsource(snapmod.App._save_image)
-    src_editor = inspect.getsource(snapmod.App._on_editor_closed)
-    src_preview = inspect.getsource(snapmod.App._on_preview_closed)
-    src_cancel = inspect.getsource(snapmod.App._on_cancel)
-    src_long = inspect.getsource(snapmod.App._on_long_shot)
-    ok_ac11 = (
-        all("_command_finished()" in s for s in
-            (src_done, src_copy, src_save, src_editor, src_preview))
-        and "cancel_sticky()" in src_cancel
-        and "preview.closed.connect" in src_long
-    )
-    record("AC11 命令结束出口全部接线", ok_ac11,
-           f"done={src_done.count('_command_finished()')} "
-           f"cancel={src_cancel.count('cancel_sticky()')}")
-
-    # AC12 README 版本记录同步
-    readme = Path("README.md").read_text(encoding="utf-8")
-    ok_ac12 = "粘滞命令" in readme and "v29" in readme
-    record("AC12 README 同步 v29 粘滞命令功能", ok_ac12,
-           f"feature={'粘滞命令' in readme} v29={'v29' in readme}")
-
-
-def test_v30_app_init_and_relaunch() -> None:
-    print("\n--- Stage AD: v30 App 真实构造 + 重复启动唤醒 ---")
-    import inspect
-    from pathlib import Path
-    from unittest.mock import MagicMock
-
+    from PySide6.QtCore import QEvent, QPoint, QRect
+    from PySide6.QtGui import QImage, QMouseEvent
     from PySide6.QtWidgets import QApplication
 
     import snap as snapmod
+    from snapeditor import Overlay, Toolbar
+    from snap_editor import Canvas
 
-    # AD1 真实构造 App（v29 自测盲点：之前全用 App.__new__ 绕过 __init__，
-    # 漏掉了 QTimer 局部变量遮蔽 / parent 类型错误导致的一启动就崩）
-    qapp = QApplication.instance()
-    ctrl = None
-    err = ""
-    try:
-        ctrl = snapmod.App(qapp)
-        qapp._ctrl = ctrl
-    except Exception as exc:  # noqa: BLE001
-        err = repr(exc)
-    ok_ad1 = (
-        ctrl is not None
-        and ctrl._sticky is None
-        and type(ctrl._sticky_timer).__name__ == "QTimer"
-        and ctrl._sticky_timer.parent() is qapp
+    def mk_ev(typ, p: QPoint, button=Qt.LeftButton):
+        return QMouseEvent(typ, QPoint(p), QPoint(p), button,
+                           button, Qt.NoModifier)
+
+    # AC1 工具条：点不同工具=切换；再点当前工具=取消回 select
+    tb = Toolbar(None)
+    tb._on_tool("arrow")
+    ok_ac1a = tb.current == "arrow" and tb._buttons["arrow"].isChecked()
+    tb._on_tool("arrow")  # 再次点击同一工具 → 取消
+    ok_ac1b = tb.current == "select" and not tb._buttons["arrow"].isChecked()
+    tb._on_tool("rect")
+    ok_ac1c = tb.current == "rect" and tb._buttons["rect"].isChecked()
+    record("AC1 工具条切换/再次点击取消/切回选择", ok_ac1a and ok_ac1b and ok_ac1c,
+           f"a={ok_ac1a} b={ok_ac1b} c={ok_ac1c}")
+    tb.close()
+
+    # AC2 行为级 Canvas：画完一个箭头仍保持 arrow 工具，可接着画第二个
+    base = make_image(160, 100)
+    cv = Canvas(base, [], None)
+    cv._set_tool("arrow")
+    # 第一个箭头
+    cv.mousePressEvent(mk_ev(QEvent.Type.MouseButtonPress, QPoint(20, 20)))
+    cv.mouseMoveEvent(mk_ev(QEvent.Type.MouseMove, QPoint(60, 60)))
+    cv.mouseReleaseEvent(mk_ev(QEvent.Type.MouseButtonRelease, QPoint(60, 60)))
+    after_first = (len(cv.shapes), cv._tool)
+    # 第二个箭头（同一次工具会话内）
+    cv.mousePressEvent(mk_ev(QEvent.Type.MouseButtonPress, QPoint(80, 30)))
+    cv.mouseMoveEvent(mk_ev(QEvent.Type.MouseMove, QPoint(130, 70)))
+    cv.mouseReleaseEvent(mk_ev(QEvent.Type.MouseButtonRelease, QPoint(130, 70)))
+    after_second = (len(cv.shapes), cv._tool)
+    ok_ac2 = (
+        after_first == (1, "arrow")
+        and after_second == (2, "arrow")
     )
-    record("AD1 真实构造 App 不崩溃且粘滞定时器就绪", ok_ad1,
-           f"err={err} timer={type(ctrl._sticky_timer).__name__ if ctrl else None}")
-    if ctrl is not None:
-        # 释放全局热键 / 单实例锁，避免污染同进程后续测试
-        ctrl.quit()
+    record("AC2 Canvas 连续画两个箭头且保持工具", ok_ac2,
+           f"first={after_first} second={after_second}")
+    cv.close()
 
-    # AD2 __init__ 里不得有局部 import QTimer 遮蔽模块级导入
-    src_init = inspect.getsource(snapmod.App.__init__)
-    ok_ad2 = (
-        "from PySide6.QtCore import QTimer" not in src_init
-        and "QTimer(self.app)" in src_init
+    # AC3 行为级 Overlay：画完矩形仍保持 rect 工具（遮罩内粘滞同样生效）
+    ov = Overlay(QImage(200, 120, QImage.Format_RGB32), dpr=1.0)
+    ov.setGeometry(0, 0, 200, 120)
+    ov._mode = "editing"             # 选区确认后的编辑态，允许选区内绘制
+    ov._tool = "rect"
+    ov.sel = QRect(0, 0, 200, 120)
+    ov.mousePressEvent(mk_ev(QEvent.Type.MouseButtonPress, QPoint(20, 20)))
+    ov.mouseMoveEvent(mk_ev(QEvent.Type.MouseMove, QPoint(60, 60)))
+    ov.mouseReleaseEvent(mk_ev(QEvent.Type.MouseButtonRelease, QPoint(60, 60)))
+    ok_ac3 = len(ov.shapes) == 1 and ov._tool == "rect"
+    record("AC3 Overlay 画完矩形保持 rect 工具", ok_ac3,
+           f"shapes={len(ov.shapes)} tool={ov._tool}")
+
+    # AC4 右键结束粘滞：Overlay 右键回 select、不取消截图
+    ov.mousePressEvent(mk_ev(QEvent.Type.MouseButtonPress, QPoint(100, 90),
+                             Qt.RightButton))
+    ok_ac4 = ov._tool == "select" and ov.sel is not None
+    record("AC4 Overlay 右键结束工具回 select 且不取消截图", ok_ac4,
+           f"tool={ov._tool} sel={ov.sel}")
+    ov.close()
+
+    # AC5 行为级 Canvas：右键结束工具回 select，编辑器不关
+    cv2 = Canvas(make_image(160, 100), [], None)
+    cv2._set_tool("ellipse")
+    cv2.mousePressEvent(mk_ev(QEvent.Type.MouseButtonPress, QPoint(30, 30),
+                              Qt.RightButton))
+    ok_ac5 = cv2._tool == "select" and cv2.isVisible() is False  # 未建立窗口，仅验证工具态
+    record("AC5 Canvas 右键结束工具回 select", ok_ac5,
+           f"tool={cv2._tool}")
+    cv2.close()
+
+    # AC6 文字提交后保持文字工具（两处源码接线）
+    src_ov_commit = inspect.getsource(Overlay._commit_text)
+    src_cv_commit = inspect.getsource(Canvas._commit_text)
+    ok_ac6 = (
+        "_set_tool(\"select\")" not in src_ov_commit
+        and "_set_tool(\"select\")" not in src_cv_commit
     )
-    record("AD2 __init__ 无局部 QTimer 遮蔽且 parent 正确", ok_ad2,
-           f"local_import={'from PySide6.QtCore import QTimer' in src_init}")
+    record("AC6 文字提交后不切回 select（覆盖两编辑器）", ok_ac6,
+           f"ov={'select' in src_ov_commit} cv={'select' in src_cv_commit}")
 
-    # AD3 已有实例收到唤醒请求 → 弹出主窗口（真实逻辑，MagicMock 替身）
-    h = snapmod.App.__new__(snapmod.App)
-    h._quitting = False
-    h.tray = MagicMock()
-    h.show_main_window = MagicMock()
-    h._on_activate_request()
-    ok_ad3 = (
-        h.tray.setVisible.called
-        and h.show_main_window.called
+    # AC7 绘制完成后不切回 select（两处 mouseReleaseEvent 源码）
+    src_ov_rel = inspect.getsource(Overlay.mouseReleaseEvent)
+    src_cv_rel = inspect.getsource(Canvas.mouseReleaseEvent)
+    ok_ac7 = (
+        "self.toolbar._on_tool(\"select\")" not in src_ov_rel
+        and "self.toolbar._on_tool(\"select\")" not in src_cv_rel
     )
-    record("AD3 唤醒请求使已有实例显示主窗口", ok_ad3,
-           f"tray={h.tray.setVisible.called} show={h.show_main_window.called}")
+    record("AC7 绘制完成不切回 select（覆盖两编辑器）", ok_ac7,
+           f"ov={'on_tool' in src_ov_rel} cv={'on_tool' in src_cv_rel}")
 
-    # AD4 main 流程：先探测已有实例并唤醒，再构造新 App（顺序不能反）
-    src_main = inspect.getsource(snapmod.main)
-    probe_at = src_main.find("singleinstance.probe()")
-    resolve_at = src_main.find("_resolve_existing_instance")
-    app_at = src_main.find("ctrl = App(app)")
+    # AC8 单实例：默认路径不弹对话框，signal_existing 后直接返回 False
     src_resolve = inspect.getsource(snapmod._resolve_existing_instance)
-    ok_ad4 = (
-        -1 < probe_at < resolve_at < app_at
-        and "singleinstance.signal_existing()" in src_resolve
+    default_block = src_resolve.split("if not restart:")[1].split("killed =")[0]
+    ok_ac8 = (
+        "MessageBoxW" not in default_block
+        and "return False" in default_block
+        and "signal_existing()" in src_resolve
     )
-    record("AD4 重复启动走唤醒而非再开实例", ok_ad4,
-           f"probe={probe_at} resolve={resolve_at} app={app_at}")
+    record("AC8 单实例默认唤醒不弹框、直接退出新进程", ok_ac8,
+           f"no_dialog={'MessageBoxW' not in default_block} "
+           f"returns_false={'return False' in default_block}")
 
-    # AD5 README 版本记录同步
+    # AC9 显式 --restart 仍保留重启链路
+    restart_block = src_resolve.split("killed =")[1]
+    ok_ac9 = "kill_recorded" in restart_block and "return True" in restart_block
+    record("AC9 显式 --restart 保留强制重启链路", ok_ac9,
+           f"kill={'kill_recorded' in restart_block}")
+
+    # AC10 7 种绘制工具都在 TOOLS 中（粘滞覆盖全部标注命令）
+    from snapeditor import TOOLS
+    tool_keys = {k for k, _ in TOOLS}
+    need = {"rect", "ellipse", "arrow", "line", "pen", "mosaic", "text"}
+    ok_ac10 = need.issubset(tool_keys)
+    record("AC10 七种标注工具全部纳入粘滞", ok_ac10,
+           f"tools={sorted(tool_keys)}")
+
+    # AC11 README 同步到 v31 / 工具粘滞与单实例行为
     readme = Path("README.md").read_text(encoding="utf-8")
-    ok_ad5 = "v30" in readme and "合计 278 项" in readme
-    record("AD5 README 同步 v30 版本记录", ok_ad5,
-           f"v30={'v30' in readme} total={'合计 278 项' in readme}")
+    ok_ac11 = (
+        "v31" in readme
+        and "粘滞" in readme
+        and "不再弹" in readme
+    )
+    record("AC11 README 同步 v31 工具粘滞与单实例行为", ok_ac11,
+           f"v31={'v31' in readme} sticky={'粘滞' in readme} "
+           f"nodlg={'不再弹' in readme}")
 
 
 if __name__ == "__main__":
@@ -4964,8 +4854,7 @@ if __name__ == "__main__":
     test_v26_copy_button()
     test_v27_copy_closes_windows()
     test_v28_warmup_and_input_gate()
-    test_v29_sticky_commands()
-    test_v30_app_init_and_relaunch()
+    test_v31_sticky_tools_and_single_instance()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

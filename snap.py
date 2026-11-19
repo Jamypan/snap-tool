@@ -41,7 +41,6 @@ from PySide6.QtCore import (  # noqa: E402
     QRect,
     Qt,
     QThread,
-    QTimer,
     Signal,
 )
 from PySide6.QtGui import QAction, QImage, QPixmap  # noqa: E402
@@ -84,15 +83,6 @@ from snapui import (  # noqa: E402
 )
 
 WM_HOTKEY = 0x0312
-
-# v29 粘滞命令：命令结束后自动重开同一命令，直到用户切换 / 取消。
-STICKY_RESTART_DELAY_MS = 260
-LONG_COMMAND = ("long",)
-
-
-def capture_command(mode: str) -> tuple[str, str]:
-    return ("capture", mode)
-
 
 user32 = ctypes.windll.user32
 
@@ -407,9 +397,6 @@ class BusyBar(QWidget):
 class PreviewWindow(QWidget):
     """长截图结果的预览与导出窗口。"""
 
-    closed = Signal()   # v29：预览关闭 = 长截图命令真正结束（用于粘滞重开）
-    sticky_cancel_requested = Signal()   # v29：预览内右键 = 取消粘滞命令
-
     def __init__(self, img: QImage, save_dir: Path, copied: bool = False) -> None:
         super().__init__(None, Qt.Window)
         self._copied = copied
@@ -482,15 +469,6 @@ class PreviewWindow(QWidget):
         self._saved_path, self._copied = path, False
         self._render_title()
 
-    def closeEvent(self, ev) -> None:  # noqa: N802
-        self.closed.emit()
-        super().closeEvent(ev)
-
-    def contextMenuEvent(self, ev) -> None:  # noqa: N802
-        # v29：预览窗口右键 = 取消粘滞命令
-        self.sticky_cancel_requested.emit()
-        super().contextMenuEvent(ev)
-
 
 # 取字结果在截图遮罩内展示（见 snapeditor.py）：逐行盖回原文位置，
 # 识别中/无坐标降级时才用浮层面板；不再使用独立的顶层结果窗口。
@@ -515,16 +493,6 @@ class App:
         self._minimize_hint_shown = False
         self._quitting = False          # 正在退出：屏蔽一切托盘提示 / 窗口提示
 
-        # v29 粘滞命令：命令结束后默认重开同一命令，直到用户切换 / 取消。
-        self._sticky: tuple | None = None
-        self._sticky_pending: tuple | None = None
-        self._stitch_control = None
-        self._suppress_result = False
-        # App 不是 QObject，不能当 parent；用 QApplication 作 parent 保证生命周期
-        self._sticky_timer = QTimer(self.app)
-        self._sticky_timer.setSingleShot(True)
-        self._sticky_timer.timeout.connect(self._on_sticky_restart)
-
         self.hotkey: Hotkey = load_hotkey()
         self.capture_mode = load_mode()
         self._hotkey_registered = False
@@ -534,7 +502,6 @@ class App:
         self.main_window = MainWindow(icon, self.hotkey, self.capture_mode, self.save_dir)
         self.main_window.capture_requested.connect(self.start_capture)
         self.main_window.long_capture_requested.connect(self.start_long_capture)
-        self.main_window.sticky_cancel_requested.connect(self.cancel_sticky)
         self.main_window.mode_changed.connect(self._on_mode_changed)
         self.main_window.hotkey_requested.connect(self.open_hotkey_settings)
         self.main_window.help_requested.connect(self.show_help)
@@ -614,9 +581,7 @@ class App:
         # 图标生成、全屏 QPainter 光栅化、PIL/GDI 抓屏后端初始化）挪到启动后
         # 的空闲时刻，避免第一次按热键时现做这些事、出现画面跟不上鼠标的卡顿。
         # singleShot(0) 让主窗口先绘制显示，预热在事件循环空闲时跑，不挡启动。
-        # 注意：QTimer 已在模块顶部导入，这里绝不能再写局部 import——
-        # 局部导入会让整个 __init__ 里的 QTimer 变成局部变量，导致上方
-        # self._sticky_timer = QTimer(self) 抛 UnboundLocalError（v29 曾踩此坑）。
+        from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._warmup)
 
     def _warmup(self) -> None:
@@ -850,139 +815,25 @@ class App:
     def _on_tray(self, reason) -> None:
         if reason == QSystemTrayIcon.Trigger:
             self.start_capture()
-        elif reason == QSystemTrayIcon.Context and hasattr(self, "_sticky"):
-            # v29：托盘右键（弹出菜单）也视为取消粘滞命令
-            self.cancel_sticky()
 
     # ------------------------------------------------------------ 截图
-    def start_capture(self, mode=None, *, _auto: bool = False) -> None:
-        """开始截图。mode 为 None 或非字符串时用默认模式（QAction.triggered 会传 bool）。
-
-        v29 粘滞语义：用户再点同一命令 = 取消；点别的命令 = 切换；
-        自动重开（_auto=True）只执行，不改粘滞状态。
-        """
-        if not isinstance(mode, str) or mode not in CAPTURE_MODES:
-            mode = self.capture_mode
-        if hasattr(self, "_sticky") and not _auto:
-            cmd = capture_command(mode)
-            if self._sticky == cmd:
-                self.cancel_sticky(close_current=True)
-                return
-            self._set_sticky(cmd)
-            self._stop_current_for_switch()
+    def start_capture(self, mode=None) -> None:
+        """开始截图。mode 为 None 或非字符串时用默认模式（QAction.triggered 会传 bool）。"""
         # 滚动长截图拼接期间 busy 是控制条（overlay 已关），此时热键 / 托盘
         # 再触发普通截图会把控制条一起隐藏并打断拼接，必须一并挡住。
         if self.overlay is not None or self.busy is not None:
             return
+        if not isinstance(mode, str) or mode not in CAPTURE_MODES:
+            mode = self.capture_mode
         self._begin_capture(mode, long_mode=False)
 
-    # ------------------------------------------------------------ v29 粘滞命令
-    def _set_sticky(self, cmd) -> None:
-        """激活一个命令：按钮亮起，清掉上一次的定时重开。"""
-        self._sticky = cmd
-        self._sticky_pending = None
-        self._sticky_timer.stop()
-        if hasattr(self, "main_window"):
-            self.main_window.set_active_command(cmd)
-
-    def cancel_sticky(self, close_current: bool = False) -> None:
-        """取消粘滞：按钮熄灭、停掉定时重开；close_current=True 时连当前界面一起收。"""
-        if not hasattr(self, "_sticky"):
-            return
-        self._sticky = None
-        self._sticky_pending = None
-        self._sticky_timer.stop()
-        ctl = getattr(self, "_stitch_control", None)
-        if ctl is not None:
-            try:
-                ctl.request_stop("sticky-cancel")
-            except Exception:  # noqa: BLE001
-                pass
-        if hasattr(self, "main_window"):
-            self.main_window.set_active_command(None)
-        if not close_current:
-            return
-        if getattr(self, "overlay", None) is not None:
-            self._close_overlay()
-        if getattr(self, "busy", None) is not None:
-            self._close_busy()
-            self._restore_own_windows()
-        if getattr(self, "preview", None) is not None:
-            try:
-                self.preview.close()
-            except Exception:  # noqa: BLE001
-                pass
-            self.preview = None
-        if getattr(self, "editor", None) is not None:
-            self._close_editor_silently()
-            self.show_main_window()
-
-    def _stop_current_for_switch(self) -> None:
-        """切到别的命令时收掉当前截图 / 拼接 / 结果窗口，但不熄灭新命令。"""
-        if getattr(self, "overlay", None) is not None:
-            self._close_overlay(restore=False)
-        if getattr(self, "busy", None) is not None:
-            ctl = getattr(self, "_stitch_control", None)
-            if ctl is not None:
-                try:
-                    ctl.request_stop("command-switch")
-                except Exception:  # noqa: BLE001
-                    pass
-            self._close_busy()
-        if getattr(self, "preview", None) is not None:
-            try:
-                self.preview.close()
-            except Exception:  # noqa: BLE001
-                pass
-            self.preview = None
-        if getattr(self, "editor", None) is not None:
-            self._close_editor_silently()
-
-    def _sticky_finished(self, cmd) -> None:
-        """一条命令正常结束：若仍是当前粘滞命令，延时重开同一命令。"""
-        if not hasattr(self, "_sticky") or self._sticky != cmd:
-            return
-        self._sticky_pending = cmd
-        self._sticky_timer.stop()
-        self._sticky_timer.start(STICKY_RESTART_DELAY_MS)
-
-    def _command_finished(self) -> None:
-        """任意命令正常结束的统一入口：由 App 决定要不要粘滞重开。"""
-        cmd = getattr(self, "_sticky", None)
-        if cmd is not None:
-            self._sticky_finished(cmd)
-
-    def _on_sticky_restart(self) -> None:
-        cmd = getattr(self, "_sticky_pending", None)
-        self._sticky_pending = None
-        if cmd is None or not hasattr(self, "_sticky") or self._sticky != cmd:
-            return
-        # 结果窗口 / 编辑器还没关，说明命令尚未真正结束，等下次信号
-        if (
-            getattr(self, "overlay", None) is not None
-            or getattr(self, "busy", None) is not None
-            or getattr(self, "preview", None) is not None
-            or getattr(self, "editor", None) is not None
-        ):
-            return
-        if cmd[0] == "long":
-            self.start_long_capture(_auto=True)
-        else:
-            self.start_capture(cmd[1], _auto=True)
-
-    def start_long_capture(self, *, _auto: bool = False) -> None:
+    def start_long_capture(self) -> None:
         """独立命令「滚动长截图」：悬停选窗口 → 单击即自动向下滚屏拼接。
 
         与普通截图共用隐藏窗口 / 抓屏 / 遮罩，但走窗口探测模式；单击
         窗口后 Overlay.long_shot 直接把客户区交给 _on_long_shot 启动
-        StitchWorker，不进编辑器、也不再点「确定」。v29 同样支持粘滞重开。
+        StitchWorker，不进编辑器、也不再点「确定」。
         """
-        if hasattr(self, "_sticky") and not _auto:
-            if self._sticky == LONG_COMMAND:
-                self.cancel_sticky(close_current=True)
-                return
-            self._set_sticky(LONG_COMMAND)
-            self._stop_current_for_switch()
         if self.overlay is not None or self.busy is not None:
             return
         self._begin_capture("window", long_mode=True)
@@ -1006,8 +857,6 @@ class App:
         except Exception as exc:  # noqa: BLE001
             self.tray.setVisible(True)
             self._restore_own_windows()
-            if hasattr(self, "_sticky"):
-                self.cancel_sticky()
             QMessageBox.warning(None, app_name(), t("截屏失败：{error}", error=exc))
             return
 
@@ -1118,9 +967,6 @@ class App:
             self._restore_own_windows()
 
     def _on_cancel(self) -> None:
-        # v29：用户主动取消（Esc / ✕ / 遮罩右键）= 解除粘滞，绝不自动重开
-        if hasattr(self, "_sticky"):
-            self.cancel_sticky()
         self._close_overlay()
 
     @staticmethod
@@ -1150,7 +996,6 @@ class App:
             QSystemTrayIcon.Information,
             1800,
         )
-        self._command_finished()
 
     def _on_done(self, img: QImage) -> None:
         self._copy_to_clipboard(img)
@@ -1161,7 +1006,6 @@ class App:
             QSystemTrayIcon.Information,
             1800,
         )
-        self._command_finished()
 
     def _save_image(self, img: QImage) -> None:
         default = self.save_dir / f"{t('截图_')}{datetime.now():%Y%m%d_%H%M%S}.png"
@@ -1177,7 +1021,6 @@ class App:
             return
         self._close_overlay()
         self._tray_message(app_name(), t("已保存：{path}", path=path), QSystemTrayIcon.Information, 2200)
-        self._command_finished()
 
     # ------------------------------------------------------------ 长截图
     def _on_long_shot(self, logical_rect: QRect) -> None:
@@ -1191,8 +1034,6 @@ class App:
             or logical_rect.height() < 8
         ):
             self._close_overlay()
-            if hasattr(self, "_sticky"):
-                self.cancel_sticky()
             return
         ov = self.overlay
         dpr = ov.dpr if ov else 1.0
@@ -1228,7 +1069,6 @@ class App:
         self.busy.show()
 
         control = snapback.ScrollControl()
-        self._stitch_control = control
         r = bar_screen_rect(self.busy, dpr)
         m = int(round(10 * dpr))   # 放宽一圈，点边框附近也不算「页面内点击」
         control.set_exclude_rect(
@@ -1252,9 +1092,6 @@ class App:
             # v26：长截图完成也自动进剪贴板，预览窗口标题同步显示已复制
             self._copy_to_clipboard(qimg)
             self.preview = PreviewWindow(qimg, self.save_dir, copied=True)
-            # v29：预览窗口关闭才算长截图命令真正结束，此时才粘滞重开
-            self.preview.closed.connect(self._on_preview_closed)
-            self.preview.sticky_cancel_requested.connect(self.cancel_sticky)
             self.preview.show()
             self.preview.raise_()
             self.preview.activateWindow()
@@ -1288,9 +1125,6 @@ class App:
         def on_fail(msg: str) -> None:
             self._close_busy()
             self._restore_own_windows()
-            # 失败不算正常结束：解除粘滞，避免弹窗关掉后又无限重试
-            if hasattr(self, "_sticky"):
-                self.cancel_sticky()
             QMessageBox.warning(None, app_name(), t("长截图失败：{error}", error=msg))
 
         worker.ok.connect(on_ok)
@@ -1304,12 +1138,6 @@ class App:
             self.busy.hide()
             self.busy.deleteLater()
             self.busy = None
-        self._stitch_control = None
-
-    def _on_preview_closed(self) -> None:
-        """v29：长截图预览关闭 = 该命令结束，按钮亮着就自动再截一张。"""
-        self.preview = None
-        self._command_finished()
 
     # ------------------------------------------------------------ OCR
     def _on_ocr(self, img: QImage) -> None:
@@ -1402,7 +1230,6 @@ class App:
         editor.save_requested.connect(self._on_editor_save)
         editor.ocr_requested.connect(self._on_editor_ocr)
         editor.closed.connect(self._on_editor_closed)
-        editor.sticky_cancel_requested.connect(self.cancel_sticky)
         editor.show()
         editor.raise_()
         editor.activateWindow()
@@ -1471,8 +1298,6 @@ class App:
         # 编辑器关闭后，恢复截图前被隐藏的自身窗口，并把主窗口重新显示出来
         self._restore_own_windows()
         self.show_main_window()
-        # v29：编辑器关闭才算「打勾命令」结束 → 粘滞重开同一截图命令
-        self._command_finished()
 
     def _reap(self, worker: QThread) -> None:
         if worker in self._workers:
@@ -1578,34 +1403,20 @@ def _run_selftest() -> int:
 
 
 def _resolve_existing_instance(st, restart: bool) -> bool:
-    """检测到已有实例：先唤醒它，再决定退出还是「结束后台实例并重启」。
+    """检测到已有实例：默认直接唤醒其主窗口，不弹框、不重启。
 
-    返回 True 表示继续启动新实例。这样「提示已运行却看不到界面」时，用户在
-    弹窗里点「是」就能直接进新版，不必去任务管理器里找进程。
+    返回 True 表示继续启动新实例（仅显式 --restart 时才走这条路径）。
+    默认路径只请老实例把主窗口显示出来，然后结束本次新进程 —— 用户重复
+    双击程序时只是把窗口调出来，不再弹「是否结束它并重新启动」的对话框。
     """
     rec = st.record or {}
     pid = rec.get("pid", "?")
-    started = rec.get("started", t("未知"))
     woken = singleinstance.signal_existing()
     singleinstance.log(f"已有实例 pid={pid} 唤醒={woken} restart={restart}")
 
     if not restart:
-        hint = t(
-            "已请它把主窗口显示出来，请看任务栏。\n" if woken
-            else "托盘图标可能被收进了通知区折叠栏（点 ^ 展开看看）。\n"
-        )
-        text = (
-            t("{app}已在后台运行（PID {pid}，启动于 {started}）。\n\n",
-              app=app_name(), pid=pid, started=started)
-            + hint
-            + t("如果确实看不到任何窗口，多半是残留的后台实例。\n\n是否结束它并重新启动？（若有未保存的编辑内容会丢失）")
-        )
-        # MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
-        ans = ctypes.windll.user32.MessageBoxW(
-            None, text, app_name(), 0x04 | 0x20 | 0x40000
-        )
-        if ans != 6:  # IDYES
-            return False
+        # signal_existing() 已通过激活通知请老实例显示主窗口；本进程直接退出。
+        return False
 
     killed = singleinstance.kill_recorded(rec)
     singleinstance.log(f"结束后台实例结果={killed}")
@@ -1675,6 +1486,8 @@ def main() -> int:
     app._ctrl = ctrl  # 防止被回收
 
     if "--shot" in sys.argv:
+        from PySide6.QtCore import QTimer
+
         QTimer.singleShot(120, ctrl.start_capture)
     elif not ctrl._hotkey_ok:
         ctrl.tray.showMessage(

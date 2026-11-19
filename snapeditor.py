@@ -2243,6 +2243,11 @@ class Toolbar(QWidget):
                 btn.setToolTip(t(text_key))
 
     def _on_tool(self, key: str) -> None:
+        # 粘滞工具（v31）：再次点击当前已激活的绘制工具 = 取消该命令，回到
+        # 「选择」态；点击其它工具则是切换命令。这样画完一个箭头后工具保持
+        # 亮起、可连续画，直到再点一次箭头按钮 / 点别的命令 / 右键才结束。
+        if key == self.current:
+            key = "select"
         for k, b in self._buttons.items():
             b.setChecked(k == key)
         self.current = key
@@ -3143,8 +3148,10 @@ class Overlay(QWidget):
             return
 
         if ev.button() == Qt.RightButton:
-            # v29：遮罩内右键 = 取消当前命令；宿主据此同时解除粘滞状态。
-            self.cancel()
+            # v31：右键结束当前粘滞工具，回到「选择」态（不取消整个截图）
+            if self._tool != "select":
+                self._set_tool("select")
+                self.toolbar._on_tool("select")
             return
         if ev.button() != Qt.LeftButton:
             return
@@ -3445,14 +3452,11 @@ class Overlay(QWidget):
                 keep = True
             if keep:
                 self.shapes.append(d)
-                # 画完自动选中这条标注，并切回「选择」态，
-                # 这样用户立刻就能点选/编辑它（而不是继续画同类型标注）。
                 self._selected = d
             self._draft = None
             self._mode = "editing"
-            # 切回 select（画完即回到选择/编辑状态）
-            self._set_tool("select")
-            self.toolbar._on_tool("select")
+            # v31 粘滞工具：画完保持当前绘制工具与按钮亮起，可继续画下一个；
+            # 只有再次点该工具 / 点别的工具 / 右键才切回「选择」态。
             if self._selected is not None:
                 self._on_select_changed()
             self.update()
@@ -3616,9 +3620,8 @@ class Overlay(QWidget):
             self._selected = s
         self._editing_shape = None
         self.setFocus()
-        # 文字提交后切回 select 态并选中刚输入的文字，便于立即编辑
-        self._set_tool("select")
-        self.toolbar._on_tool("select")
+        # v31 粘滞工具：文字提交后保持文字工具，可连续输入下一个；
+        # 结束方式同样是再次点该工具 / 点别的工具 / 右键。
         if self._selected is not None:
             self._on_select_changed()
         self.update()
