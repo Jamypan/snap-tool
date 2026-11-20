@@ -2480,10 +2480,10 @@ def test_long_capture_v17() -> None:
         )
         ok_q8 = (
             stats2["stop_reason"] == "reached-bottom"
-            and holder["grabs"] == 4          # 首帧 + 连续 3 帧确认，不再一帧就收工
-            and holder["before"] == holder["after"] == 4
+            and holder["grabs"] == 5          # 首帧 + 3 帧确认 + 1 次大步长复核
+            and holder["before"] == holder["after"] == 5
             and img2.height == 40
-            and stats2["retries"] == 2
+            and stats2["retries"] == 3
         )
         record("Q8 滚到底自动结束且抓帧钩子成对调用", ok_q8,
                f"reason={stats2['stop_reason']} grabs={holder['grabs']} "
@@ -2824,14 +2824,32 @@ def test_v19_features() -> None:
         record("S2 匹配失败重试后继续拼接", ok_s2,
                f"reason={st2['stop_reason']} retries={st2['retries']} height={img2.height}")
 
-        # S3 连续失败超过上限才结束
+        # S3 匹配失败时先分清「页面没动」和「页面在动但对不上」（v46）
+        #   a) 画面完全没变 → 判到底，不无限重试
         img3, st3, h3 = run(lambda a, b, **kw: (0, 0.1), max_frames=8)
-        ok_s3 = st3["stop_reason"] == "match-failed" and st3["retries"] == 2
-        record("S3 连续失败超上限才结束", ok_s3,
-               f"reason={st3['stop_reason']} retries={st3['retries']}")
+        ok_s3a = st3["stop_reason"] == "reached-bottom" and st3["degraded"] == 0
+        #   b) 画面一直在变（弹窗 / 视频 / 整屏吸附）→ 降级继续，绝不中断
+        rng3 = np.random.default_rng(3)
+        sb.grab_region = lambda _r: Image.fromarray(
+            rng3.integers(0, 255, (200, 60, 3), dtype=np.uint8)
+        )
+        sb.find_vertical_overlap = lambda a, b, **kw: (0, 0.1)
+        _, st3b = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 60, 200), settle_seconds=0, max_frames=6,
+            hide_overlays=False, bottom_guard=0,
+        )
+        ok_s3b = (
+            st3b["stop_reason"] == "max-frames"      # 跑满帧数而不是中途断掉
+            and st3b["degraded"] >= 1
+            and st3b["stop_reason"] not in ("match-failed", "no-overlap")
+        )
+        record("S3 失配时区分「没动→到底」与「在动→降级继续」",
+               ok_s3a and ok_s3b,
+               f"still={st3['stop_reason']} moving={st3b['stop_reason']} "
+               f"degraded={st3b['degraded']}")
 
-        # S4 一次滚过头 → 自适应减小步长
-        img4, st4, h4 = run(lambda a, b, **kw: (a.shape[0] - 150, 0.99),
+        # S4 一次滚过头（重叠只剩 20 行）→ 自适应减小步长
+        img4, st4, h4 = run(lambda a, b, **kw: (a.shape[0] - 20, 0.99),
                             frame_h=200, max_frames=4)
         ok_s4 = abs(st4["notches"]) < 3 and st4["stop_reason"] == "max-frames"
         record("S4 自适应减小滚轮步长", ok_s4,
@@ -3099,7 +3117,9 @@ def test_v20_long_capture_quality() -> None:
                       f"cursor_x={[p[0] for p in seen['cursor']]}")
 
         # T11 到底补尾：正常帧都用缩短的捕获区，最后一帧用完整 rect
-        sb.find_vertical_overlap = lambda a, b, **kw: (max(0, a.shape[0] - 10), 0.99)
+        # v46：用 top=0（内容完全贴在画布末尾＝这一帧没滚动）来表达「到底」；
+        # 旧断言用的 a.h-10 实际是「重叠 10 行」，语义上属于「几乎滚了整屏」。
+        sb.find_vertical_overlap = lambda a, b, **kw: (0, 0.99)
         seen["rects"].clear()
         img11, st11 = sb.stitch_scroll(
             sb.ScreenRect(0, 0, 600, 240), settle_seconds=0, max_frames=6,
@@ -4564,11 +4584,11 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v40", "v41", "v42", "v43", "v44", "v45",
+    marks = ("v27", "v40", "v41", "v42", "v43", "v44", "v45", "v46",
              "关闭截图编辑与截屏助手两个窗口",
              "合计 250 项", "合计 368 项", "合计 375 项", "合计 381 项", "合计 386 项",
-             "合计 392 项", "合计 398 项", "dist/v16", "dist/v41", "dist/v42",
-             "dist/v43", "dist/v44", "dist/v45")
+             "合计 392 项", "合计 398 项", "合计 406 项", "dist/v16", "dist/v41",
+             "dist/v42", "dist/v43", "dist/v44", "dist/v45", "dist/v46")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
     lang_marks = ("command panel", "コマンドパネル", "명령 패널",
@@ -6971,6 +6991,158 @@ def test_v45_flat_top_buttons_and_zoom_fit() -> None:
     app.processEvents()
 
 
+def test_v46_scroll_stitch_robustness() -> None:
+    """Stage AR  v46：网页长截图抗中断。
+
+    用户反馈「截网页还是会经常中断」。根因（用仿真定位）：
+      · 模板取自帧中部（第 86~206 行），要重叠 >= 206 行才可能匹配 —— 520px
+        高的窗口单帧最多滚约 314px，而浏览器一滚常是 300~400px，一过线必失配；
+      · new_start（重叠行数）被当成「新增行数」用，「重叠很少＝滚过头」于是被
+        误判成「几乎没动」，连续 3 帧就假报「到底」；
+      · 失配后继续往下滚，漏掉的内容越滚越远，永远补不回；
+      · 网页 sticky 顶栏压在模板上，导致整段对不上。
+    """
+    import numpy as np
+    from PIL import Image
+
+    import snapback as sb
+
+    app = QApplication.instance()
+
+    rng = np.random.default_rng(11)
+    # 尺寸按真实窗口取（约 900×520 的客户区），小窗口下模板会矮到几行、
+    # 列带也窄，属于另一种边界，不是这次要覆盖的场景。
+    H, W, PAGE = 520, 900, 2600
+    base = rng.integers(0, 255, (PAGE, W)).astype(np.float32)
+    page = (base * 0.5 + np.roll(base, 1, axis=1) * 0.25
+            + np.roll(base, -1, axis=1) * 0.25)
+    for y in range(0, PAGE, 70):
+        page[y + 6:y + 30, 60:W - 60] *= 0.25
+    page = np.clip(page, 0, 255).astype(np.uint8)
+
+    def run(*, step_px: int = 80, swallow=(), popup=(), fixed_header: int = 0,
+            per_frame: int = 0):
+        """用假抓屏 / 假滚轮驱动真实 stitch_scroll，回读拼接质量。"""
+        state = {"pos": 0, "n": 0}
+
+        def fake_grab(_rect):
+            state["n"] += 1
+            f = page[state["pos"]: state["pos"] + H].copy()
+            if fixed_header:
+                f[:fixed_header] = page[:fixed_header]
+            if state["n"] in popup:
+                f[:] = 30
+            return Image.fromarray(np.stack([f] * 3, -1))
+
+        def fake_wheel(n):
+            if state["n"] in swallow:      # 滚轮被吞：焦点进了 iframe 之类
+                return
+            # per_frame 模拟 scroll-snap：无论滚几格都吸附整整一屏
+            delta = per_frame or abs(n) * step_px
+            state["pos"] = min(PAGE - H, state["pos"] + delta)
+
+        names = ("grab_region", "_send_mouse_wheel", "get_cursor_pos",
+                 "set_cursor_pos", "find_floating_overlays", "is_key_pressed")
+        orig = {n: getattr(sb, n) for n in names}
+        sb.grab_region, sb._send_mouse_wheel = fake_grab, fake_wheel
+        sb.get_cursor_pos = lambda: (0, 0)
+        sb.set_cursor_pos = lambda x, y: None
+        sb.find_floating_overlays = lambda r: []
+        sb.is_key_pressed = lambda vk: False
+        try:
+            img, st = sb.stitch_scroll(
+                sb.ScreenRect(0, 0, W, H), settle_seconds=0, retry_settle=0,
+                hide_overlays=False, bottom_guard=0, max_frames=120,
+            )
+        finally:
+            for n, v in orig.items():
+                setattr(sb, n, v)
+        arr = np.array(img)
+        if fixed_header:                   # 长图顶部保留一次 sticky 顶栏
+            arr = arr[fixed_header:]
+        ref = page[fixed_header: fixed_header + arr.shape[0]]
+        n = min(arr.shape[0], ref.shape[0])
+        diff = float(np.abs(arr[:n].astype(int)
+                            - np.stack([ref[:n]] * 3, -1).astype(int)).mean())
+        return arr.shape[0], st, diff
+
+    # AR1 逐行差改 75 分位：平坦页面上 1~2 行错位也能分出来
+    page3 = np.stack([page] * 3, -1)
+    acc1, fr1 = page3[:600].copy(), page3[380:780].copy()
+    d_ok = sb.overlap_row_diff(acc1, fr1, 380)
+    d_off = sb.overlap_row_diff(acc1, fr1, 378)
+    top1, _ = sb.find_vertical_overlap(acc1, fr1, search_rows=700)
+    ok_ar1 = d_ok <= 0.5 and d_off > d_ok and top1 == 380
+    record("AR1 逐行差用 p75，2 行错位可辨且定位精确", ok_ar1,
+           f"diff(380)={d_ok:.2f} diff(378)={d_off:.2f} top={top1}")
+
+    # AR2 多模板带：单帧滚 500px（重叠只剩 100 行）仍能定位；旧参数必失手
+    acc2, fr2 = page3[:700].copy(), page3[600:1120].copy()
+    rows2 = min(72, max(40, H // 10))
+    offs2 = [0, int(0.12 * (H - rows2)), int(0.25 * (H - rows2))]
+    top2, sc2 = sb.find_vertical_overlap(
+        acc2, fr2, search_rows=700, template_rows=rows2,
+        template_offset=0, template_offsets=offs2,
+    )
+    top_old, _sc_old = sb.find_vertical_overlap(
+        acc2, fr2, search_rows=700, template_rows=100, template_offset=67,
+    )
+    ok_ar2 = top2 == 600 and sc2 > 0.9 and top_old != 600
+    record("AR2 多模板带可容忍半屏以上滚动（旧单模板失效）", ok_ar2,
+           f"新 top={top2} score={sc2:.3f}；旧 top={top_old}")
+
+    # AR3 每帧滚整整一屏（零重叠）不再假报「到底」，整页还原
+    h3, st3, diff3 = run(per_frame=H)         # 每帧吸附整整一屏：零重叠
+    ok_ar3 = h3 == PAGE and diff3 < 0.5 and st3["stop_reason"] == "reached-bottom"
+    record("AR3 整屏步进（零重叠）不中断且整页还原", ok_ar3,
+           f"高={h3}/{PAGE} 差={diff3:.3f} 结束={st3['stop_reason']} "
+           f"降级={st3['degraded']}")
+
+    # AR4 大步长（接近一整屏）也能连续拼接
+    h4, st4, diff4 = run(step_px=100)         # 每帧 300px，重叠只剩 220
+    ok_ar4 = h4 == PAGE and diff4 < 0.5
+    record("AR4 大步长连续拼接无错位", ok_ar4,
+           f"高={h4}/{PAGE} 差={diff4:.3f} 过头={st4['overshoots']}")
+
+    # AR5 滚轮被吞几帧后恢复：不判到底、不加降级
+    h5, st5, diff5 = run(step_px=80, swallow={5, 6, 7})
+    ok_ar5 = h5 == PAGE and diff5 < 0.5 and st5["degraded"] == 0
+    record("AR5 滚轮连续被吞后自动恢复", ok_ar5,
+           f"高={h5}/{PAGE} 差={diff5:.3f} 重试={st5['retries']} 降级={st5['degraded']}")
+
+    # AR6 中途整屏弹窗：原地重抓而不是继续往下滚，长图不缺内容
+    h6, st6, diff6 = run(step_px=80, popup={6})
+    ok_ar6 = h6 == PAGE and diff6 < 0.5 and st6["degraded"] == 0
+    record("AR6 中途整屏弹窗后不丢内容", ok_ar6,
+           f"高={h6}/{PAGE} 差={diff6:.3f} 重试={st6['retries']}")
+
+    # AR7 固定顶栏检测：只量真正不动的行，页面没滚动时不误判
+    prev7, cur7 = page[:400].copy(), page[100:500].copy()
+    cur7[:80] = prev7[:80]
+    fixed7 = sb.detect_top_fixed(prev7, cur7)
+    still7 = sb.detect_top_fixed(prev7, prev7.copy())
+    h8, st8, diff8 = run(step_px=80, fixed_header=80)
+    ok_ar7 = (
+        fixed7 == 80 and still7 == 0
+        # 长图 = 顶栏一次(80) + 内容(PAGE-80)；比对时已去掉顶栏那 80 行
+        and st8["fixed_top"] == 80 and h8 == PAGE - 80 and diff8 < 0.5
+    )
+    record("AR7 固定顶栏高度检测 + 只保留一次", ok_ar7,
+           f"detect={fixed7} still={still7} 内容={h8}/{PAGE - 80} 差={diff8:.3f}")
+
+    # AR8 源码标记，防止后续改回旧实现
+    from pathlib import Path as _Path
+    src_sb = _Path("snapback.py").read_text(encoding="utf-8")
+    ok_ar8 = (
+        "np.percentile(rows, 75)" in src_sb
+        and "template_offsets" in src_sb
+        and "detect_top_fixed" in src_sb
+        and 'stats["degraded"]' in src_sb
+        and "new_start > content_h + 2" in src_sb
+    )
+    record("AR8 抗中断实现标记齐全", ok_ar8, f"marks={ok_ar8}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7024,6 +7196,7 @@ if __name__ == "__main__":
     test_v43_confirm_order_and_ok_under_cursor()
     test_v44_no_angle_toolbar_and_pro_marks()
     test_v45_flat_top_buttons_and_zoom_fit()
+    test_v46_scroll_stitch_robustness()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

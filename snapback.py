@@ -709,11 +709,16 @@ def restore_floating_overlays(hwnds: list[int]) -> None:
 # 长截图拼接
 # ---------------------------------------------------------------------------
 def overlap_row_diff(acc: np.ndarray, frame: np.ndarray, top: int) -> float:
-    """重叠区逐行像素差的中位数（0 = 完全对齐）。
+    """重叠区逐行像素差的 75 分位数（0 = 完全对齐）。
 
-    用「中间列带 + 行中位数」而不是整幅均值：输入法工具条、链接提示条这类
-    固定浮层只占少数行/边缘列，中位数几乎不受影响，但真正的错位会让绝大
-    多数行都差很多。用于多候选匹配里挑出真正对齐的位置。
+    用「中间列带 + 行 p75」而不是整幅均值：
+      · 中间列带：输入法工具条、链接提示条这类固定浮层只占边缘列；
+      · **p75 而不是中位数**（v46）：网页大多是渐变 / 大面积纯色，错开 1~2
+        行对「逐行差的中位数」完全没有影响（仍是 0.00，见下），可长截图正是
+        靠这个把偏移纠回来——差 2 行时 378/379/380/381 的中位数全是 0，
+        分不出谁对，每拼一帧累积 2px，越拼越歪；换成 75 分位后 380 是 0.00、
+        379 是 0.49、378 是 2.51，能精确挑出正确位置。
+      · 只有超过 1/4 的行都变了才会被抬高，普通浮层照样忽略。
     """
     if acc.shape[1] != frame.shape[1] or top < 0 or top >= acc.shape[0] - 4:
         return 255.0
@@ -728,7 +733,11 @@ def overlap_row_diff(acc: np.ndarray, frame: np.ndarray, top: int) -> float:
     b = frame[0: overlap: 2, c0:c1: 2].astype(np.int16)
     if a.shape != b.shape or a.size == 0:
         return 255.0
-    return float(np.median(np.abs(a - b).mean(axis=(1, 2))))
+    d = np.abs(a - b)
+    rows = d.reshape(d.shape[0], -1).mean(axis=1)   # 兼容 2D 灰度 / 3D 彩色
+    if rows.size == 0:
+        return 255.0
+    return float(np.percentile(rows, 75))
 
 
 def find_vertical_overlap(
@@ -739,6 +748,7 @@ def find_vertical_overlap(
     template_offset: int = 0,
     *,
     max_candidates: int = 5,
+    template_offsets: tuple[int, ...] | list[int] | None = None,
 ) -> tuple[int, float]:
     """
     在已拼接图像 acc 中定位新帧 frame 顶部的匹配位置。
@@ -747,53 +757,110 @@ def find_vertical_overlap(
 
     v20 抗浮层对齐：
       · 只在画面中间列带上做相关匹配，避开左侧链接提示条、右侧输入法工具条；
-      · 取多个相关峰值候选，再用「重叠区逐行差的中位数」挑真正对齐的那个
+      · 取多个相关峰值候选，再用「重叠区逐行差」挑真正对齐的那个
         —— 固定浮层 / 重复卡片会让相关系数峰值落在错误位置，但错位会让
-        绝大多数行都对不上，中位数差立刻暴露出来；
-      · 在 ±2 行内微调，消除 1~2px 的硬接缝；
+        绝大多数行都对不上；
+      · 在 ±3 行内微调，消除 1~3px 的硬接缝（v46 由 ±2 放宽，配合 p75 评分）；
       · score 把对齐差折算进去，错得离谱时会低于阈值，交给上层重试。
+
+    v46 多模板带（治「网页经常中断」的核心）：
+      单条模板有个硬上限——模板取到 frame 的第 off 行、高 rows 行时，两帧
+      重叠必须 >= off + rows 才可能对上。旧参数 off=86 / rows=120 意味着
+      重叠要 >= 206 行，520px 高的窗口单帧最多只能滚约 314px；而浏览器一次
+      滚轮常常就是 300~400px，于是一滚过线就必然失配、重试两次后中断。
+      现在改成在帧内铺 2~3 条**短模板**（如 0%、12%、25% 处各 60~80 行），
+      任一条命中即可：低位的模板保证大滚动也能对上（重叠只需 >= rows），
+      高位的模板保证「网页顶部有 sticky 导航」时不被那块固定内容带偏。
     """
     import cv2
 
     if acc.shape[1] != frame.shape[1]:
         raise ValueError(_t("拼接帧宽度必须一致"))
-    if acc.shape[0] < template_rows or frame.shape[0] < template_offset + template_rows:
+
+    frame_h = int(frame.shape[0])
+    rows = max(24, min(int(template_rows), frame_h))
+    # 模板带规格：默认只一条（兼容旧调用与单元测试），stitch_scroll 会传多条
+    specs: list[tuple[int, int]] = []
+    if template_offsets:
+        for off in sorted({int(o) for o in template_offsets}):
+            if 0 <= off <= frame_h - rows:
+                specs.append((off, rows))
+    if not specs:
+        specs = [(max(0, min(int(template_offset), frame_h - rows)), rows)]
+    if acc.shape[0] < rows:
         return -1, 0.0
 
     # 两侧各留 12%：网页左右常贴着固定侧栏 / 悬浮条，中间主体最可信
     c0 = int(frame.shape[1] * 0.12)
     c1 = max(c0 + 8, int(frame.shape[1] * 0.88))
-    template = frame[
-        template_offset: template_offset + template_rows, c0:c1
-    ]
     search_top = max(0, acc.shape[0] - search_rows)
     search = acc[search_top:, c0:c1]
-    if search.shape[0] < template_rows:
+    if search.shape[0] < rows:
         return -1, 0.0
 
-    res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
-    # 纯色模板会让 CCOEFF_NORMED 出现 NaN，先压成无效值
-    res = np.nan_to_num(res, nan=-1.0, posinf=-1.0, neginf=-1.0)
-    # 模板与搜索区等宽 → res 形状为 (N, 1)：逐个取峰值并抑制邻近行，
-    # 得到互不相同的候选位置（网页里常有多块长得一样的卡片）。
-    work = res.copy()
-    candidates: list[tuple[int, float]] = []
-    for _ in range(max(1, max_candidates)):
-        _, val, _, loc = cv2.minMaxLoc(work)
-        if not np.isfinite(val) or val < 0.0:
-            break
-        row = int(loc[1])
-        candidates.append((row, float(val)))
-        work[max(0, row - 3): min(work.shape[0], row + 4), 0] = -1.0
-    if not candidates:
-        return -1, 0.0
+    # 粗匹配用 2× 降采样：1900px 宽的窗口按全分辨率做相关要 ~1 秒/帧，长图
+    # 动辄几十帧，用户会明显觉得卡。降采样让计算量掉到 1/4 以下，位置误差
+    # 不超过 2 个原像素，由后面的 ±3~±6 原像素精修兜住。
+    down = 2 if (search.shape[1] >= 640 and rows >= 70) else 1
+    small_search = None
+    if down > 1:
+        small_search = cv2.resize(
+            search, None, fx=1.0 / down, fy=1.0 / down,
+            interpolation=cv2.INTER_AREA,
+        )
 
-    best_key: tuple[float, float, float] | None = None
+    best_key: tuple[float, float, float, int] | None = None
     best_top, best_score = -1, 0.0
-    for row, corr in candidates:
-        m = search_top + row
-        t0 = m - template_offset
-        for delta in (-2, -1, 0, 1, 2):
+    # 先跨所有模板带收集相关系数峰值，再统一排序取前几个做逐行差精修。
+    # 逐行差（overlap_row_diff）是最贵的一步，每条模板各精修 5×7 次会把
+    # 每帧耗时放大 4 倍；跨带排序后只精修少数候选，耗时与单模板相当。
+    peaks: list[tuple[float, int, int]] = []          # (corr, off, top0)
+    for off, trows in specs:
+        template = frame[off: off + trows, c0:c1]
+        if template.size == 0:
+            continue
+        if down > 1:
+            tpl = cv2.resize(
+                template, None, fx=1.0 / down, fy=1.0 / down,
+                interpolation=cv2.INTER_AREA,
+            )
+            if tpl.shape[0] < 8 or tpl.shape[0] >= small_search.shape[0]:
+                res = None
+            else:
+                res = cv2.matchTemplate(small_search, tpl, cv2.TM_CCOEFF_NORMED)
+        else:
+            res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+        if res is None:
+            continue
+        # 纯色模板会让 CCOEFF_NORMED 出现 NaN，先压成无效值
+        res = np.nan_to_num(res, nan=-1.0, posinf=-1.0, neginf=-1.0)
+        # 模板与搜索区等宽 → res 形状为 (N, 1)：逐个取峰值并抑制邻近行，
+        # 得到互不相同的候选位置（网页里常有多块长得一样的卡片）。
+        work = res.copy()
+        for _ in range(max(1, max_candidates)):
+            _, val, _, loc = cv2.minMaxLoc(work)
+            if not np.isfinite(val) or val < 0.0:
+                break
+            row = int(loc[1])
+            peaks.append((float(val), off, search_top + row * down - off))
+            work[max(0, row - 3): min(work.shape[0], row + 4), 0] = -1.0
+    if not peaks:
+        return -1, 0.0
+    peaks.sort(key=lambda t: t[0], reverse=True)
+
+    # 精修范围与候选数按置信度自适应：逐行差（overlap_row_diff）是全程最贵
+    # 的一步，13 个偏移 × 3 个候选要 200ms 以上。
+    # 置信度不能只看相关系数——固定浮层 / 重复卡片会造出「相关很高但整体
+    # 错位」的假峰，所以再加一道：峰顶处的逐行差也要够小，才敢只认这一个峰。
+    first_top = peaks[0][2]
+    first_diff = (
+        overlap_row_diff(acc, frame, first_top)
+        if 0 <= first_top <= acc.shape[0] - 8 else 255.0
+    )
+    trusted = peaks[0][0] >= 0.97 and first_diff <= 8.0
+    span = 2 if trusted else 3 * down
+    for corr, _off, t0 in peaks[:(1 if trusted else 3)]:
+        for delta in range(-span, span + 1):
             top = t0 + delta
             if top < 0 or top > acc.shape[0] - 8:
                 continue
@@ -801,10 +868,68 @@ def find_vertical_overlap(
             # 惩罚保持温和：轮播图 / GIF / 懒加载会让少量行变化，不能因此
             # 把本该通过的一帧判成匹配失败；主要靠候选间比较挑出正确位置。
             score = corr * (1.0 - min(0.4, diff / 400.0))
-            key = (score, -diff, corr)
+            # 末位用 -|delta| 作「离相关峰最近」的次级判据：渐变 / 大片留白的
+            # 页面上相邻几行的逐行差可能全是 0，分不出差 1 行，此时应留在
+            # 相关峰本身而不是被微调挪走（否则每拼一帧歪 1px，越拼越斜）。
+            key = (score, -diff, corr, -abs(delta))
             if best_key is None or key > best_key:
                 best_key, best_top, best_score = key, top, score
+    if best_key is None:
+        return -1, 0.0
     return best_top, float(best_score)
+
+
+def detect_top_fixed(
+    prev: np.ndarray,
+    cur: np.ndarray,
+    *,
+    tol: float = 2.0,
+    min_rows: int = 8,
+    max_ratio: float = 0.45,
+    gap: int = 6,
+    blank_std: float = 3.0,
+    min_changed_ratio: float = 0.25,
+) -> int:
+    """比较滚动前后的两帧，量出页面顶部「固定不动」的行数（sticky 顶栏高度）。
+
+    网页顶部常有横跨整宽的固定导航 / 工具条 / Cookie 横幅：它们不随滚动
+    移动，会挡住真正的新内容。模板一旦压在这块区域上就永远匹配不上，拼接
+    时还会把同一段顶栏反复叠进长图，形成一条条重复的「假内容」。
+
+    判据：滚动前后像素几乎不变（差异 < tol）**且** 该行本身有内容
+    （标准差 > blank_std，排除纯白留白行）。变化行占比不足 min_changed_ratio
+    时认为页面其实没滚动，直接放弃判定（否则静止页面会被误判成整屏固定）。
+
+    返回需要从帧顶部裁掉的行数；0 表示没有检测到固定顶栏。
+    """
+    h = int(min(prev.shape[0], cur.shape[0]))
+    if h < max(80, min_rows * 4) or prev.shape[1] != cur.shape[1]:
+        return 0
+    c0 = int(prev.shape[1] * 0.10)
+    c1 = max(c0 + 8, int(prev.shape[1] * 0.90))
+    p = prev[:h, c0:c1].astype(np.int16)
+    c = cur[:h, c0:c1].astype(np.int16)
+    d = np.abs(p - c)
+    row_diff = d.reshape(d.shape[0], -1).mean(axis=1)
+    band = prev[:h, c0:c1]
+    row_std = band.reshape(band.shape[0], -1).std(axis=1)
+
+    if float((row_diff >= tol).mean()) < min_changed_ratio:
+        return 0                      # 页面没动，谈不上「固定」
+
+    fixed = (row_diff < tol) & (row_std > blank_std)
+    limit = int(h * max_ratio)
+    n = 0
+    gap_run = 0
+    for i in range(limit):
+        if bool(fixed[i]):
+            n = i + 1
+            gap_run = 0
+        else:
+            gap_run += 1
+            if gap_run >= gap:        # 连续 gap 行都不是固定元素 → 顶栏到此为止
+                break
+    return n if n >= min_rows else 0
 
 
 def stitch_scroll(
@@ -822,11 +947,14 @@ def stitch_scroll(
     on_before_grab=None,
     on_after_grab=None,
     bottom_confirm_frames: int = 3,
-    retry_limit: int = 2,
-    retry_settle: float = 0.35,
+    retry_limit: int = 3,
+    retry_settle: float = 0.5,
     adapt_scroll: bool = True,
     hide_overlays: bool = True,
     bottom_guard: int = 32,
+    detect_fixed: bool = True,
+    overshoot_ratio: float = 0.9,
+    max_overshoot_fixes: int = 6,
 ) -> tuple[Image.Image, dict]:
     """
     自动滚动并拼接长截图（选中的窗口客户区即 rect）。
@@ -838,7 +966,6 @@ def stitch_scroll(
       · 到底必须连续 bottom_confirm_frames 帧都几乎没有新增才结束；
         单帧「没动」多半只是平滑滚动 / 惯性未稳定，或滚轮发给了别的窗口。
       · 匹配失败先减小步长、多等一拍重试 retry_limit 次，不再一帧就放弃。
-      · 模板从 frame 中部取，避开网页固定顶栏；搜索窗随窗口高度放大。
       · 每帧滚轮前重新锁定光标，防止用户移动鼠标后滚错窗口。
       · 步长按上一帧新增行数自适应，避免一次滚过头导致找不到重叠。
 
@@ -853,14 +980,27 @@ def stitch_scroll(
       · 匹配只取中间列带、多候选 + 重叠区一致性验证，避免浮层把重叠量
         带偏，产生大段重复内容（看起来像「拼接缝隙」）。
 
+    v46 网页抗中断（治「截网页经常中断」）：
+      1. 多模板带：不再只从帧中部取一条 120 行模板，而是在 0% / 12% / 25%
+         处铺三条 60~80 行的短模板，任一条命中即可。旧参数下「重叠必须
+         >= 206 行」意味着 520px 窗口单帧最多滚约 314px，而浏览器一滚
+         常常 300~400px，一过线就必然失配。
+      2. 步长上限联动：自适应步长不再允许滚到「重叠不足一条模板」的距离。
+      3. 滚过头识别：滚动量接近整屏（scroll-snap 页面尤其常见）时**缩小
+         步长重来**，不再当成「几乎没动」一路累加到判「到底」。
+      4. 真到底确认：连续判定「没新增」后，先用更大步长再试一次，排除
+         「滚轮没送达 / 步长太小」，仍无新增才收工。
+      5. 固定顶栏剔除：detect_fixed 时用「滚动前后不变的行」量出 sticky
+         导航的高度，从后续每帧顶部裁掉，避免重复叠进长图。
+
     control 提供交互语义：左键暂停 / 再按继续、右键结束、点「确定」结束；
     拼接线程在等待期间高频 poll()，暂停时不抓帧也不滚轮。
     on_before_grab / on_after_grab 用于「控制条与选区重叠」时，在抓帧瞬间
     临时隐藏 / 恢复控制条，避免它自己被拍进长图。
 
     返回 (拼接结果图, 统计信息 dict)；stats.stop_reason 记录结束原因，
-    stats.retries / stats.score / stats.align_diff / stats.overlays_hidden
-    等字段便于诊断。
+    stats.retries / stats.score / stats.align_diff / stats.fixed_top /
+    stats.overshoots / stats.overlays_hidden 等字段便于诊断。
     """
     # 底部预留：客户区最下面几十像素是浏览器状态条 / 浮层的高发区
     guard = min(max(0, int(bottom_guard)), max(0, rect.h // 6))
@@ -920,13 +1060,15 @@ def stitch_scroll(
         if on_progress is not None and canvas is not None:
             on_progress(stats["frames"], stats["height"], canvas, stats["score"])
 
-    def _adapt(new_rows: int, frame_h: int) -> None:
+    def _adapt(new_rows: int, content_h: int, t_rows: int) -> None:
         nonlocal notches
         if not adapt_scroll:
             return
-        # 每帧新增行最好不超过窗口高度的 70%（再大就快滚过一整屏，
-        # 相邻帧重叠太少容易失配）；太小则加大步长，避免长页面截不完。
-        hi = max(min_new_rows * 2, int(frame_h * 0.7))
+        # 每帧新增行最好不超过窗口高度的 70%（再大就快滚过一整屏，相邻帧
+        # 重叠太少容易失配）；太小则加大步长，避免长页面截不完。
+        # v46：上限再受「至少要留一条模板高的重叠」约束——否则自适应出来的
+        # 步长会比模板能容忍的还大，一滚就必失配。
+        hi = max(min_new_rows * 2, min(int(content_h * 0.7), content_h - t_rows - 12))
         lo = max(1, min_new_rows * 2)
         if new_rows > hi and abs(notches) > 1:
             notches = -max(1, abs(notches) - 1)
@@ -934,11 +1076,40 @@ def stitch_scroll(
             notches = -min(8, abs(notches) + 1)
         stats["notches"] = notches
 
-    def _retry() -> None:
-        """单帧异常：不放弃、不追加，再滚一次重新确认。"""
+    def _wait(seconds: float) -> None:
+        if control is not None:
+            control.wait(seconds)
+        elif seconds > 0:
+            time.sleep(seconds)
+
+    def _retry(advance: bool = False) -> None:
+        """单帧异常后的重试。
+
+        advance=False（失配重试用）：**原地等待再重抓，不再往下滚**。
+          旧行为是失配后继续滚一屏，于是漏掉的内容越滚越远、永远补不回来——
+          页面滚过画布末尾之后就再无重叠，只能一路降级拼错。原地重抓正好
+          对付「弹窗 / 视频 / 平滑滚动中间态」这类只污染一两帧的情况。
+
+        advance=True（到底确认用）：继续滚一格，验证页面是不是真的不动了。
+        """
         stats["retries"] += 1
         _progress()
-        _scroll(retry_settle)
+        if advance:
+            _scroll(retry_settle)
+        else:
+            _wait(retry_settle)
+
+    fixed_top = 0
+    fixed_tries = 0
+    prev_frame: np.ndarray | None = None
+    bottom_probed = False
+    overshoots = 0
+    last_new_rows: int | None = None
+    good_notches = abs(notches)
+    degraded = 0
+    stats["fixed_top"] = 0
+    stats["overshoots"] = 0
+    stats["degraded"] = 0
 
     try:
         for i in range(max_frames):
@@ -962,25 +1133,85 @@ def stitch_scroll(
             frame = np.array(img)
             stats["frames"] = i + 1
 
+            # 固定顶栏：拿「滚动前 / 滚动后」两帧比出顶部不动的那几行。
+            # 只在画布还基本是第一帧时接受结果，否则那块顶栏已经拼进长图中段，
+            # 再裁帧只会让前后不一致。
+            if (
+                detect_fixed and fixed_top == 0 and fixed_tries < 4
+                and prev_frame is not None and canvas is not None
+                and canvas.shape[0] <= frame.shape[0] + 8
+            ):
+                fixed_tries += 1
+                cand = detect_top_fixed(prev_frame, frame)
+                if cand:
+                    fixed_top = cand
+                    stats["fixed_top"] = fixed_top
+            if prev_frame is None or fixed_top == 0:
+                prev_frame = frame
+
+            content = frame[fixed_top:] if fixed_top else frame
+
             if canvas is None:
                 canvas = frame.copy()
             else:
-                frame_h = frame.shape[0]
-                template_rows = min(120, max(24, frame_h // 4))
-                template_offset = min(96, max(0, frame_h // 6))
-                search_rows = max(400, frame_h * 2)
+                content_h = int(content.shape[0])
+                # 模板高度决定「能容忍多大的滚动」：重叠必须 >= 模板高才可能
+                # 对上。取内容区高度的 1/10（44~72 行）——既够长到不易误匹配，
+                # 又让自适应步长能放宽到 content_h - t_rows 附近。
+                t_rows = min(72, max(40, content_h // 10))
+                # 三条模板带：0%（大滚动也能对上）/ 12% / 25%（避开 sticky 顶栏）
+                t_offs: list[int] = []
+                for ratio in (0.0, 0.12, 0.25):
+                    off = int(round(ratio * max(0, content_h - t_rows)))
+                    if off + t_rows <= content_h and off not in t_offs:
+                        t_offs.append(off)
+                if not t_offs:
+                    t_offs = [0]
+                # 搜索窗只需覆盖「一次最大滚动 + 一条模板」的范围；旧值取
+                # content_h*2 是两倍冗余，白白把每帧的匹配成本翻了一倍。
+                search_rows = max(400, content_h + t_rows + 80)
                 top, score = find_vertical_overlap(
-                    canvas, frame,
+                    canvas, content,
                     search_rows=search_rows,
-                    template_rows=template_rows,
-                    template_offset=template_offset,
+                    template_rows=t_rows,
+                    template_offset=t_offs[0],
+                    template_offsets=t_offs,
                 )
                 stats["score"] = round(score, 4)
                 stats["align_diff"] = (
-                    round(overlap_row_diff(canvas, frame, top), 2) if top >= 0 else 255.0
+                    round(overlap_row_diff(canvas, content, top), 2)
+                    if top >= 0 else 255.0
                 )
 
                 if top == -1 or score < match_threshold:
+                    # v46：先分清「页面压根没动」和「真的对不上」——把本帧与
+                    # 画布末尾直接比一次，几乎完全相同说明是滚到到底 / 滚轮
+                    # 没送达（焦点进了 iframe 之类），走到底确认流程；差异明显
+                    # 说明页面确实在动、只是匹配不到（弹窗 / 视频 / scroll-snap
+                    # 整屏吸附），这时绝不中断，按上次的步长降级继续拼。
+                    still = 255.0
+                    if canvas.shape[0] >= content_h:
+                        still = overlap_row_diff(
+                            canvas, content, max(0, canvas.shape[0] - content_h)
+                        )
+                    if still <= 4.0:
+                        low_new_streak += 1
+                        match_fail_streak = 0
+                        if low_new_streak < bottom_confirm_frames:
+                            _retry(advance=True)
+                            continue
+                        if not bottom_probed:
+                            # 用**最小步长**再确认一次：页面真到底时它同样不会动，
+                            # 而「滚轮没送达 / 步长被页面吃掉」时它能安全地只挪一点。
+                            # （早先版本在这里把步长加倍，反而一探就滚过头、无重叠，
+                            #  接着降级拼错，后面整段都歪。）
+                            bottom_probed = True
+                            notches = -1 if abs(notches) > 1 else notches
+                            stats["notches"] = notches
+                            _retry(advance=True)
+                            continue
+                        stats["stop_reason"] = "reached-bottom"
+                        break
                     match_fail_streak += 1
                     if match_fail_streak <= retry_limit:
                         # 懒加载 / 动画 / 平滑滚动中间态只影响一帧：
@@ -990,22 +1221,77 @@ def stitch_scroll(
                             stats["notches"] = notches
                         _retry()
                         continue
-                    stats["stop_reason"] = "no-overlap" if top == -1 else "match-failed"
-                    break
-                match_fail_streak = 0
+                    # 降级估算：有历史就用上一次真实的滚动距离（步长不变时最准），
+                    # 没有历史说明第一帧就无重叠——那多半是 scroll-snap 整屏吸附
+                    # 或视口被整页替换，按「滚了整屏」处理（拼整帧）比按半屏猜
+                    # 更接近真相，也不会把内容拦腰截断。
+                    est_new = last_new_rows or content_h
+                    new_start = max(0, min(content_h - 1, content_h - int(est_new)))
+                    new_rows = content_h - new_start
+                    degraded += 1
+                    stats["degraded"] = degraded
+                    match_fail_streak = 0
+                    low_new_streak = 0
+                else:
+                    match_fail_streak = 0
+                    # new_start 是「本帧与已拼画布的重叠行数」：越大＝滚得越少。
+                    # v46 修正：旧代码把 new_start 当成「新增行数」，于是
+                    # 「重叠很少＝滚过头」被误判成「几乎没动」，连续 3 帧就
+                    # 假报「到底」，网页长图于是只截几屏就中断。
+                    new_start = canvas.shape[0] - top
 
-                new_start = canvas.shape[0] - top
-                if new_start <= 0 or new_start >= frame_h or new_start < min_new_rows:
-                    # 到底必须连续确认：单帧几乎没动不能直接判到底
-                    low_new_streak += 1
-                    if low_new_streak < bottom_confirm_frames:
-                        _retry()
-                        continue
-                    stats["stop_reason"] = "reached-bottom"
-                    break
-                low_new_streak = 0
+                    if new_start > content_h + 2:
+                        # 重叠比整帧还多——物理上不可能，说明匹配落到了别处的
+                        # 重复内容上（整屏弹窗、大片同色、图片占位符）。按失配
+                        # 处理并原地重抓；若当成「没动」继续滚，就会一边滚一边
+                        # 什么都没拼，白漏掉整整一屏。
+                        match_fail_streak += 1
+                        if match_fail_streak <= retry_limit:
+                            _retry()
+                            continue
+                        est_new = last_new_rows or content_h
+                        new_start = max(0, min(content_h - 1, content_h - int(est_new)))
+                        new_rows = content_h - new_start
+                        degraded += 1
+                        stats["degraded"] = degraded
+                        match_fail_streak = 0
+                        low_new_streak = 0
+                    else:
+                        new_rows = content_h - new_start
 
-                new_part = frame[new_start:]
+                        if new_rows < min_new_rows:
+                            # 页面几乎没动：到底必须连续确认，单帧不能直接判到底
+                            low_new_streak += 1
+                            if low_new_streak < bottom_confirm_frames:
+                                _retry(advance=True)
+                                continue
+                            if not bottom_probed:
+                                # 用**最小步长**再确认一次：页面真到底时它同样不会动，
+                                # 而「滚轮没送达 / 步长被页面吃掉」时它能安全地只挪一点。
+                                # （早先版本在这里把步长加倍，反而一探就滚过头、无重叠，
+                                #  接着降级拼错，后面整段都歪。）
+                                bottom_probed = True
+                                notches = -1 if abs(notches) > 1 else notches
+                                stats["notches"] = notches
+                                _retry(advance=True)
+                                continue
+                            stats["stop_reason"] = "reached-bottom"
+                            break
+                        if new_start < max(12, t_rows // 2):
+                            # 重叠比半条模板还少：滚过头 / scroll-snap 整屏跳动，
+                            # 接缝风险高，缩小步长重来——绝不能判「到底」
+                            overshoots += 1
+                            stats["overshoots"] = overshoots
+                            if abs(notches) > 1 and overshoots <= max_overshoot_fixes:
+                                notches = -max(1, abs(notches) // 2)
+                                stats["notches"] = notches
+                                _retry(advance=True)
+                                continue
+                        low_new_streak = 0
+
+                new_part = content[new_start:]
+                if new_part.shape[0] == 0:
+                    new_part = content[-1:]
                 if canvas.shape[0] + new_part.shape[0] > max_height:
                     allow = max(0, max_height - canvas.shape[0])
                     if allow > 0:
@@ -1014,7 +1300,14 @@ def stitch_scroll(
                     break
 
                 canvas = np.vstack([canvas, new_part])
-                _adapt(new_start, frame_h)
+                last_new_rows = int(new_part.shape[0])
+                # 失配时为了保命会把步长压到很小；一旦重新匹配成功就把它恢复到
+                # 健康值，否则弹窗 / 动画过去之后会一直以 1 格慢爬，本来 20 帧
+                # 的活拖成 50 帧（用户观感就是「长截图卡住了」）。
+                if abs(notches) < good_notches:
+                    notches = -good_notches
+                _adapt(new_rows, content_h, t_rows)
+                good_notches = abs(notches)
 
             stats["height"] = int(canvas.shape[0])
             _progress()
