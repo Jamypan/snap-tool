@@ -3144,6 +3144,9 @@ class Overlay(QWidget):
         self._hover_hwnd: int = 0         # v35: 当前悬停窗口句柄
         self._hover_rect: QRect | None = None
         self._confirm_mode = False        # 选择完成、仅显示「确定/取消」的阶段
+        # v42：选择完成瞬间的鼠标位置（逻辑坐标）。确认条浮在其附近，
+        # 首次定位后固定不再漂移；为 None 时（如未传 near）退回选区外侧定位。
+        self._confirm_pos: QPoint | None = None
         self._hover_title = ""
         self._last_pick_time = 0.0
         self._last_pick_pos = QPoint(-9999, -9999)
@@ -3375,6 +3378,8 @@ class Overlay(QWidget):
         self.sel = r
         self._mode = "editing"
         self._confirm_mode = True
+        # v42：记住选择结束时的鼠标位置，确认条据此浮在鼠标旁（见 _place_toolbar）
+        self._confirm_pos = QPoint(near) if near is not None else None
         # 选择阶段只给「确定 / 取消」：标注等其它操作移到程序窗口里做
         self.toolbar.set_confirm_mode(True)
         self._place_toolbar(near=near)
@@ -4608,6 +4613,7 @@ class Overlay(QWidget):
         self.ocr_panel.hide()
         self.ocr_layer.hide()
         self._confirm_mode = False
+        self._confirm_pos = None
         if self._text_edit:
             self._text_edit.deleteLater()
             self._text_edit = None
@@ -4638,6 +4644,7 @@ class Overlay(QWidget):
         self.shapes.clear()
         self._selected = None
         self._confirm_mode = False
+        self._confirm_pos = None
         self._hover_rect = None
         self._hover_title = ""
         self._hover_hwnd = 0
@@ -4674,11 +4681,11 @@ class Overlay(QWidget):
     def _place_toolbar(self, near: QPoint | None = None) -> None:
         """放置「确定/取消」工具条。
 
-        - near 给定（选择完成瞬间）：把按钮浮在鼠标附近，方便立即点选；
-          仅做「贴边收缩」保证整条按钮完整可见，不做镜像翻转，因此不会
-          漂到屏幕对角角落。
-        - near 为 None（选区移动 / 缩放 / 取字收起恢复）：跟随选区。
-          确认模式下不允许这种重定位，保持按钮固定在鼠标处的位置不变。
+        - 确认模式（选择刚完成）：v42 起把按钮浮在鼠标附近——用选择结束
+          瞬间记下的 _confirm_pos（或本次传入的 near）作锚点，只做「贴边
+          收缩」保证整条按钮完整可见，不镜像翻转，也不会随后续鼠标漂移。
+          没有锚点时（如全屏/窗口截图未给出鼠标位置）退回选区外侧定位。
+        - 非确认模式（取字收起恢复等）：跟随选区下方。
         """
         if not self.sel:
             return
@@ -4692,14 +4699,20 @@ class Overlay(QWidget):
             y = min(y, max(0, self.height() - tb.height()))
             return max(0, x), max(0, y)
 
-        # 确认模式：按钮组固定贴在选区外侧，位置不随鼠标漂移
+        # 确认模式：按钮浮在鼠标位置，方便用户框完就直接点「确定」
         if self._confirm_mode:
-            x = self.sel.left()
-            y = self.sel.bottom() + gap
-            if y + tb.height() > self.height():
-                above = self.sel.top() - tb.height() - gap
-                y = above if above >= 0 else y
-            x, y = clamp(x, y)
+            anchor = self._confirm_pos if self._confirm_pos is not None else near
+            if anchor is not None:
+                # 浮在鼠标右下方；贴边收缩，不随后续鼠标移动而漂移
+                x, y = clamp(anchor.x() + gap, anchor.y() + gap)
+            else:
+                # 无鼠标锚点（窗口/全屏截图）：退回选区下方，空间不足翻上方
+                x = self.sel.left()
+                y = self.sel.bottom() + gap
+                if y + tb.height() > self.height():
+                    above = self.sel.top() - tb.height() - gap
+                    y = above if above >= 0 else y
+                x, y = clamp(x, y)
             self.toolbar.setGeometry(x, y, tb.width(), tb.height())
             return
         if near is not None:

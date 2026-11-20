@@ -472,27 +472,27 @@ def test_overlay() -> None:
     ok_b3 = b3 is not None and b3.size() == base.size() and b3.pixel(0, 0) == base.pixel(0, 0)
     record("B3 全屏(整屏)裁剪=整图", ok_b3, f"size={b3.size() if b3 else None} base={base.size()}")
 
-    # B4 确认条贴在选区外侧下方（设计稿：选区下方左侧），贴边时自动翻到上方
+    # B4 确认条浮在鼠标位置（v42）：near 给定时用鼠标锚点，贴边收缩不越界
     ov4 = Overlay(base, dpr=2.0)
     ov4.resize(800, 600)
     ov4.toolbar.set_confirm_mode(True)
     ov4._confirm_mode = True
     ov4.sel = QRect(50, 40, 60, 30)
 
-    # B4a 选区下方有空位 → 条放选区左下外侧，与选区左边缘对齐
+    # B4a 给出鼠标位置 → 条浮在鼠标右下方（near + 14），而不是选区角上
     ov4._place_toolbar(near=QPoint(20, 20))
     g = ov4.toolbar.geometry()
     ok_b4a = (
-        g.x() == 50
-        and g.y() == ov4.sel.bottom() + 14
+        g.x() == 34
+        and g.y() == 34
         and g.x() >= 0 and g.y() >= 0
         and (g.x() + g.width()) <= 800
         and (g.y() + g.height()) <= 600
     )
     record(
-        "B4a 确认条贴在选区下方左侧",
+        "B4a 确认条浮在鼠标位置(near)",
         ok_b4a,
-        f"geom=({g.x()},{g.y()},{g.width()},{g.height()}) 期望x=50 y={ov4.sel.bottom() + 14}",
+        f"geom=({g.x()},{g.y()},{g.width()},{g.height()}) 期望x=34 y=34(near+14)",
     )
 
     # B4b 选区贴近底边 → 翻到选区上方，且不越界
@@ -510,21 +510,22 @@ def test_overlay() -> None:
         f"geom=({g2.x()},{g2.y()},{g2.width()},{g2.height()}) 选区top=500",
     )
 
-    # B4c 选择完成时 _apply_selection 进入确认模式并把条放到选区下方
+    # B4c 选择完成时 _apply_selection 记录鼠标位置，确认条浮在鼠标旁
     ov4.sel = QRect(300, 200, 200, 150)
     ov4._apply_selection(QRect(300, 200, 200, 150), near=QPoint(340, 240))
     g3 = ov4.toolbar.geometry()
     ok_b4c = (
         ov4._confirm_mode is True
-        and g3.x() == 300
-        and g3.y() == ov4.sel.bottom() + 14
+        and ov4._confirm_pos == QPoint(340, 240)
+        and g3.x() == 354
+        and g3.y() == 254
         and (g3.x() + g3.width()) <= 800
         and (g3.y() + g3.height()) <= 600
     )
     record(
-        "B4c _apply_selection 进入确认模式并贴选区下方",
+        "B4c _apply_selection 记录鼠标位置并浮确认条",
         ok_b4c,
-        f"geom=({g3.x()},{g3.y()},{g3.width()},{g3.height()}) confirm={ov4._confirm_mode}",
+        f"geom=({g3.x()},{g3.y()},{g3.width()},{g3.height()}) anchor={ov4._confirm_pos} confirm={ov4._confirm_mode}",
     )
 
     # B4d 确认模式下再次调用 _place_toolbar()（模拟点击其他位置/移动选区）按钮位置不变
@@ -4556,9 +4557,9 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v40", "v41", "关闭截图编辑与截屏助手两个窗口",
-             "合计 250 项", "合计 368 项", "合计 375 项",
-             "dist/v16", "dist/v41")
+    marks = ("v27", "v40", "v41", "v42", "关闭截图编辑与截屏助手两个窗口",
+             "合计 250 项", "合计 368 项", "合计 375 项", "合计 381 项",
+             "dist/v16", "dist/v41", "dist/v42")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
     lang_marks = ("command panel", "コマンドパネル", "명령 패널",
@@ -6055,11 +6056,11 @@ def test_v38_layout_redesign() -> None:
     )
     record("AJ10 确认条顺序与深色主按钮", ok_aj10, f"order={order} w={conf.width()}")
 
-    # AJ11 确认条贴在选区外侧（不压在选区里）
+    # AJ11 确认条浮在鼠标位置（v42）：AJ10 传的 near=(200,180)，条应落在 (214,194) 附近
     tb = ov.toolbar.geometry()
-    ok_aj11 = tb.top() > ov.sel.bottom()
-    record("AJ11 确认条在选区外侧下方", ok_aj11,
-           f"bar_top={tb.top()} sel_bottom={ov.sel.bottom()}")
+    ok_aj11 = tb.left() == 214 and tb.top() == 194
+    record("AJ11 确认条浮在鼠标位置", ok_aj11,
+           f"bar=({tb.left()},{tb.top()}) 期望(214,194)=near+14")
 
     # AJ12 选区描边是暖橙色（不是旧的蓝色）
     shot = ov.grab().toImage()
@@ -6443,18 +6444,23 @@ def test_v41_top_style_dropdown_icons_and_wrapped_cells() -> None:
     app.processEvents()
     src_e = Path("snap_editor.py").read_text(encoding="utf-8")
 
-    # AM1 复制按钮黑底白图标、无文字；其余顶部按钮与 Dock 同款透明底
+    # AM1 复制按钮黑底白图标、无文字；顶部按钮装进与 Dock 同款圆角容器
     cp = ed._top_buttons["copy"]
+    td = ed._top_dock
+    bottom_dock = ed.canvas.toolbar
     ok_am1 = (
         cp.text() == ""
         and "#1c1c1e" in cp.styleSheet()
         and all(not b.text() and b.width() == 38 and b.height() == 38
                 for b in ed._top_buttons.values())
-        and "background:transparent;border:none;border-radius:13px;"
-        in ed._top_buttons["save"].styleSheet()
+        # v42：顶部按钮挂在与底部 Dock 相同的圆角容器里（同 objectName / 同 QSS / 同高）
+        and td.objectName() == "dock"
+        and td.styleSheet() == bottom_dock.styleSheet()
+        and td.height() == bottom_dock.height() == 52
+        and all(b.parent() is td for b in ed._top_buttons.values())
     )
-    record("AM1 复制黑底纯图标 / 其余顶部按钮 Dock 风格", ok_am1,
-           f"copyStyle={cp.styleSheet()[:60]!r}")
+    record("AM1 复制黑底纯图标 / 顶部按钮装进 Dock 同款容器", ok_am1,
+           f"topDock=({td.objectName()},{td.height()}) dock={bottom_dock.height()} copyStyle={cp.styleSheet()[:40]!r}")
 
     # AM2 底部 Dock 不再有钉在桌面 / 复制（顶部已有，避免重复）
     dock = ed.canvas.toolbar
@@ -6552,6 +6558,107 @@ def test_v41_top_style_dropdown_icons_and_wrapped_cells() -> None:
     tmp.cleanup()
 
 
+def test_v42_confirm_at_cursor_and_top_dock() -> None:
+    """Stage AN：v42 确认条浮在鼠标位置 + 顶部按钮装进 Dock 同款容器。"""
+    import sys
+    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtWidgets import QApplication
+
+    from snap_editor import EditorWindow
+    from snapeditor import Overlay
+
+    print("\n--- Stage AN: v42 确认条鼠标定位 / 顶部 Dock 容器 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    base = QImage(800, 600, QImage.Format_RGB32)
+    base.fill(QColor("#ffffff"))
+
+    # AN1 选择结束时传入鼠标位置 near → 确认条浮在 near+14，锚点被记住
+    ov = Overlay(base, dpr=1.0)
+    ov.resize(800, 600)
+    ov._apply_selection(QRect(50, 40, 200, 150), near=QPoint(240, 180))
+    g = ov.toolbar.geometry()
+    ok_an1 = (
+        ov._confirm_mode is True
+        and ov._confirm_pos == QPoint(240, 180)
+        and g.x() == 254 and g.y() == 194
+    )
+    record("AN1 选择完成确认条浮在鼠标位置", ok_an1,
+           f"geom=({g.x()},{g.y()}) anchor={ov._confirm_pos}")
+
+    # AN2 后续无参重定位不漂移（仍在鼠标锚点处）
+    ov.sel = QRect(300, 300, 200, 150)   # 模拟选区被移动
+    ov._place_toolbar()
+    g2 = ov.toolbar.geometry()
+    ok_an2 = (g2 == g)
+    record("AN2 确认条不随选区/鼠标漂移", ok_an2,
+           f"before=({g.x()},{g.y()}) after=({g2.x()},{g2.y()})")
+
+    # AN3 鼠标在屏幕右下角 → 贴边收缩，整条完整可见、不镜像到对角
+    ov2 = Overlay(base, dpr=1.0)
+    ov2.resize(800, 600)
+    ov2._apply_selection(QRect(600, 500, 150, 80), near=QPoint(790, 590))
+    g3 = ov2.toolbar.geometry()
+    ok_an3 = (
+        0 <= g3.x() and 0 <= g3.y()
+        and g3.x() + g3.width() <= 800
+        and g3.y() + g3.height() <= 600
+        and g3.x() > 400 and g3.y() > 300      # 没有被翻到左上角
+    )
+    record("AN3 鼠标靠右下角时贴边收缩不镜像", ok_an3,
+           f"geom=({g3.x()},{g3.y()},{g3.width()},{g3.height()})")
+
+    # AN4 无鼠标锚点（窗口/全屏截图）→ 退回选区下方定位
+    ov3 = Overlay(base, dpr=1.0)
+    ov3.resize(800, 600)
+    ov3._confirm_mode = True
+    ov3._confirm_pos = None
+    ov3.sel = QRect(50, 40, 200, 150)
+    ov3._place_toolbar()
+    g4 = ov3.toolbar.geometry()
+    ok_an4 = (
+        ov3._confirm_pos is None
+        and g4.x() == 50 and g4.y() == ov3.sel.bottom() + 14
+    )
+    record("AN4 无鼠标锚点退回选区下方", ok_an4,
+           f"geom=({g4.x()},{g4.y()}) 期望(50,{ov3.sel.bottom()+14})")
+
+    # AN5 teardown 清理鼠标锚点
+    ov._teardown()
+    ok_an5 = ov._confirm_pos is None and ov._confirm_mode is False
+    record("AN5 关闭确认态清理鼠标锚点", ok_an5,
+           f"pos={ov._confirm_pos} mode={ov._confirm_mode}")
+
+    # AN6 顶部动作按钮装进与底部 Dock 完全相同风格的圆角容器
+    img2 = QImage(500, 320, QImage.Format_RGB32)
+    img2.fill(QColor("#ffffff"))
+    ed = EditorWindow(img2, [], None)
+    ed.show()
+    app.processEvents()
+    td = ed._top_dock
+    bd = ed.canvas.toolbar
+    ok_an6 = (
+        td.objectName() == "dock"
+        and td.styleSheet() == bd.styleSheet()
+        and td.height() == bd.height() == 52
+        and td.width() > 0
+        and all(b.parent() is td and b.width() == 38 and b.height() == 38
+                for b in ed._top_buttons.values())
+        and ed.btn_transform.parent() is td
+        and ed.zoom_pill.parent() is td
+    )
+    record("AN6 顶部按钮装进 Dock 同款圆角容器", ok_an6,
+           f"topDock=({td.objectName()},{td.width()}x{td.height()}) bottomDock={bd.height()}")
+
+    ed.hide()
+    ed.deleteLater()
+    for w in (ov, ov2, ov3):
+        w.hide()
+        w.deleteLater()
+    app.processEvents()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -6601,6 +6708,7 @@ if __name__ == "__main__":
     test_v39_menu_buttons_and_panel_window()
     test_v40_icon_bar_round_text_and_table_copy()
     test_v41_top_style_dropdown_icons_and_wrapped_cells()
+    test_v42_confirm_at_cursor_and_top_dock()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

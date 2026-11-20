@@ -1587,6 +1587,18 @@ class EditorWindow(QMainWindow):
         lay.addSpacing(118)
         lay.addStretch(1)
 
+        # v42：顶部动作按钮装进与底部 Dock 同款的圆角容器（复用其 QSS），
+        # 使上下两排按钮的「大小 / 边框 / 底色」完全一致。
+        top_dock = QWidget(bar)
+        top_dock.setObjectName("dock")
+        top_dock.setAttribute(Qt.WA_StyledBackground, True)
+        top_dock.setStyleSheet(Toolbar._qss())
+        top_dock.setFixedHeight(52)          # 与底部 Dock 完全同高（38 按钮 + 上下各 7 留白）
+        self._top_dock = top_dock
+        dock_lay = QHBoxLayout(top_dock)
+        dock_lay.setContentsMargins(9, 7, 9, 7)
+        dock_lay.setSpacing(3)
+
         def icon_btn(icon_name: str, tip: str, slot, objname: str,
                      primary: bool = False) -> QPushButton:
             """与 Dock 完全一致的 38×38 纯图标按钮。
@@ -1594,7 +1606,7 @@ class EditorWindow(QMainWindow):
             primary=True 时套用 Dock「复制」主按钮的黑色底 + 白图标，
             但依旧不带文字（用户要求：复制黑底、不要文字）。
             """
-            b = QPushButton(bar)
+            b = QPushButton(top_dock)
             b.setObjectName(objname)
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
@@ -1607,11 +1619,8 @@ class EditorWindow(QMainWindow):
                     "QPushButton{background:#1c1c1e;border:none;border-radius:13px;}"
                     "QPushButton:hover{background:#34302c;}"
                 )
-            else:
-                b.setStyleSheet(
-                    "QPushButton{background:transparent;border:none;border-radius:13px;}"
-                    "QPushButton:hover{background:#f5f0e8;}"
-                )
+            # v42：非主按钮不写死样式，交给 Dock 容器的 QSS 统一管理，
+            # 与底部 Dock 的普通按钮（透明底 + 悬停浅底 + 13px 圆角）完全一致。
             b.clicked.connect(slot)
             return b
 
@@ -1631,7 +1640,7 @@ class EditorWindow(QMainWindow):
             # v41：复制用黑底白图标（与 Dock 主按钮一致），纯图标不带文字
             b = icon_btn(icon_name, tip, slot, f"top_{key}",
                          primary=(key == "copy"))
-            lay.addWidget(b)
+            dock_lay.addWidget(b)
             self._top_buttons[key] = b
 
         # 图像变换：图标自带下拉小三角，四个动作收进一个菜单
@@ -1639,14 +1648,16 @@ class EditorWindow(QMainWindow):
             "变换", t("图像变换"), lambda _=False: self._show_transform_menu(),
             "topTransform",
         )
-        lay.addWidget(self.btn_transform)
+        dock_lay.addWidget(self.btn_transform)
 
         # 缩放：图标自带下拉小三角，放缩四项合并进一个菜单
         self.zoom_pill = icon_btn(
             "缩放", "", lambda _=False: self._show_view_menu(), "zoomPill",
         )
-        lay.addWidget(self.zoom_pill)
+        dock_lay.addWidget(self.zoom_pill)
 
+        # 容器加入顶部栏居中，窗口控制三键仍挂在外层、靠右上角
+        lay.addWidget(top_dock)
         lay.addStretch(1)
 
         # v39：标准窗口控制——最小化 / 最大化(还原) / 关闭
