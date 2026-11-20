@@ -1,0 +1,71 @@
+截屏助手 SnapTool —— 第三方组件与许可声明
+Third-Party Components and Licenses
+================================================================
+
+本文件随 SnapTool 发行包一起分发，用于说明程序使用的第三方组件
+及其许可条款。程序界面「关于」窗口不再展示这些技术信息。
+
+This file ships with the SnapTool distribution to declare the
+third-party components and their licenses. The About window no
+longer shows these technical details.
+
+适用版本 / Applies to: SnapTool v48 及以后
+----------------------------------------------------------------
+
+1. 组件清单 / Component list
+
+  Python 3.13                        PSF License Agreement
+  PySide6 6.12 (Qt 6)                LGPL-3.0（另有商业许可可选）
+  Qt 6 运行库（Core/Gui/Widgets）     LGPL-3.0
+  RapidOCR 3.10                      Apache-2.0
+  PP-OCR 模型（随 RapidOCR 附带）     Apache-2.0
+  OpenCV (opencv-python) 5.0         Apache-2.0
+  ONNX Runtime 1.31                  MIT
+  Pillow 12                          MIT-CMU (HPND)
+  NumPy 2.3                          BSD-3-Clause
+  Shapely 2.2                        BSD-3-Clause
+  pyclipper 1.4                      MIT
+  OmegaConf 2.4                      BSD-3-Clause
+  PyYAML 6                           MIT
+  PyInstaller 6.22（仅构建期）        GPL-2.0 + 启动器例外条款
+
+2. LGPL 组件说明（PySide6 / Qt）
+   LGPL components (PySide6 / Qt)
+
+  SnapTool 以动态链接方式使用 Qt：Qt 的 DLL 与 PySide6 的扩展模块
+  以独立文件形式放在发行目录 _internal/ 下，未与 SnapTool.exe 静态
+  合并。因此你可以自行替换这些库文件（例如换成你自己编译的 Qt 版本），
+  而无需修改或重新链接 SnapTool.exe。
+
+  SnapTool links Qt dynamically: the Qt DLLs and PySide6 extension
+  modules are shipped as separate files under _internal/ and are not
+  statically merged into SnapTool.exe. You may replace these library
+  files with your own builds without modifying or relinking the
+  executable.
+
+  PySide6 与 Qt 的源码可从以下位置获取 / Sources:
+    https://code.qt.io/cgit/pyside/pyside-setup.git
+    https://download.qt.io/official_releases/qt/
+  LGPL-3.0 许可证全文 / Full text:
+    https://www.gnu.org/licenses/lgpl-3.0.txt
+  Qt 在各平台的许可说明 / Qt licensing:
+    https://www.qt.io/licensing/open-source-lgpl-obligations
+
+3. 随包附带的许可证文本 / License texts bundled in the package
+
+  _internal/onnxruntime/LICENSE               ONNX Runtime (MIT)
+  _internal/onnxruntime/ThirdPartyNotices.txt  ONNX Runtime 依赖的第三方声明
+
+  其余组件（Apache-2.0 / MIT / BSD / PSF）的许可证全文可在各自项目
+  主页或已安装的 Python 包元数据中查阅。
+
+4. 程序本体 / The application itself
+
+  SnapTool 自身的源码与界面资源版权归作者所有。本文件不构成对
+  SnapTool 本体的任何授权变更。
+
+  Copyright of SnapTool's own source code and UI assets remains with
+  the author. This file does not change the licensing of SnapTool
+  itself.
+
+联系方式 / Contact: 283096251@qq.com

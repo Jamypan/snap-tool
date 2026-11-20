@@ -258,8 +258,6 @@ ABOUT_HTML = f"""
 <p>一个自制功能强大的Windows桌面截图软件。</p>
 <p>功能：三种截图模式、对象化标注编辑、整图旋转 / 镜像、画笔端点箭头、独立「滚动长截图」命令、中文 OCR 逐行盖回取字、全局热键自定义、8 种界面语言。</p>
 <p style="font-size:13px;">联系邮箱：<a href="mailto:{CONTACT_EMAIL}" style="color:#0a6ed1;">{CONTACT_EMAIL}</a></p>
-<p style="font-size:12px; color:#6b7280;">技术栈：Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime)。<br>
-第三方组件许可：PySide6 (LGPL)、RapidOCR / PaddleOCR / OpenCV (Apache-2.0)、ONNX Runtime (MIT)。</p>
 </div>
 """
 

@@ -24,6 +24,8 @@ datas = [
     ('ocr_test.png', '.'),                  # --selftest 用的冒烟测试图
     ('app.ico', '.'),                       # 运行时窗口 / 托盘图标（make_icon 读取）
     ('assets/avatar-pan.webp', 'assets'),  # 「关于」对话框里的头像
+    # v48：技术栈 / 第三方许可从「关于」界面移出，改为随包附带的文本文件
+    ('THIRD-PARTY-LICENSES.txt', '.'),
 ]
 binaries = []
 hiddenimports = []
@@ -164,3 +166,14 @@ coll = COLLECT(
     upx_exclude=[],
     name='SnapTool',
 )
+
+# ---- 许可声明额外在发行目录根部放一份 -------------------------------------
+# PyInstaller 6 会把 datas 一律塞进 _internal/，普通用户解压后看不到。
+# LGPL 要求分发时给出显著通知，所以最外层再复制一份，双击即可打开。
+import os as _os
+import shutil as _shutil
+
+_dst = _os.path.join(DISTPATH, 'SnapTool')
+if _os.path.isdir(_dst):
+    _shutil.copy('THIRD-PARTY-LICENSES.txt', _dst)
+

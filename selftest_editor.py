@@ -7274,6 +7274,51 @@ def test_v47_default_split_rows() -> None:
     tmp.cleanup()
 
 
+def test_v48_about_cleanup() -> None:
+    """Stage AT  「关于」去掉技术栈 / 第三方许可，改由随包文本文件承载。"""
+    from pathlib import Path
+
+    import i18n
+    from i18n_docs import about_html
+
+    # AT1 关于正文（8 语言）不再出现技术栈与许可证字样
+    banned = (
+        "技术栈", "技術棧", "技術:", "기술:", "Built with", "Technologies :",
+        "Technik:", "Tecnología:",
+        "第三方组件许可", "Third-party license", "第三方ライセンス",
+        "서드파티 라이선스", "Licences tierces", "Drittanbieter-Lizenzen",
+        "Licencias de terceros",
+        "LGPL", "Apache-2.0", "ONNX Runtime", "PySide6",
+    )
+    bad = []
+    for code in i18n.LANGS:
+        html = about_html(code)
+        hit = [w for w in banned if w in html]
+        if hit:
+            bad.append(f"{code}:{hit[:2]}")
+    record("AT1 关于 8 语言不再含技术栈/许可", not bad, f"命中={bad[:2]}")
+
+    # AT2 许可声明改由随包文本文件承载，关键组件与条款齐全
+    lic = Path(__file__).with_name("THIRD-PARTY-LICENSES.txt")
+    txt = lic.read_text(encoding="utf-8") if lic.is_file() else ""
+    need = ("Python 3.13", "PySide6", "LGPL-3.0", "RapidOCR", "OpenCV",
+            "Apache-2.0", "ONNX Runtime", "MIT", "_internal/")
+    missing = [w for w in need if w not in txt]
+    ok_at2 = lic.is_file() and len(txt) > 1200 and not missing
+    # LGPL 合规要点：说明动态链接、可自行替换库文件
+    ok_at2 = ok_at2 and ("可自行替换" in txt or "replace" in txt)
+    record("AT2 随包许可文件齐全（含 LGPL 可替换说明）", ok_at2,
+           f"缺失={missing} 字节={len(txt)}")
+
+    # AT3 打包配置把它收进发行版，并在发行目录根部再放一份
+    spec = Path(__file__).with_name("SnapTool.spec").read_text(encoding="utf-8")
+    ok_at3 = ("('THIRD-PARTY-LICENSES.txt', '.')" in spec
+              and "DISTPATH" in spec
+              and "THIRD-PARTY-LICENSES.txt', _dst" in spec)
+    record("AT3 打包配置随包分发许可文件", ok_at3,
+           f"datas={'THIRD-PARTY-LICENSES.txt' in spec}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7329,6 +7374,7 @@ if __name__ == "__main__":
     test_v45_flat_top_buttons_and_zoom_fit()
     test_v46_scroll_stitch_robustness()
     test_v47_default_split_rows()
+    test_v48_about_cleanup()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

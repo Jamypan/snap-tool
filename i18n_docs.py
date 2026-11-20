@@ -98,50 +98,45 @@ _HELP: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
-# 关于窗口：简介 / 功能 / 联系邮箱前缀 / 技术说明
+# 关于窗口：简介 / 功能 / 联系邮箱前缀
 # 简介文案与 snapui.ABOUT_HTML 的简体中文保持一致（简体由 ABOUT_HTML 提供）。
-_ABOUT: dict[str, tuple[str, str, str, str]] = {
+# v48：技术栈与第三方许可不再进「关于」界面，改为随包附带的
+# THIRD-PARTY-LICENSES.txt（普通用户不看，但分发时仍须随附）。
+_ABOUT: dict[str, tuple[str, str, str]] = {
     "zh_TW": (
         "一個自製功能強大的 Windows 桌面截圖軟體。",
         "功能：三種截圖模式、物件化標註編輯、整圖旋轉 / 鏡像、畫筆端點箭頭、獨立「捲動長截圖」命令、中文 OCR 逐行蓋回取字、全域熱鍵自訂、8 種介面語言。",
         "聯繫信箱：",
-        "技術棧：Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime)。第三方元件授權：PySide6 (LGPL)、RapidOCR / PaddleOCR / OpenCV (Apache-2.0)、ONNX Runtime (MIT)。",
     ),
     "en": (
         "A powerful, self-built Windows desktop screenshot tool.",
         "Features: three capture modes, object-based annotations, whole-image rotate / flip, pen endpoint arrows, a dedicated Scrolling Capture command, per-line OCR overlay, custom global hotkey, 8 interface languages.",
         "Contact: ",
-        "Built with Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime). Third-party licenses: PySide6 (LGPL), RapidOCR / PaddleOCR / OpenCV (Apache-2.0), ONNX Runtime (MIT).",
     ),
     "ja": (
         "自作の機能が強力な Windows デスクトップ スクリーンショット ソフトです。",
         "機能：3 つのキャプチャ モード、オブジェクトベースの注釈、画像全体の回転 / 反転、ペンの端点矢印、専用の「スクロール キャプチャ」コマンド、行単位の OCR 重ね表示、ショートカットのカスタマイズ、8 言語のインターフェース。",
         "連絡先メール: ",
-        "技術: Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime)。第三者ライセンス: PySide6 (LGPL)、RapidOCR / PaddleOCR / OpenCV (Apache-2.0)、ONNX Runtime (MIT)。",
     ),
     "ko": (
         "직접 만든 강력한 Windows 데스크톱 스크린샷 소프트웨어입니다.",
         "기능: 세 가지 캡처 모드, 객체 기반 주석, 이미지 전체 회전 / 반전, 펜 끝점 화살표, 전용 '스크롤 캡처' 명령, 줄 단위 OCR 덮어쓰기, 전역 단축키 사용자 지정, 8가지 인터페이스 언어.",
         "연락처 이메일: ",
-        "기술: Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime). 서드파티 라이선스: PySide6 (LGPL), RapidOCR / PaddleOCR / OpenCV (Apache-2.0), ONNX Runtime (MIT).",
     ),
     "fr": (
         "Un logiciel de capture d'écran Windows puissant, fait maison.",
         "Fonctions : trois modes de capture, annotations objets, rotation / miroir de l'image, flèches aux extrémités du crayon, commande dédiée « Capture défilante », OCR ligne par ligne, raccourci global personnalisable, 8 langues d'interface.",
         "Contact : ",
-        "Technologies : Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime). Licences tierces : PySide6 (LGPL), RapidOCR / PaddleOCR / OpenCV (Apache-2.0), ONNX Runtime (MIT).",
     ),
     "de": (
         "Eine selbst entwickelte, leistungsstarke Screenshot-Software für Windows.",
         "Funktionen: drei Aufnahmemodi, objektbasierte Markierungen, Rotation / Spiegelung des ganzen Bilds, Pfeile an Stiftenden, eigener Befehl „Scroll-Aufnahme“, zeilenweise OCR-Überlagerung, eigenes globales Tastenkürzel, 8 Oberflächensprachen.",
         "Kontakt: ",
-        "Technik: Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime). Drittanbieter-Lizenzen: PySide6 (LGPL), RapidOCR / PaddleOCR / OpenCV (Apache-2.0), ONNX Runtime (MIT).",
     ),
     "es": (
         "Un software de captura de pantalla para Windows potente y hecho por uno mismo.",
         "Funciones: tres modos de captura, anotaciones basadas en objetos, rotación / espejo de toda la imagen, flechas en los extremos del lápiz, comando dedicado « Captura larga », OCR superpuesto por líneas, atajo global personalizable, 8 idiomas de interfaz.",
         "Contacto: ",
-        "Tecnología: Python 3.13 + PySide6 + Win32 API + RapidOCR (ONNX Runtime). Licencias de terceros: PySide6 (LGPL), RapidOCR / PaddleOCR / OpenCV (Apache-2.0), ONNX Runtime (MIT).",
     ),
 }
 
@@ -275,7 +270,7 @@ def about_html(lang: str | None = None, email: str = "283096251@qq.com",
     if code == "zh_CN":
         from snapui import ABOUT_HTML
         return ABOUT_HTML
-    desc, features, contact, tech = _ABOUT.get(code) or _ABOUT["en"]
+    desc, features, contact = _ABOUT.get(code) or _ABOUT["en"]
     title = name or ""
     return f"""
 <div style="font-family:'Microsoft YaHei',sans-serif; font-size:13px; color:#1f2937; line-height:1.6;">
@@ -283,7 +278,6 @@ def about_html(lang: str | None = None, email: str = "283096251@qq.com",
 <p>{desc}</p>
 <p>{features}</p>
 <p style="font-size:13px;">{contact}<a href="mailto:{email}" style="color:#0a6ed1;">{email}</a></p>
-<p style="font-size:12px; color:#6b7280;">{tech}</p>
 </div>
 """
 
