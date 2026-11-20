@@ -5929,13 +5929,14 @@ def test_v38_layout_redesign() -> None:
     app.processEvents()
 
     # AJ1 v39：命令面板就是主窗口本体，普通窗口、不再贴底悬浮
+    # v47：移除「打开保存目录 / 默认截图模式 / 命令行参数」三行后共 12 行
     ok_aj1 = (
         not bool(mw.windowFlags() & Qt.FramelessWindowHint)
         and not bool(mw.windowFlags() & Qt.WindowStaysOnTopHint)
         and isinstance(mw.centralWidget(), CommandPanel)
         and mw.centralWidget() is mw._panel
         and mw._panel.isVisible()
-        and len(mw._panel._rows) == 15
+        and len(mw._panel._rows) == 12
     )
     record("AJ1 主窗口=两列命令面板(普通窗口)", ok_aj1,
            f"central={type(mw.centralWidget()).__name__} rows={len(mw._panel._rows)}")
@@ -5954,15 +5955,19 @@ def test_v38_layout_redesign() -> None:
               ("long", ""), ("pin", "")]
     record("AJ2 面板五条截图/贴图行各发对应信号", fired == expect, f"fired={fired}")
 
-    # AJ3 点模式行会把该模式记成默认模式并高亮
+    # AJ3 v47：点模式行左侧只截图、不改默认；点右侧窄条才设默认
     seen_modes: list = []
     mw.mode_changed.connect(lambda m: seen_modes.append(m))
     panel._rows["mode_fullscreen"].click()
-    ok_aj3 = (mw._mode == "fullscreen" and seen_modes[-1] == "fullscreen"
+    left_ok = (mw._mode == "rect" and not seen_modes
+               and not panel._rows["mode_fullscreen"]._highlight)
+    panel._pickers["fullscreen"].click()
+    ok_aj3 = (left_ok and mw._mode == "fullscreen"
+              and seen_modes[-1] == "fullscreen"
               and panel._rows["mode_fullscreen"]._highlight
               and not panel._rows["mode_rect"]._highlight)
-    record("AJ3 点模式行同时更新默认模式与高亮", ok_aj3,
-           f"mode={mw._mode} seen={seen_modes[-1:]}")
+    record("AJ3 左侧只截图 / 右侧窄条只改默认", ok_aj3,
+           f"left_ok={left_ok} mode={mw._mode} seen={seen_modes[-1:]}")
 
     # AJ4 面板四组标题 + 关于仍在帮助组 + 退出独立在顶部
     groups = (panel._lbl_now.text(), panel._lbl_edit.text(),
@@ -5989,6 +5994,7 @@ def test_v38_layout_redesign() -> None:
            f"quit={quit_hits} minimize={min_hits} accepted={ev.isAccepted()}")
 
     # AJ5 面板各行接到正确信号（关于直接开对话框，退出在标题栏）
+    # v47：「打开保存目录」「命令行参数」两行已从面板移除，改走托盘菜单
     hits: list = []
     mw.ocr_capture_requested.connect(lambda: hits.append("ocr"))
     mw.pin_clipboard_requested.connect(lambda: hits.append("pin"))
@@ -5997,14 +6003,13 @@ def test_v38_layout_redesign() -> None:
     mw.pin_hotkey_requested.connect(lambda: hits.append("pinhk"))
     mw.language_requested.connect(lambda: hits.append("lang"))
     mw.help_requested.connect(lambda k: hits.append("help:" + k))
-    for key in ("ocr", "pin_clipboard", "dir", "hotkey", "pin_hotkey",
-                "language", "help_help", "help_cli"):
+    for key in ("ocr", "pin_clipboard", "hotkey", "pin_hotkey",
+                "language", "help_help"):
         panel._rows[key].click()
-    ok_aj5 = hits == ["ocr", "pin", "dir", "hotkey", "pinhk", "lang",
-                      "help:help", "help:cli"]
+    ok_aj5 = hits == ["ocr", "pin", "hotkey", "pinhk", "lang", "help:help"]
     record("AJ5 面板行 -> 对应命令信号", ok_aj5, f"hits={hits}")
 
-    # AJ6 画笔平滑度 / 默认模式两行是循环切换
+    # AJ6 画笔平滑度行循环切换（默认方式改由窄条点选，_cycle_mode 仅兼容保留）
     smooth: list = []
     mw.pen_smooth_changed.connect(lambda v: smooth.append(v))
     mw.set_pen_smooth("medium")
@@ -6016,7 +6021,7 @@ def test_v38_layout_redesign() -> None:
     panel._cycle_mode()
     ok_aj6 = (smooth == ["high", "off"] and mw._pen_smooth == "off"
               and modes_cycle[-1] == "window")
-    record("AJ6 平滑度/默认模式行可循环切换", ok_aj6,
+    record("AJ6 平滑度行可循环切换", ok_aj6,
            f"smooth={smooth} mode={modes_cycle[-1:]}")
 
     # AJ7 英文化后主窗口无中文残留
@@ -6028,6 +6033,8 @@ def test_v38_layout_redesign() -> None:
              panel._lbl_hotkey.text(), panel._lbl_mode.text()]
     for row in panel._rows.values():
         texts += [row.title_label.text(), row.desc_label.text(), row.key_label.text()]
+    texts.append(panel._lbl_pick.text())
+    texts += [p.text() for p in panel._pickers.values()]
     cjk = [x for x in texts if _re.search(r"[\u4e00-\u9fff]", x)]
     i18n.LANG.set_preference("zh_CN", persist=False)
     app.processEvents()
@@ -6863,10 +6870,10 @@ def test_v44_no_angle_toolbar_and_pro_marks() -> None:
         p._rows["long_capture"].is_pro()
         and p._rows["ocr"].is_pro()
         and p._rows["pin_clipboard"].is_pro()
-        and not p._rows["dir"].is_pro()
+        and not p._rows["about"].is_pro()
     )
     record("AP6 命令面板3行PRO，其它行普通", ok_ap6,
-           f"long={p._rows['long_capture'].is_pro()} dir={p._rows['dir'].is_pro()}")
+           f"long={p._rows['long_capture'].is_pro()} about={p._rows['about'].is_pro()}")
 
     for w in (ed, mw, sp):
         w.hide(); w.deleteLater()
@@ -7143,6 +7150,130 @@ def test_v46_scroll_stitch_robustness() -> None:
     record("AR8 抗中断实现标记齐全", ok_ar8, f"marks={ok_ar8}")
 
 
+def test_v47_default_split_rows() -> None:
+    """Stage AS：v47 命令面板「左启动 / 右定默认」拆分（设计稿 J）。"""
+    import sys
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtWidgets import QApplication
+
+    import i18n
+    from hotkeys import CAPTURE_MODES, Hotkey
+    from snapui import MainWindow, make_icon
+    from ui_theme import PICK_W
+
+    print("\n--- Stage AS: v47 默认方式拆分行 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    src_ui = Path(__file__).with_name("snapui.py").read_text(encoding="utf-8")
+
+    tmp = TemporaryDirectory(prefix="snaptool-as-")
+    mw = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp.name))
+    mw.show()
+    app.processEvents()
+    panel = mw._panel
+
+    # AS1 三种方式各切成左右两块：整行仍是按钮，行尾多出 78px 窄条
+    ok_as1 = (
+        set(panel._pickers) == set(CAPTURE_MODES)
+        and all(pk.width() == PICK_W and pk.height() == 44
+                and pk.parent() is panel._rows[f"mode_{m}"]
+                for m, pk in panel._pickers.items())
+        # 窄条贴在行尾：右侧只留 12px 内边距
+        and all(pk.geometry().right() == panel._rows[f"mode_{m}"].width() - 13
+                for m, pk in panel._pickers.items())
+    )
+    record("AS1 三行各拆成整行 + 78px 行尾窄条", ok_as1,
+           f"宽={[pk.width() for pk in panel._pickers.values()]}")
+
+    # AS2 左半边只截图（不改默认），右半边只定默认（不截图）
+    caps: list = []
+    modes: list = []
+    mw.capture_requested.connect(lambda m: caps.append(m))
+    mw.mode_changed.connect(lambda m: modes.append(m))
+    panel._rows["mode_window"].click()
+    left_only = caps == ["window"] and not modes and mw._mode == "rect"
+    panel._pickers["window"].click()
+    right_only = caps == ["window"] and modes == ["window"] and mw._mode == "window"
+    record("AS2 左侧立刻截图 / 右侧只设默认", left_only and right_only,
+           f"caps={caps} modes={modes} mode={mw._mode}")
+
+    # AS3 同一时刻只有一行高亮 + 只有它那条窄条是选中态
+    hl = [m for m in CAPTURE_MODES if panel._rows[f"mode_{m}"]._highlight]
+    sel = [m for m, pk in panel._pickers.items() if pk.is_selected()]
+    panel._pickers["fullscreen"].click()
+    app.processEvents()
+    hl2 = [m for m in CAPTURE_MODES if panel._rows[f"mode_{m}"]._highlight]
+    sel2 = [m for m, pk in panel._pickers.items() if pk.is_selected()]
+    ok_as3 = (hl == ["window"] and sel == ["window"]
+              and hl2 == ["fullscreen"] and sel2 == ["fullscreen"])
+    record("AS3 高亮与选中态独占且一起移动", ok_as3,
+           f"{hl}/{sel} -> {hl2}/{sel2}")
+
+    # AS4 左右两列各 6 行；滚动长截图不分栏，右侧只留箭头
+    left_keys = ("mode_rect", "mode_window", "mode_fullscreen", "long_capture",
+                 "ocr", "pin_clipboard")
+    right_keys = ("hotkey", "pin_hotkey", "language", "pen_smooth",
+                  "help_help", "about")
+    gone = [k for k in ("dir", "default_mode", "help_cli")
+            if k in panel._rows]
+    long_row = panel._rows["long_capture"]
+    ok_as4 = (
+        all(k in panel._rows for k in left_keys + right_keys)
+        and len(panel._rows) == 12 and not gone
+        and long_row.picker() is None
+        and not long_row.key_label.isHidden()
+        and not long_row.key_label.pixmap().isNull()
+    )
+    record("AS4 两列各6行、删掉3行、长截图只留箭头", ok_as4,
+           f"rows={len(panel._rows)} gone={gone} arrow={not long_row.key_label.pixmap().isNull()}")
+
+    # AS5 「默认方式」列标题正对下方窄条（中心对齐）
+    lbl = panel._lbl_pick
+    dxs = []
+    for m, pk in panel._pickers.items():
+        cx_pk = pk.mapTo(mw, QPoint(0, 0)).x() + pk.width() / 2
+        cx_lb = lbl.mapTo(mw, QPoint(0, 0)).x() + lbl.width() / 2
+        dxs.append(abs(cx_pk - cx_lb))
+    ok_as5 = max(dxs) <= 2 and lbl.width() == PICK_W and lbl.text() == "默认方式"
+    record("AS5 「默认方式」列标题与窄条对齐", ok_as5,
+           f"偏差={max(dxs):.1f} 标题={lbl.text()!r}")
+
+    # AS6 换语言不撑破：面板宽度夹在 600~700，说明文字用省略号而不是硬切
+    widths = {}
+    for code in ("zh_CN", "en", "ja", "de"):
+        i18n.LANG.set_preference(code, persist=False)
+        app.processEvents()
+        panel.retranslate_ui()          # 显式刷新，不依赖信号时序
+        app.processEvents()
+        widths[code] = panel.card.minimumWidth()
+    i18n.LANG.set_preference("zh_CN", persist=False)
+    app.processEvents()
+    panel.retranslate_ui()
+    from ui_theme import ElideLabel
+    src_ui_theme = Path(__file__).with_name("ui_theme.py").read_text(encoding="utf-8")
+    ok_as6 = (
+        all(560 <= w <= 700 for w in widths.values())   # 有下限也有上限，不撑破屏幕
+        and isinstance(panel._rows["long_capture"].desc_label, ElideLabel)
+        and "ElideRight" in src_ui_theme
+    )
+    record("AS6 多语言面板宽度受控 + 说明文字省略", ok_as6, f"宽度={widths}")
+
+    # AS7 面板里不再有“默认截图模式”“打开保存目录”“命令行参数”三行
+    dead_text = ("默认截图模式", "打开保存目录", "命令行参数")
+    titles = [r.title_label.text() for r in panel._rows.values()]
+    ok_as7 = (not [x for x in titles if x in dead_text]
+              and not {"dir", "default_mode", "help_cli"} & set(panel._rows))
+    record("AS7 面板不再出现被移除的三行", ok_as7,
+           f"残留标题={[x for x in titles if x in dead_text]}")
+
+    mw.close()
+    mw.deleteLater()
+    app.processEvents()
+    tmp.cleanup()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7197,6 +7328,7 @@ if __name__ == "__main__":
     test_v44_no_angle_toolbar_and_pro_marks()
     test_v45_flat_top_buttons_and_zoom_fit()
     test_v46_scroll_stitch_robustness()
+    test_v47_default_split_rows()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

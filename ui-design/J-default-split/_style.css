@@ -1,0 +1,228 @@
+/* 截屏助手 · 默认截图模式改造 · 共享样式
+   配色取自 ui_theme.py：CREAM #fbfaf7 / INK #1c1c1e / ORANGE #f97316 / SOFT #ffefe2 */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #6f7a86;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+  color: #1c1c1e;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 26px 26px 52px;
+}
+
+/* ---------------- 桌面背景 ---------------- */
+.desk {
+  position: fixed; inset: 0;
+  background: linear-gradient(150deg, #7d8794 0%, #8f99a5 45%, #79838f 100%);
+  z-index: 0;
+}
+.desk::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(680px 420px at 18% 12%, rgba(255,255,255,.22), transparent 70%),
+    radial-gradient(520px 320px at 88% 82%, rgba(255,255,255,.14), transparent 72%);
+}
+
+/* ---------------- 窗口 ---------------- */
+.frame { position: relative; z-index: 2; }
+
+.win {
+  position: relative;
+  width: 872px;
+  background: #fbfaf7;
+  border-radius: 9px;
+  border: 1px solid #d8d3ca;
+  box-shadow: 0 26px 68px rgba(20,26,34,.34), 0 4px 12px rgba(20,26,34,.16);
+  overflow: hidden;
+}
+
+.tbar {
+  height: 34px; display: flex; align-items: center;
+  padding: 0 0 0 13px;
+  background: #f4f2ed;
+  border-bottom: 1px solid #e3ded5;
+}
+.tbar .ticon {
+  width: 17px; height: 17px; margin-right: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+.tbar .tname { font-size: 12.5px; color: #3a3630; font-weight: 600; }
+.tbar .tbtns { margin-left: auto; display: flex; height: 34px; }
+.tbar .tbtns i {
+  width: 46px; display: flex; align-items: center; justify-content: center;
+  font-style: normal; font-size: 12px; color: #4a453e;
+}
+.tbar .tbtns i.x:hover { background: #e81123; color: #fff; }
+
+/* ---------------- 头部 ---------------- */
+.head {
+  display: flex; align-items: center;
+  padding: 15px 20px 13px;
+}
+.logo {
+  width: 40px; height: 40px; border-radius: 11px; flex: 0 0 40px;
+  background: linear-gradient(145deg, #ffa14a, #f97316);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 3px 9px rgba(249,115,22,.32);
+}
+.hname { margin-left: 12px; }
+.hname b { display: block; font-size: 15.5px; font-weight: 700; letter-spacing: .2px; }
+.hname span { display: block; font-size: 11px; color: #a39a90; margin-top: 3px; }
+.hright { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.badge {
+  font-size: 11.5px; color: #1f8a5f; background: #eaf6ef;
+  border: 1px solid #cfe9da; border-radius: 7px; padding: 4px 11px; font-weight: 600;
+}
+.quit {
+  font-size: 11.5px; color: #6b6660; background: #fbfaf7;
+  border: 1px solid #e2ddd4; border-radius: 7px; padding: 4px 11px;
+  display: flex; align-items: center; gap: 5px;
+}
+.divider-h { height: 1px; background: #e9e4dc; margin: 0 20px; }
+
+/* ---------------- 两列 ---------------- */
+.cols { display: flex; padding: 8px 12px 10px; }
+.col { flex: 1; padding: 0 8px; min-width: 0; }
+.vline { width: 1px; background: #e9e4dc; margin: 4px 0; }
+
+.gtitle {
+  font-size: 11px; color: #a39a90; font-weight: 600;
+  letter-spacing: .6px; padding: 9px 12px 5px;
+  display: flex; align-items: center;
+}
+.gtitle .r {}
+.gap { height: 4px; }
+
+/* ---------------- 行 ---------------- */
+.row {
+  height: 44px; border-radius: 12px; border: 1px solid transparent;
+  display: flex; align-items: center; padding: 0 12px 0 10px; gap: 11px;
+  margin-bottom: 2px; position: relative;
+}
+.row.on { background: #ffefe2; border-color: #ffd9bd; }
+.row.pro { background: #fff4e2; border-color: #f0d7a8; }
+.row.hover { background: #f5f0e8; }
+
+.ic {
+  width: 30px; height: 30px; border-radius: 9px; flex: 0 0 30px;
+  background: #f2ece2; border: 1px solid #e9e2d6;
+  display: flex; align-items: center; justify-content: center;
+}
+.row.on .ic { background: #fffaf4; border-color: #ffd9bd; }
+.ic.gold { background: linear-gradient(145deg, #f8b055, #f2942b); border-color: #eda03b; }
+.ic.gold svg { stroke: #fff; }
+
+.tx { flex: 1; min-width: 0; }
+.tx b { display: block; font-size: 13px; font-weight: 600; line-height: 1.25; }
+.tx span { display: block; font-size: 10.5px; color: #a39a90; margin-top: 2px; }
+
+.end { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.pill {
+  font-size: 10px; color: #a39a90; background: #f7f3ec;
+  border: 1px solid #eae4d9; border-radius: 6px; padding: 2px 7px;
+}
+
+/* ---------------- 单选圆点 ---------------- */
+.radio {
+  width: 17px; height: 17px; border-radius: 50%;
+  border: 1.6px solid #cdc5b9; background: #fff;
+  flex: 0 0 17px; position: relative;
+}
+.radio.checked { border-color: #f97316; border-width: 5.2px; }
+.radio.hint { border-color: #f0a869; }
+
+/* 圆点右侧的「默认」文字 */
+.deflabel { font-size: 10.5px; color: #f97316; font-weight: 600; }
+
+/* hover 时滑出的动作按钮 */
+.mini {
+  font-size: 10.5px; color: #8a6a4a; background: #fff;
+  border: 1px solid #e6dccd; border-radius: 7px; padding: 3px 9px;
+  display: flex; align-items: center; gap: 4px; white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(120,100,70,.10);
+}
+.mini.primary { background: #f97316; border-color: #f97316; color: #fff; font-weight: 600; }
+
+/* ---------------- 底部主按钮 ---------------- */
+.cta {
+  margin: 6px 12px 2px; height: 40px; border-radius: 12px;
+  background: #f97316; color: #fff; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  box-shadow: 0 4px 12px rgba(249,115,22,.28);
+}
+.cta .k {
+  font-size: 10px; background: rgba(255,255,255,.22);
+  border-radius: 5px; padding: 2px 6px; font-weight: 500;
+}
+
+/* ---------------- 提示气泡 ---------------- */
+.tip {
+  position: absolute; z-index: 20;
+  background: #2b3036; color: #f6f2ea;
+  font-size: 10.5px; line-height: 1.5;
+  border-radius: 8px; padding: 7px 10px;
+  box-shadow: 0 8px 22px rgba(20,26,34,.3);
+  white-space: nowrap;
+}
+.tip::before {
+  content: ""; position: absolute; width: 8px; height: 8px;
+  background: #2b3036; transform: rotate(45deg);
+}
+.tip.l::before { left: -4px; top: 50%; margin-top: -4px; }
+.tip.t::before { top: -4px; left: 50%; margin-left: -4px; }
+.tip b { color: #ffc48e; font-weight: 600; }
+
+/* ---------------- 角标：方案编号 ---------------- */
+.tag {
+  position: absolute; z-index: 20;
+  bottom: -40px; left: 50%; transform: translateX(-50%);
+  font-size: 11.5px; letter-spacing: .4px; white-space: nowrap;
+  background: rgba(28,28,30,.78); color: #fff;
+  border-radius: 7px; padding: 6px 13px; font-weight: 600;
+}
+.hl {
+  position: absolute; z-index: 10;
+  border: 2px solid #2f8fff; border-radius: 9px;
+  pointer-events: none;
+}
+
+/* ================= 一行两个热区：左启动 / 右点选 ================= */
+.row.split { padding: 0; gap: 0; overflow: hidden; }
+
+.launch {
+  flex: 1; min-width: 0; align-self: stretch;
+  display: flex; align-items: center; gap: 11px;
+  padding: 0 10px;
+}
+.launch .tx b { font-size: 13px; font-weight: 600; line-height: 1.25; }
+.launch .tx span { font-size: 10.5px; color: #a39a90; margin-top: 2px; display: block; }
+
+.pick {
+  width: 78px; align-self: stretch; flex: 0 0 78px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  border-left: 1px solid #e9e4dc;
+}
+.row.on .pick { border-left-color: #f2d2b4; }
+
+/* 右侧热区悬停：单独一块浅橙，说明这里可以点 */
+.pick.hot { background: #fff6ee; }
+
+/* 左侧热区悬停：整块略深，配合鼠标箭头 */
+.launch.hot { background: #f5f0e8; box-shadow: inset 0 0 0 1px #ece5d9; border-radius: 11px 0 0 11px; }
+
+/* 列头压在右侧热区正中 */
+.gtitle.colhead-mode { padding-right: 0; }
+.gtitle .colhead-c {
+  margin-left: auto; width: 78px; text-align: center;
+  font-size: 10px; color: #a8a094; font-weight: 500;
+}
+
+/* 滚动长截图这类「动作行」：右侧只有一个箭头 */
+.chev-end {
+  align-self: stretch; width: 78px; flex: 0 0 78px;
+  display: flex; align-items: center; justify-content: center;
+  color: #c3b9ab; font-size: 14px;
+}

@@ -63,6 +63,7 @@ BTN_RADIUS = 13
 PANEL_RADIUS = 20
 ROW_HEIGHT = 44
 ROW_RADIUS = 12
+PICK_W = 78              # 命令行尾「默认方式」窄条宽度
 
 
 def qcolor(value: str, alpha: int | None = None) -> QColor:
@@ -300,6 +301,14 @@ def _smile(p: QPainter) -> None:
     p.drawPath(path)
 
 
+def _chevron(p: QPainter) -> None:
+    """行尾小箭头：还有下一步动作（设计稿 .prow .arrow）。"""
+    path = QPainterPath(QPointF(9.5, 5.5))
+    path.lineTo(15.5, 12)
+    path.lineTo(9.5, 18.5)
+    p.drawPath(path)
+
+
 _ICONS = {
     "logo": _camera,
     "region": _bracket_rect,
@@ -323,6 +332,7 @@ _ICONS = {
     "folder": _folder,
     "exit": _exit,
     "smile": _smile,
+    "chevron": _chevron,
 }
 
 
@@ -477,6 +487,99 @@ class PillButton(QPushButton):
             self._restyle()
 
 
+class ElideLabel(QLabel):
+    """单行说明文字：宽度不够时用「…」收尾，不硬切半个字。
+
+    QLabel 自己想多宽就多宽，会把命令面板顶得很宽；这里改成完全听布局安排，
+    画的时候按实际宽度省略，多语言长文案也不会挤破布局。
+    """
+
+    def __init__(self, text: str = "", color: str = INK3,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self._full = text
+        self._color = qcolor(color)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._full = text
+        self.setToolTip(text or "")
+        super().setText(text)
+        self.update()
+
+    def full_text(self) -> str:
+        return self._full
+
+    def paintEvent(self, ev) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setPen(QPen(self._color))
+        p.setFont(self.font())
+        txt = p.fontMetrics().elidedText(self._full, Qt.ElideRight, self.width())
+        p.drawText(self.rect(), int(self.alignment()), txt)
+        p.end()
+
+
+class RowPicker(QPushButton):
+    """行尾窄条选择区：点它只把该行「设为默认」，不执行整行的命令。
+
+    设计稿 J：一行切成左右两个热区，中间一条竖线——左侧照旧是整行按钮
+    （点一下就用这种方式截图），右侧这 78px 只负责选默认方式。
+    未选中时画空心圆，选中时整行浅橙 + 「默认」二字 + 实心橙点。
+    """
+
+    def __init__(self, parent: QWidget | None = None, width: int = PICK_W,
+                 height: int = ROW_HEIGHT) -> None:
+        super().__init__(parent)
+        self._selected = False
+        self.setFixedSize(width, height)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setStyleSheet("background:transparent;border:none;")
+        # 文案由 setText 注入，只用于读屏 / 自测；实际绘制在 paintEvent 里
+        self.setText("")
+
+    def set_selected(self, on: bool) -> None:
+        if on != self._selected:
+            self._selected = on
+            self.update()
+
+    def is_selected(self) -> bool:
+        return self._selected
+
+    def paintEvent(self, ev) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect())
+        h = r.height()
+        hot = self.underMouse() and self.isEnabled()
+        # 悬停只让这一块变浅橙（鼠标落在窄条上时父行的悬停底色会自然撤掉）
+        if hot and not self._selected:
+            p.setPen(Qt.NoPen)
+            p.setBrush(qcolor(SOFT))
+            p.drawRoundedRect(r.adjusted(2, 3, -2, -3), 10, 10)
+        # 中间竖线：把「启动区」和「选择区」分开
+        p.setPen(QPen(qcolor("#ffd9bd" if self._selected else LINE), 1))
+        p.drawLine(QPointF(0.5, 8), QPointF(0.5, h - 8))
+        cx, cy = r.width() - 19.0, h / 2
+        if self._selected:
+            p.setPen(Qt.NoPen)
+            p.setBrush(qcolor(ORANGE))
+            p.drawEllipse(QPointF(cx, cy), 7.0, 7.0)
+            p.setBrush(qcolor("#ffffff"))
+            p.drawEllipse(QPointF(cx, cy), 2.4, 2.4)
+            txt = self.text()
+            if txt:
+                p.setFont(ui_font(11, bold=True))
+                p.setPen(QPen(qcolor(ORANGE)))
+                p.drawText(QRectF(0, 0, r.width() - 32, h),
+                           Qt.AlignRight | Qt.AlignVCenter, txt)
+        else:
+            p.setPen(QPen(qcolor(ORANGE if hot else "#d9d0c5"), 1.6))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(QPointF(cx, cy), 6.4, 6.4)
+        p.end()
+
+
 class PanelRow(QPushButton):
     """命令面板里的一行：图标方块 + 标题/说明 + 右侧快捷键（设计稿 .prow）。"""
 
@@ -487,6 +590,8 @@ class PanelRow(QPushButton):
         self._highlight = False
         self._pro = False            # v44：高级功能金色 PRO 标识
         self._key = key
+        self._key_icon = ""          # 行尾小图标（长截图那一行的箭头）
+        self._picker: RowPicker | None = None
         # 自绘不画文字，但保留按钮 text 供读屏 / 自测按文案查找
         self.setText(title)
         self.setCursor(Qt.PointingHandCursor)
@@ -510,7 +615,7 @@ class PanelRow(QPushButton):
         self.title_label.setStyleSheet(
             f"color:{INK};font-size:13px;font-weight:600;background:transparent;{FONT_QSS}"
         )
-        self.desc_label = QLabel(desc, self)
+        self.desc_label = ElideLabel(desc, INK3, self)
         self.desc_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.desc_label.setStyleSheet(
             f"color:{INK3};font-size:10.5px;background:transparent;{FONT_QSS}"
@@ -536,8 +641,44 @@ class PanelRow(QPushButton):
         self.desc_label.setVisible(bool(desc))
         if key is not None:
             self._key = key
-            self.key_label.setText(key)
-            self.key_label.setVisible(bool(key))
+            self._apply_key()
+
+    def _apply_key(self) -> None:
+        """行尾显示：快捷键文字 > 小图标（箭头）> 什么都不显示。"""
+        if self._key:
+            self.key_label.setPixmap(QPixmap())
+            self.key_label.setText(self._key)
+            self.key_label.setVisible(True)
+        elif self._key_icon:
+            self.key_label.setText("")
+            self.key_label.setPixmap(
+                icon(self._key_icon, INK3, 13).pixmap(13, 13))
+            self.key_label.setVisible(True)
+        else:
+            self.key_label.setText("")
+            self.key_label.setPixmap(QPixmap())
+            self.key_label.setVisible(False)
+
+    def set_key_icon(self, name: str, size: int = 13) -> None:
+        """把行尾的快捷键文字换成一个小图标（长截图行右侧的箭头）。"""
+        self._key_icon = name
+        if name:
+            self._key = ""
+        self._apply_key()
+
+    def enable_picker(self, width: int = PICK_W) -> RowPicker:
+        """把行尾切出一个 78px 的窄条当选择区：整行点击仍是命令本身。
+
+        设计稿 J：左侧启动、右侧定默认；注意窄条是行的子控件，
+        点它会吃掉鼠标事件，不会触发父行的 clicked。
+        """
+        self._picker = RowPicker(self, width)
+        self.layout().addWidget(self._picker, 0, Qt.AlignVCenter)
+        self.key_label.setVisible(False)
+        return self._picker
+
+    def picker(self) -> RowPicker | None:
+        return self._picker
 
     def set_icon_name(self, name: str) -> None:
         if name != self._icon_name:
@@ -652,7 +793,8 @@ def group_title(text: str, parent: QWidget | None = None) -> QLabel:
 __all__ = [
     "CREAM", "INK", "INK2", "INK3", "LINE", "ORANGE", "SOFT", "DIM", "CANVAS_BG",
     "HOVER", "GREEN", "FONT_QSS", "BAR_HEIGHT", "BAR_RADIUS", "BTN_SIZE",
-    "BTN_RADIUS", "PANEL_RADIUS", "ROW_HEIGHT", "ROW_RADIUS",
+    "BTN_RADIUS", "PANEL_RADIUS", "ROW_HEIGHT", "ROW_RADIUS", "PICK_W",
     "qcolor", "ui_font", "apply_shadow", "paint_icon", "icon", "clear_icon_cache",
-    "IconButton", "PillButton", "PanelRow", "Card", "hline", "label", "group_title",
+    "IconButton", "PillButton", "PanelRow", "RowPicker", "ElideLabel", "Card",
+    "hline", "label", "group_title",
 ]

@@ -1252,6 +1252,16 @@ _ROWS.update({
         "默认", "預設", "Default", "既定", "기본",
         "Par défaut", "Standard", "Predeterminado",
     ),
+    "默认方式": (
+        "默认方式", "預設方式", "Default", "既定の方法", "기본 방식",
+        "Méthode par défaut", "Standardmethode", "Método predeterminado",
+    ),
+    "拖动选取任意区域": (
+        "拖动选取任意区域", "拖曳選取任意區域", "Drag to select any area",
+        "ドラッグで範囲を選択", "드래그하여 영역 선택",
+        "Glisser pour sélectionner une zone", "Bereich aufziehen",
+        "Arrastra para seleccionar",
+    ),
     "命令面板": (
         "命令面板", "命令面板", "Command Panel", "コマンドパネル", "명령 패널",
         "Panneau de commandes", "Befehlspanel", "Panel de comandos",
