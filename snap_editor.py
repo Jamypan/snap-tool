@@ -253,6 +253,9 @@ class Canvas(QWidget):
         # 放大到超过窗口时保持居中（偏移可为负），配合中键拖动浏览其它区域
         self.off_x = max(pad, (self.width() - self._right_inset() - iw * self.view_scale) / 2.0)
         self.off_y = (self.height() - ih * self.view_scale) / 2.0
+        # v45：_fit 也可能由「适应窗口」命令（而非 resizeEvent）触发，
+        # 此时 Qt 不会自动重绘——不显式 update() 就会出现「算了新比例但画面不动」。
+        self.update()
         self.zoom_changed.emit(self.view_scale)
 
     # ------------------------------------------------------------ 视图放缩
@@ -282,8 +285,10 @@ class Canvas(QWidget):
         self._set_view_scale(1.0)
 
     def zoom_fit(self) -> None:
+        """适应窗口：整张图缩放到恰好装下，并重新居中（v45 修复无重绘）。"""
         self._zoom = 1.0
         self._fit()
+        self._place_ocr_layer()                     # 取字行块按新比例重新盖回
 
     def wheelEvent(self, ev) -> None:  # noqa: N802
         """Ctrl + 滚轮：以光标所在点为锚点放缩。"""
@@ -1507,7 +1512,9 @@ class EditorWindow(QMainWindow):
         self._save_dir = save_dir
         self._actions: dict[str, QAction] = {}
         self._menus: dict[str, QMenu] = {}
-        self.setMinimumSize(680, 460)
+        # v45：顶部 12 个按钮 + 窗口控制需要约 800px，最小宽度随之提高，
+        # 避免窗口拖窄后顶部命令被裁掉。
+        self.setMinimumSize(880, 480)
 
         central = QWidget(self)
         central.setObjectName("edRoot")
@@ -1612,7 +1619,7 @@ class EditorWindow(QMainWindow):
             b.setProperty("pro", pro)
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
-            b.setToolTip(tip + ("  · PRO 高级功能" if pro else ""))
+            b.setToolTip(tip)
             b.setIcon(toolbar_icon(icon_name, "#ffffff" if primary
                                    else ("#1c1c1e" if pro else None)))
             b.setIconSize(QSize(19, 19))
@@ -1632,41 +1639,75 @@ class EditorWindow(QMainWindow):
             b.clicked.connect(slot)
             return b
 
-        # 顺序：复制 / 保存 / 钉在桌面 / 取字 / 图像变换▾ / 缩放▾
+        # v45：原来收在下拉菜单里的「图像变换」「缩放」全部平铺成独立按钮，
+        # 与复制 / 保存同款（38×38 纯图标、同样的圆角与悬停）。分三组，
+        # 组间加一条与 Dock 一致的细分隔线：
+        #   复制 / 保存 / 钉在桌面 / 取字
+        #   ｜ 顺旋 / 逆旋 / 左右镜像 / 上下镜像
+        #   ｜ 放大 / 缩小 / 实际大小 1:1 / 适应窗口
         self._top_buttons: dict[str, QPushButton] = {}
-        specs = (
-            ("copy", "复制", "复制到剪贴板 (Ctrl+Enter)", "复制",
-             lambda _=False: self.copy_requested.emit(self.canvas.compose())),
-            ("save", "保存", "另存为文件 (Ctrl+S)", "保存",
-             lambda _=False: self.save_requested.emit(self.canvas.compose())),
-            ("pin", "钉在桌面", "钉在桌面：把当前截图贴成可移动的浮窗", "钉在桌面",
-             lambda _=False: self.pin_requested.emit(self.canvas.compose())),
-            ("ocr", "取字", "识别选区文字 (OCR)", "取字",
-             lambda _=False: self.ocr_requested.emit(self.canvas.base.copy())),
-        )
-        for key, _label, tip, icon_name, slot in specs:
-            # v41：复制用黑底白图标（与 Dock 主按钮一致），纯图标不带文字
-            # v44：钉在桌面 / 取字是高级功能，用金色底 PRO 标识
-            b = icon_btn(icon_name, tip, slot, f"top_{key}",
-                         primary=(key == "copy"),
-                         pro=(key in ("pin", "ocr")))
+        # 提示语随语言切换重建：key -> (文案 key, 快捷键, 是否高级功能)
+        self._top_tip_keys: dict[str, tuple[str, str, bool]] = {}
+
+        def add_sep() -> None:
+            sep = QLabel("")
+            sep.setFixedSize(1, 24)
+            sep.setStyleSheet("QLabel { background:#e9e4dc; }")
+            holder = QWidget(top_dock)
+            hl = QHBoxLayout(holder)
+            hl.setContentsMargins(4, 0, 4, 0)
+            hl.setSpacing(0)
+            hl.addWidget(sep)
+            dock_lay.addWidget(holder)
+
+        def add(key: str, icon_name: str, label_key: str, shortcut: str,
+                slot, pro: bool = False, primary: bool = False) -> QPushButton:
+            self._top_tip_keys[key] = (label_key, shortcut, pro)
+            b = icon_btn(icon_name, self._top_tip(key), slot, f"top_{key}",
+                         primary=primary, pro=pro)
             dock_lay.addWidget(b)
             self._top_buttons[key] = b
+            return b
 
-        # 图像变换：图标自带下拉小三角，四个动作收进一个菜单
-        self.btn_transform = icon_btn(
-            "变换", t("图像变换"), lambda _=False: self._show_transform_menu(),
-            "topTransform",
-        )
-        dock_lay.addWidget(self.btn_transform)
+        # ① 基础动作
+        add("copy", "复制", "复制", "Ctrl+Enter",
+            lambda _=False: self.copy_requested.emit(self.canvas.compose()),
+            primary=True)
+        add("save", "保存", "保存", "Ctrl+S",
+            lambda _=False: self.save_requested.emit(self.canvas.compose()))
+        # v44：钉在桌面 / 取字是高级功能，金色底 + PRO 标识
+        add("pin", "钉在桌面", "钉在桌面", "",
+            lambda _=False: self.pin_requested.emit(self.canvas.compose()), pro=True)
+        add("ocr", "取字", "取字", "",
+            lambda _=False: self.ocr_requested.emit(self.canvas.base.copy()), pro=True)
 
-        # 缩放：图标自带下拉小三角，放缩四项合并进一个菜单
-        self.zoom_pill = icon_btn(
-            "缩放", "", lambda _=False: self._show_view_menu(), "zoomPill",
-        )
-        dock_lay.addWidget(self.zoom_pill)
+        # ② 图像变换（整图，可撤销）
+        add_sep()
+        add("cw", "顺旋", "顺时针旋转 90°", "Ctrl+R",
+            lambda _=False: self.canvas.transform_image("cw"))
+        add("ccw", "逆旋", "逆时针旋转 90°", "Ctrl+Shift+R",
+            lambda _=False: self.canvas.transform_image("ccw"))
+        # v44：镜像属于高级功能
+        add("flip_h", "左右", "左右镜像", "Ctrl+H",
+            lambda _=False: self.canvas.transform_image("flip_h"), pro=True)
+        add("flip_v", "上下", "上下镜像", "Ctrl+Shift+H",
+            lambda _=False: self.canvas.transform_image("flip_v"), pro=True)
+
+        # ③ 视图放缩（只改显示比例，导出仍是全分辨率原图）
+        add_sep()
+        add("zoom_in", "放大", "放大", "Ctrl+=",
+            lambda _=False: self.canvas.zoom_in())
+        add("zoom_out", "缩小", "缩小", "Ctrl+-",
+            lambda _=False: self.canvas.zoom_out())
+        add("zoom_actual", "实际大小", "实际大小 1:1", "Ctrl+1",
+            lambda _=False: self.canvas.zoom_actual())
+        add("zoom_fit", "适应窗口", "适应窗口", "Ctrl+0",
+            lambda _=False: self.canvas.zoom_fit())
 
         # 容器加入顶部栏居中，窗口控制三键仍挂在外层、靠右上角
+        # v45：12 个 38×38 固定按钮，锁住容器尺寸——否则窄窗口下布局会把
+        # 按钮挤压/裁切，导致最后几个命令点不到。
+        top_dock.setFixedSize(dock_lay.sizeHint())
         lay.addWidget(top_dock)
         lay.addStretch(1)
 
@@ -1707,24 +1748,15 @@ class EditorWindow(QMainWindow):
             grip.move(self.canvas.width() - 16, self.canvas.height() - 16)
             grip.raise_()
 
-    def _show_transform_menu(self) -> None:
-        """整图旋转 / 镜像四项收进一个下拉按钮。"""
-        m = QMenu(self)
-        for i in range(4):
-            a = self._actions.get(f"transform{i}")
-            if a is not None:
-                m.addAction(a)
-        m.exec(self.btn_transform.mapToGlobal(
-            QPoint(0, self.btn_transform.height() + 4)
-        ))
-
-    def _show_view_menu(self) -> None:
-        m = QMenu(self)
-        for i in range(4):
-            a = self._actions.get(f"view{i}")
-            if a is not None:
-                m.addAction(a)
-        m.exec(self.zoom_pill.mapToGlobal(QPoint(0, self.zoom_pill.height() + 4)))
+    def _top_tip(self, key: str) -> str:
+        """顶部图标按钮的悬浮提示（v45：文案 + 快捷键 + PRO 标记）。"""
+        label_key, shortcut, pro = self._top_tip_keys.get(key, ("", "", False))
+        text = t(label_key) if label_key else ""
+        if shortcut:
+            text += f" ({shortcut})"
+        if pro:
+            text += "  · PRO 高级功能"
+        return text
 
     def _toggle_maximized(self) -> None:
         """最大化 / 还原切换，按钮图标与提示同步。"""
@@ -1897,12 +1929,11 @@ class EditorWindow(QMainWindow):
                 pro = prefix == "transform" and i in (2, 3)
                 a.setText(t(text_key) + ("  · PRO" if pro else ""))
         # v40：顶部是纯图标按钮，语言切换只更新提示，不再改文字
-        for key, label_key in zip(("copy", "save", "pin", "ocr"),
-                                   ("复制", "保存", "钉在桌面", "取字")):
+        # v45：顶部新增变换 / 缩放按钮，提示语统一按 _top_tip_keys 重建
+        for key in getattr(self, "_top_tip_keys", {}):
             b = getattr(self, "_top_buttons", {}).get(key)
             if b is not None:
-                b.setToolTip(t(label_key))
-        self.btn_transform.setToolTip(t("图像变换"))
+                b.setToolTip(self._top_tip(key))
         self.btn_min.setToolTip(t("最小化"))
         self.btn_max.setToolTip(
             t("还原") if self.isMaximized() else t("最大化")
@@ -1912,8 +1943,11 @@ class EditorWindow(QMainWindow):
 
     def _show_zoom(self, scale: float) -> None:
         text = t("缩放 {pct}%", pct=int(round(scale * 100)))
-        # v40：图标按钮不占文字位置，当前比例放到悬浮提示里
-        self.zoom_pill.setToolTip(text)
+        self._zoom_note = text
+        # v40：图标按钮不占文字位置，当前比例放到「实际大小」按钮的悬浮提示里
+        b = getattr(self, "_top_buttons", {}).get("zoom_actual")
+        if b is not None:
+            b.setToolTip(f"{self._top_tip('zoom_actual')}  ·  {text}")
         self.statusBar().showMessage(text)
         self.statusBar().hide()
 

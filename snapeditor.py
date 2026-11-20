@@ -506,17 +506,21 @@ def _arc_arrow(p: QPainter, cx: float, cy: float, r: float,
 def _draw_mirror_icon(p: QPainter) -> None:
     """画「左右镜像」基准图标：竖直虚线镜像轴 + 两侧互为镜像的实心三角。
 
-    左三角纯白＝原图，右三角淡白＝翻过去的镜像；三角尖朝外侧、底边贴近
+    左三角＝原图，右三角略淡＝翻过去的镜像；三角尖朝外侧、底边贴近
     轴但留 2px 缝，避免和轴线糊成一片。上下镜像直接把这张图旋转 90°，
     两者天然严格成对。
+
+    v45：三角颜色跟随当前图标墨色（_ICON_INK），不再写死近白——
+    写死的话在金色 PRO 底、奶油白底上都几乎看不见，只剩一条虚线。
     """
     p.setPen(_icon_pen(1.5))
     p.setBrush(Qt.NoBrush)
     for a, b in ((3.0, 8.0), (11.0, 15.0), (18.0, 23.0)):
         p.drawLine(QPointF(13, a), QPointF(13, b))
     p.setPen(Qt.NoPen)
+    ink = QColor(_ICON_INK)
     for tip, base, alpha in ((4.0, 11.0, 255), (22.0, 15.0, 170)):
-        p.setBrush(QBrush(QColor(245, 247, 250, alpha)))
+        p.setBrush(QBrush(QColor(ink.red(), ink.green(), ink.blue(), alpha)))
         p.drawPolygon(
             QPolygonF(
                 [

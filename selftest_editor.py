@@ -4564,9 +4564,11 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v40", "v41", "v42", "v43", "v44", "关闭截图编辑与截屏助手两个窗口",
+    marks = ("v27", "v40", "v41", "v42", "v43", "v44", "v45",
+             "关闭截图编辑与截屏助手两个窗口",
              "合计 250 项", "合计 368 项", "合计 375 项", "合计 381 项", "合计 386 项",
-             "合计 392 项", "dist/v16", "dist/v41", "dist/v42", "dist/v43", "dist/v44")
+             "合计 392 项", "合计 398 项", "dist/v16", "dist/v41", "dist/v42",
+             "dist/v43", "dist/v44", "dist/v45")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
     lang_marks = ("command panel", "コマンドパネル", "명령 패널",
@@ -6121,7 +6123,7 @@ def test_v38_layout_redesign() -> None:
     )
     record("AJ14 Dock = 选择+7工具+撤销", ok_aj14, f"order={order2}")
 
-    # AJ15 顶部按钮取代 ☰；重复命令已从菜单移除；放缩合并到下拉
+    # AJ15 顶部按钮取代 ☰；重复命令已从菜单移除；变换/放缩平铺成独立按钮（v45）
     top_keys = set(ed._top_buttons)
     file_texts = " ".join(a.text() for a in ed._menus["file"].actions())
     edit_texts = " ".join(a.text() for a in ed._menus["edit"].actions())
@@ -6134,11 +6136,13 @@ def test_v38_layout_redesign() -> None:
         not ed.btn_menu.isVisible()
         and {"copy", "save", "pin", "ocr"} <= top_keys
         and "saveas" not in top_keys          # v40：另存为已与保存合并
-        and ed.btn_transform.objectName() == "topTransform"
-        and ed.zoom_pill.objectName() == "zoomPill"
+        and {"cw", "ccw", "flip_h", "flip_v",
+             "zoom_in", "zoom_out", "zoom_actual", "zoom_fit"} <= top_keys
+        and ed._top_buttons["cw"].objectName() == "top_cw"
+        and ed._top_buttons["zoom_fit"].objectName() == "top_zoom_fit"
         and gone and has_view and has_window
     )
-    record("AJ15 顶部按钮 / 精简菜单 / 缩放下拉 / 窗口控制", ok_aj15,
+    record("AJ15 顶部按钮 / 精简菜单 / 变换与放缩平铺 / 窗口控制", ok_aj15,
            f"top={sorted(top_keys)} gone={gone} view={has_view} win={has_window}")
 
     # AJ16 菜单栏隐藏后快捷键仍然生效（action 已挂到窗口）
@@ -6236,12 +6240,11 @@ def test_v39_menu_buttons_and_panel_window() -> None:
     ok_ak4 = (
         not ed.btn_menu.isVisible()
         and {"copy", "save", "pin", "ocr"} <= top_keys
-        and ed.btn_transform.objectName() == "topTransform"
         and "def _build_hamburger" in src_ed   # 兼容占位仍在，但界面无 ☰
     )
     record("AK4 顶部按钮取代汉堡菜单", ok_ak4, f"top={sorted(top_keys)}")
 
-    # AK5 红框 5 项不在可见菜单；放缩/变换各自收进下拉
+    # AK5 红框 5 项不在可见菜单；变换 / 放缩改为顶部独立按钮（v45）
     file_texts = " ".join(a.text() for a in ed._menus["file"].actions())
     edit_texts = " ".join(a.text() for a in ed._menus["edit"].actions())
     gone = all(k not in file_texts + edit_texts for k in
@@ -6251,11 +6254,11 @@ def test_v39_menu_buttons_and_panel_window() -> None:
     ok_ak5 = (
         gone and len(view_acts) == 4 and len(tr_acts) == 4
         and all(a.text() and not a.shortcut().isEmpty() for a in view_acts)
-        and not ed.zoom_pill.text() and not ed.btn_transform.text()
-        and not ed.zoom_pill.icon().isNull()
-        and not ed.btn_transform.icon().isNull()
+        and all(not b.text() and not b.icon().isNull()
+                for b in ed._top_buttons.values())
+        and not hasattr(ed, "zoom_pill") and not hasattr(ed, "btn_transform")
     )
-    record("AK5 精简菜单 + 放缩/变换下拉", ok_ak5,
+    record("AK5 精简菜单 + 变换/放缩平铺按钮（无下拉）", ok_ak5,
            f"gone={gone} view={len(view_acts)} transform={len(tr_acts)}")
 
     # AK6 顶部最小化/最大化/关闭 + 双击标题栏 + 右下拖拽角
@@ -6329,13 +6332,11 @@ def test_v40_icon_bar_round_text_and_table_copy() -> None:
     # AL1 顶部按钮与 Dock 同款：38×38 纯图标、无文字、居中靠 stretch
     keys = set(ed._top_buttons)
     ok_al1 = (
-        keys == {"copy", "save", "pin", "ocr"}
+        keys == {"copy", "save", "pin", "ocr", "cw", "ccw", "flip_h", "flip_v",
+                 "zoom_in", "zoom_out", "zoom_actual", "zoom_fit"}
         and all(not b.text() and not b.icon().isNull()
                 and b.width() == 38 and b.height() == 38
                 for b in ed._top_buttons.values())
-        and not ed.btn_transform.text() and not ed.zoom_pill.text()
-        and not ed.btn_transform.icon().isNull()
-        and not ed.zoom_pill.icon().isNull()
         and "saveas" not in src_ed.split("def _build_topbar")[1].split("def resizeEvent")[0]
     )
     record("AL1 顶部按钮=纯图标 Dock 风格（另存为已移除）", ok_al1,
@@ -6349,7 +6350,9 @@ def test_v40_icon_bar_round_text_and_table_copy() -> None:
                    and pm.pixelColor(xx, yy).red() < 200)
 
     inks = {k: _icon_ink(b) for k, b in ed._top_buttons.items()}
-    ok_al1b = all(v >= 60 for v in inks.values())
+    # 镜像图标最细（虚线轴 + 两枚三角）。v45 修好配色前它在金底上只有 13 个
+    # 可见像素（三角被写死成近白），现在约 59；阈值放宽到 45 仍能抓住空图标。
+    ok_al1b = all(v >= 45 for v in inks.values())
     record("AL1b 顶部每个图标都有可见笔画", ok_al1b, f"ink={inks}")
 
     # AL2 关闭按钮只有一个 X（文字 ✕，不再叠加 close 图标）
@@ -6657,10 +6660,9 @@ def test_v42_confirm_at_cursor_and_top_dock() -> None:
         and td.styleSheet() == bd.styleSheet()
         and td.height() == bd.height() == 52
         and td.width() > 0
+        and len(ed._top_buttons) == 12
         and all(b.parent() is td and b.width() == 38 and b.height() == 38
                 for b in ed._top_buttons.values())
-        and ed.btn_transform.parent() is td
-        and ed.zoom_pill.parent() is td
     )
     record("AN6 顶部按钮装进 Dock 同款圆角容器", ok_an6,
            f"topDock=({td.objectName()},{td.width()}x{td.height()}) bottomDock={bd.height()}")
@@ -6851,6 +6853,124 @@ def test_v44_no_angle_toolbar_and_pro_marks() -> None:
     app.processEvents()
 
 
+def test_v45_flat_top_buttons_and_zoom_fit() -> None:
+    """Stage AQ：v45 顶部「图像变换 / 缩放」下拉改成同款独立按钮 + 修好适应窗口。"""
+    import sys
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication, QWidget
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtCore import QEvent
+
+    from snap_editor import EditorWindow
+
+    print("\n--- Stage AQ: v45 顶部按钮平铺 / 适应窗口重绘 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    src_ed = Path(__file__).with_name("snap_editor.py").read_text(encoding="utf-8")
+    src_sd = Path(__file__).with_name("snapeditor.py").read_text(encoding="utf-8")
+
+    img = QImage(1800, 1100, QImage.Format_RGB32)
+    img.fill(QColor("#ffffff"))
+    ed = EditorWindow(img, [], None)
+    ed.resize(1140, 760)
+    ed.show()
+    app.processEvents()
+
+    # AQ1 布局顺序：三组共 12 个按钮，组间 2 条分隔线（下拉合并已拆开）
+    lay = ed._top_dock.layout()
+    order, seps = [], 0
+    for i in range(lay.count()):
+        w = lay.itemAt(i).widget()
+        if w is None:
+            continue
+        hit = [k for k, b in ed._top_buttons.items() if b is w]
+        if hit:
+            order.append(hit[0])
+        else:
+            seps += 1
+    expect = ["copy", "save", "pin", "ocr", "cw", "ccw", "flip_h", "flip_v",
+              "zoom_in", "zoom_out", "zoom_actual", "zoom_fit"]
+    ok_aq1 = order == expect and seps == 2
+    record("AQ1 顶部12个按钮按三组平铺 + 2条分隔线", ok_aq1,
+           f"order={order} seps={seps}")
+
+    # AQ2 全部同款 38×38 纯图标；下拉按钮与两个下拉菜单方法已删除
+    ok_aq2 = (
+        all(b.width() == 38 and b.height() == 38 and not b.text()
+            and not b.icon().isNull() and b.parent() is ed._top_dock
+            for b in ed._top_buttons.values())
+        and not hasattr(ed, "btn_transform") and not hasattr(ed, "zoom_pill")
+        and "def _show_transform_menu" not in src_ed
+        and "def _show_view_menu" not in src_ed
+    )
+    record("AQ2 12按钮大小/风格一致，下拉已移除", ok_aq2,
+           f"sizes={sorted({(b.width(), b.height()) for b in ed._top_buttons.values()})}")
+
+    # AQ3 左右/上下镜像金色 PRO；顺旋/逆旋/放缩四键保持基础
+    pro = {k: ed._top_buttons[k].property("pro") for k in expect}
+    ok_aq3 = (
+        pro == {"copy": False, "save": False, "pin": True, "ocr": True,
+                "cw": False, "ccw": False, "flip_h": True, "flip_v": True,
+                "zoom_in": False, "zoom_out": False,
+                "zoom_actual": False, "zoom_fit": False}
+        and "#e8a33d" in ed._top_buttons["flip_h"].styleSheet()
+        and "#e8a33d" in ed._top_buttons["flip_v"].styleSheet()
+    )
+    record("AQ3 镜像2键金色PRO，旋转/放缩非PRO", ok_aq3, f"pro={pro}")
+
+    # AQ4 「适应窗口」命令真的触发重绘（v45 前算完新比例不 update，画面不动）
+    cv = ed.canvas
+    counter = {"n": 0}
+
+    class _Watch(QWidget):
+        def eventFilter(self, obj, ev):  # noqa: N802
+            if ev.type() == QEvent.Paint:
+                counter["n"] += 1
+            return False
+
+    watch = _Watch()
+    cv.installEventFilter(watch)
+    cv.zoom_in()
+    app.processEvents()
+    counter["n"] = 0
+    ed._top_buttons["zoom_fit"].click()
+    app.processEvents()
+    ok_aq4 = counter["n"] > 0 and abs(cv.view_scale - cv._fit_scale) < 1e-6
+    record("AQ4 适应窗口命令触发重绘且回到整图装下", ok_aq4,
+           f"paints={counter['n']} scale={cv.view_scale:.3f} fit={cv._fit_scale:.3f}")
+
+    # AQ5 先「实际大小 1:1」再「适应窗口」也能收回来（整图完整可见、不溢出）
+    cv.zoom_actual()
+    app.processEvents()
+    big = cv.view_scale
+    ed._top_buttons["zoom_fit"].click()
+    app.processEvents()
+    fits = (
+        cv.view_scale < big
+        and cv.off_x >= 0 and cv.off_y >= 0
+        and cv.off_x + cv.base.width() * cv.view_scale <= cv.width() + 1
+        and cv.off_y + cv.base.height() * cv.view_scale <= cv.height() + 1
+    )
+    record("AQ5 实际大小后适应窗口整图完整可见", fits,
+           f"actual={big:.2f} fit={cv.view_scale:.2f} off=({cv.off_x:.0f},{cv.off_y:.0f})")
+
+    # AQ6 镜像图标三角跟随墨色（旧代码写死近白 → 金底上只剩一条虚线）
+    def _ink(btn) -> int:
+        pm = btn.grab().toImage()
+        return sum(1 for y in range(pm.height()) for x in range(pm.width())
+                   if pm.pixelColor(x, y).alpha() > 0
+                   and pm.pixelColor(x, y).red() < 200)
+
+    ink_h, ink_v = _ink(ed._top_buttons["flip_h"]), _ink(ed._top_buttons["flip_v"])
+    ok_aq6 = ink_h >= 45 and ink_v >= 45 and "QColor(245, 247, 250, alpha)" not in src_sd
+    record("AQ6 镜像图标在金底上可见（墨色跟随）", ok_aq6,
+           f"ink=({ink_h},{ink_v})")
+
+    ed.hide()
+    ed.deleteLater()
+    app.processEvents()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -6903,6 +7023,7 @@ if __name__ == "__main__":
     test_v42_confirm_at_cursor_and_top_dock()
     test_v43_confirm_order_and_ok_under_cursor()
     test_v44_no_angle_toolbar_and_pro_marks()
+    test_v45_flat_top_buttons_and_zoom_fit()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
