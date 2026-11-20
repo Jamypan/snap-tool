@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -65,8 +65,10 @@ from snapeditor import (
     Shape,
     StylePanel,
     Toolbar,
+    _ocr_copy_text,
     _reading_order,
     _text_edit_color,
+    toolbar_icon,
     text_edit_baseline_offset,
     draw_shape,
     normalize_angle,
@@ -1292,7 +1294,7 @@ class Canvas(QWidget):
         usable = [d for d in lines if isinstance(d, dict) and d.get("box")]
         if not usable:
             # 后端没有位置信息（Windows OCR / Tesseract 兜底）时降级成整块面板
-            self.show_ocr_text("\n".join(_reading_order(lines)), backend)
+            self.show_ocr_text(_ocr_copy_text(lines), backend)
             return
         self._commit_text()
         self.toolbar.hide()
@@ -1568,57 +1570,69 @@ class EditorWindow(QMainWindow):
             pass
 
     def _build_topbar(self) -> None:
-        """v39：去掉 ☰，常用命令全部平铺成窗口顶部的按钮。"""
+        """v40：顶部按钮与底部 Dock 同款（纯图标），居中放在正上方。
+
+        「保存」与「另存为」行为完全相同（都弹同一个保存对话框），
+        因此去掉重复的「另存为」，只保留「保存」并放到「复制」旁边。
+        右上角是最小化 / 最大化 / 关闭三个标准窗口控制。
+        """
         bar = self.topbar
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(14, 9, 14, 9)
-        lay.setSpacing(7)
+        lay.setContentsMargins(14, 6, 14, 6)
+        lay.setSpacing(3)
 
-        self._top_buttons: dict[str, PillButton] = {}
-        for key, label_key, icon_name, slot in (
-            ("copy", "复制", "copy",
-             lambda _=False: self.copy_requested.emit(self.canvas.compose())),
-            ("saveas", "另存为…", "folder",
-             lambda _=False: self.save_requested.emit(self.canvas.compose())),
-            ("pin", "钉在桌面", "pin",
-             lambda _=False: self.pin_requested.emit(self.canvas.compose())),
-            ("ocr", "取字", "text",
-             lambda _=False: self.ocr_requested.emit(self.canvas.base.copy())),
-        ):
-            b = PillButton(t(label_key), icon_name, "plain", bar, height=30)
-            b.setObjectName(f"top_{key}")
+        # 左侧留一段与窗口控制等宽的空白，让图标组相对整个窗口真正居中
+        lay.addSpacing(118)
+        lay.addStretch(1)
+
+        def icon_btn(icon_name: str, tip: str, slot, objname: str) -> QPushButton:
+            """与 Dock 完全一致的 38×38 纯图标按钮。"""
+            b = QPushButton(bar)
+            b.setObjectName(objname)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(tip)
+            b.setIcon(toolbar_icon(icon_name))
+            b.setIconSize(QSize(19, 19))
+            b.setFixedSize(38, 38)
+            b.setStyleSheet(
+                "QPushButton{background:transparent;border:none;border-radius:13px;}"
+                "QPushButton:hover{background:#f5f0e8;}"
+            )
             b.clicked.connect(slot)
+            return b
+
+        # 顺序：复制 / 保存 / 钉在桌面 / 取字 / 图像变换▾ / 缩放▾
+        self._top_buttons: dict[str, QPushButton] = {}
+        specs = (
+            ("copy", "复制", "复制到剪贴板 (Ctrl+Enter)", "复制",
+             lambda _=False: self.copy_requested.emit(self.canvas.compose())),
+            ("save", "保存", "另存为文件 (Ctrl+S)", "保存",
+             lambda _=False: self.save_requested.emit(self.canvas.compose())),
+            ("pin", "钉在桌面", "钉在桌面：把当前截图贴成可移动的浮窗", "钉在桌面",
+             lambda _=False: self.pin_requested.emit(self.canvas.compose())),
+            ("ocr", "取字", "识别选区文字 (OCR)", "取字",
+             lambda _=False: self.ocr_requested.emit(self.canvas.base.copy())),
+        )
+        for key, _label, tip, icon_name, slot in specs:
+            b = icon_btn(icon_name, tip, slot, f"top_{key}")
             lay.addWidget(b)
             self._top_buttons[key] = b
 
-        # 图像变换：四个动作收进一个下拉按钮
-        self.btn_transform = PillButton(t("图像变换") + "  ▾", None, "plain", bar, height=30)
-        self.btn_transform.setObjectName("topTransform")
-        self.btn_transform.clicked.connect(lambda _=False: self._show_transform_menu())
+        # 图像变换：图标自带下拉小三角，四个动作收进一个菜单
+        self.btn_transform = icon_btn(
+            "变换", t("图像变换"), lambda _=False: self._show_transform_menu(),
+            "topTransform",
+        )
         lay.addWidget(self.btn_transform)
 
-        # 缩放：放大 / 缩小 / 1:1 / 适应窗口合并进一个下拉按钮
-        self.zoom_pill = QPushButton("", bar)
-        self.zoom_pill.setObjectName("zoomPill")
-        self.zoom_pill.setCursor(Qt.PointingHandCursor)
-        self.zoom_pill.setFocusPolicy(Qt.NoFocus)
-        self.zoom_pill.setFixedHeight(30)
-        self.zoom_pill.setStyleSheet(
-            f"QPushButton{{background:rgba(251,250,247,0.96);border:1px solid {LINE};"
-            f"border-radius:15px;padding:0 14px;color:{INK2};font-size:12px;{FONT_QSS}}}"
-            f"QPushButton:hover{{background:#ffffff;}}"
+        # 缩放：图标自带下拉小三角，放缩四项合并进一个菜单
+        self.zoom_pill = icon_btn(
+            "缩放", "", lambda _=False: self._show_view_menu(), "zoomPill",
         )
-        self.zoom_pill.clicked.connect(lambda _=False: self._show_view_menu())
         lay.addWidget(self.zoom_pill)
 
         lay.addStretch(1)
-
-        self.btn_save = PillButton(t("保存"), "save", "plain", bar, height=30)
-        self.btn_save.setObjectName("topSave")
-        self.btn_save.clicked.connect(
-            lambda _=False: self.save_requested.emit(self.canvas.compose())
-        )
-        lay.addWidget(self.btn_save)
 
         # v39：标准窗口控制——最小化 / 最大化(还原) / 关闭
         self.btn_min = PillButton("—", None, "plain", bar, height=30)
@@ -1639,12 +1653,16 @@ class EditorWindow(QMainWindow):
         self.btn_menu = QPushButton(bar)
         self.btn_menu.setVisible(False)
 
-        self.btn_close = PillButton("✕", "close", "plain", bar, height=30)
+        # v40：关闭按钮只留一个 X——此前文字 "✕" + close 图标（也是 X）叠出两个。
+        self.btn_close = PillButton("✕", None, "plain", bar, height=30)
         self.btn_close.setObjectName("winClose")
         self.btn_close.setFixedWidth(38)
         self.btn_close.setToolTip(t("关闭"))
         self.btn_close.clicked.connect(lambda _=False: self.closed.emit())
         lay.addWidget(self.btn_close)
+
+        # btn_save 兼容引用（现在就是顶部「保存」图标按钮）
+        self.btn_save = self._top_buttons["save"]
 
     def resizeEvent(self, ev) -> None:  # noqa: N802
         super().resizeEvent(ev)
@@ -1830,29 +1848,24 @@ class EditorWindow(QMainWindow):
         ):
             for i, text_key in enumerate(keys):
                 self._actions[f"{prefix}{i}"].setText(t(text_key))
-        for key, label_key in zip(("copy", "saveas", "pin", "ocr"),
-                                   ("复制", "另存为…", "钉在桌面", "取字")):
+        # v40：顶部是纯图标按钮，语言切换只更新提示，不再改文字
+        for key, label_key in zip(("copy", "save", "pin", "ocr"),
+                                   ("复制", "保存", "钉在桌面", "取字")):
             b = getattr(self, "_top_buttons", {}).get(key)
             if b is not None:
-                b.setText(t(label_key))
-                b._restyle()
-        self.btn_transform.setText(t("图像变换") + "  ▾")
-        self.btn_save.setText(t("保存"))
-        self.btn_save._restyle()
+                b.setToolTip(t(label_key))
+        self.btn_transform.setToolTip(t("图像变换"))
         self.btn_min.setToolTip(t("最小化"))
         self.btn_max.setToolTip(
             t("还原") if self.isMaximized() else t("最大化")
         )
-        self.btn_close.setText("✕")
         self.btn_close.setToolTip(t("关闭"))
-        self.btn_close._restyle()
         self._show_zoom(self.canvas.view_scale)
 
     def _show_zoom(self, scale: float) -> None:
         text = t("缩放 {pct}%", pct=int(round(scale * 100)))
-        self.zoom_pill.setText(text + "  ▾")   # 明确提示这是个下拉按钮
-        self.zoom_pill.adjustSize()
-        # 比例显示在顶部胶囊里，状态栏只用来存文本（自测读 currentMessage）
+        # v40：图标按钮不占文字位置，当前比例放到悬浮提示里
+        self.zoom_pill.setToolTip(text)
         self.statusBar().showMessage(text)
         self.statusBar().hide()
 

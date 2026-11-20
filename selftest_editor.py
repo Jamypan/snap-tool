@@ -4556,8 +4556,8 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v39", "关闭截图编辑与截屏助手两个窗口",
-             "合计 250 项", "合计 360 项", "dist/v16", "dist/v39")
+    marks = ("v27", "v40", "关闭截图编辑与截屏助手两个窗口",
+             "合计 250 项", "合计 368 项", "dist/v16", "dist/v40")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
     lang_marks = ("command panel", "コマンドパネル", "명령 패널",
@@ -6122,7 +6122,8 @@ def test_v38_layout_redesign() -> None:
     has_window = all(hasattr(ed, k) for k in ("btn_min", "btn_max", "btn_close"))
     ok_aj15 = (
         not ed.btn_menu.isVisible()
-        and {"copy", "saveas", "pin", "ocr"} <= top_keys
+        and {"copy", "save", "pin", "ocr"} <= top_keys
+        and "saveas" not in top_keys          # v40：另存为已与保存合并
         and ed.btn_transform.objectName() == "topTransform"
         and ed.zoom_pill.objectName() == "zoomPill"
         and gone and has_view and has_window
@@ -6224,7 +6225,7 @@ def test_v39_menu_buttons_and_panel_window() -> None:
     top_keys = set(ed._top_buttons)
     ok_ak4 = (
         not ed.btn_menu.isVisible()
-        and {"copy", "saveas", "pin", "ocr"} <= top_keys
+        and {"copy", "save", "pin", "ocr"} <= top_keys
         and ed.btn_transform.objectName() == "topTransform"
         and "def _build_hamburger" in src_ed   # 兼容占位仍在，但界面无 ☰
     )
@@ -6240,7 +6241,9 @@ def test_v39_menu_buttons_and_panel_window() -> None:
     ok_ak5 = (
         gone and len(view_acts) == 4 and len(tr_acts) == 4
         and all(a.text() and not a.shortcut().isEmpty() for a in view_acts)
-        and "▾" in ed.zoom_pill.text() and "▾" in ed.btn_transform.text()
+        and not ed.zoom_pill.text() and not ed.btn_transform.text()
+        and not ed.zoom_pill.icon().isNull()
+        and not ed.btn_transform.icon().isNull()
     )
     record("AK5 精简菜单 + 放缩/变换下拉", ok_ak5,
            f"gone={gone} view={len(view_acts)} transform={len(tr_acts)}")
@@ -6277,6 +6280,139 @@ def test_v39_menu_buttons_and_panel_window() -> None:
            f"angle={sp._angle_box.isVisible()} cursor={cur.shape()}")
 
     for w in (ed, mw):
+        w.hide()
+        w.deleteLater()
+    app.processEvents()
+    tmp.cleanup()
+
+
+def test_v40_icon_bar_round_text_and_table_copy() -> None:
+    """Stage AL：v40 顶部纯图标按钮 / 单 X / 文字圆角 / OCR 表格 TSV。"""
+    import sys
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtWidgets import QApplication
+
+    from hotkeys import Hotkey
+    from snap_editor import EditorWindow
+    from snapeditor import (
+        TEXT_BG_RADIUS, Shape, _ocr_copy_text, _ocr_table_layout,
+        draw_shape,
+    )
+    from snapui import MainWindow, make_icon
+
+    print("\n--- Stage AL: v40 四项界面/功能调整 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    tmp = TemporaryDirectory(prefix="snaptool-al-")
+    src_ed = Path("snap_editor.py").read_text(encoding="utf-8")
+    src_sd = Path("snapeditor.py").read_text(encoding="utf-8")
+
+    img = QImage(500, 320, QImage.Format_RGB32)
+    img.fill(QColor("#ffffff"))
+    ed = EditorWindow(img, [], None)
+    ed.show()
+    app.processEvents()
+
+    # AL1 顶部按钮与 Dock 同款：38×38 纯图标、无文字、居中靠 stretch
+    keys = set(ed._top_buttons)
+    ok_al1 = (
+        keys == {"copy", "save", "pin", "ocr"}
+        and all(not b.text() and not b.icon().isNull()
+                and b.width() == 38 and b.height() == 38
+                for b in ed._top_buttons.values())
+        and not ed.btn_transform.text() and not ed.zoom_pill.text()
+        and not ed.btn_transform.icon().isNull()
+        and not ed.zoom_pill.icon().isNull()
+        and "saveas" not in src_ed.split("def _build_topbar")[1].split("def resizeEvent")[0]
+    )
+    record("AL1 顶部按钮=纯图标 Dock 风格（另存为已移除）", ok_al1,
+           f"keys={sorted(keys)}")
+
+    # AL1b 图标真的有内容（不是空 QIcon —— 名称拼错时 isNull 仍为 False）
+    def _icon_ink(btn) -> int:
+        pm = btn.grab().toImage()
+        return sum(1 for yy in range(pm.height()) for xx in range(pm.width())
+                   if pm.pixelColor(xx, yy).alpha() > 0
+                   and pm.pixelColor(xx, yy).red() < 200)
+
+    inks = {k: _icon_ink(b) for k, b in ed._top_buttons.items()}
+    ok_al1b = all(v >= 60 for v in inks.values())
+    record("AL1b 顶部每个图标都有可见笔画", ok_al1b, f"ink={inks}")
+
+    # AL2 关闭按钮只有一个 X（文字 ✕，不再叠加 close 图标）
+    ok_al2 = (
+        ed.btn_close.text() == "✕"
+        and ed.btn_close.icon().isNull()
+        and 'PillButton("✕", None' in src_ed
+    )
+    record("AL2 关闭按钮只有一个 X", ok_al2,
+           f"text={ed.btn_close.text()!r} iconNull={ed.btn_close.icon().isNull()}")
+
+    # AL3 文字标注背景 / 边框圆角（两处 drawRoundedRect 都用 TEXT_BG_RADIUS）
+    body = src_sd.split("if not box.isNull() and (want_bg or want_border):", 1)[1].split("if rotated_text:", 1)[0]
+    ok_al3 = (
+        TEXT_BG_RADIUS >= 8
+        and body.count(f"drawRoundedRect(box, TEXT_BG_RADIUS, TEXT_BG_RADIUS)") == 2
+        and "drawRoundedRect(box, 3, 3)" not in src_sd
+    )
+    record("AL3 文字背景与边框加大圆角", ok_al3,
+           f"radius={TEXT_BG_RADIUS} hits={body.count('drawRoundedRect(box, TEXT_BG_RADIUS, TEXT_BG_RADIUS)')}")
+
+    # AL4 OCR 表格 → TSV：两行两列，Tab 分列、换行分行
+    table_lines = [
+        {"text": "姓名", "box": [10, 10, 60, 30]},
+        {"text": "年龄", "box": [110, 10, 160, 30]},
+        {"text": "张三", "box": [10, 40, 60, 60]},
+        {"text": "18", "box": [110, 40, 160, 60]},
+    ]
+    layout = _ocr_table_layout(table_lines)
+    tsv = _ocr_copy_text(table_lines)
+    ok_al4 = (
+        layout is not None
+        and tsv == "姓名\t年龄\n张三\t18"
+    )
+    record("AL4 OCR 表格复制为 TSV", ok_al4, f"tsv={tsv!r}")
+
+    # AL5 非表格（每行一格）仍按阅读顺序、不出现 Tab
+    plain_lines = [
+        {"text": "第一行文字", "box": [10, 10, 120, 30]},
+        {"text": "第二行文字", "box": [10, 40, 120, 60]},
+    ]
+    plain = _ocr_copy_text(plain_lines)
+    ok_al5 = plain == "第一行文字\n第二行文字" and "\t" not in plain
+    record("AL5 普通文字不误判为表格", ok_al5, f"plain={plain!r}")
+
+    # AL6 表格选区复制：把选中块按 (行,列) 填回网格，未选留空
+    layer = ed.canvas.ocr_layer
+    layer.set_lines(table_lines, __import__("PySide6.QtCore", fromlist=["QRect"]).QRect(0, 0, 200, 80), 1.0, "test")
+    app.processEvents()
+    assert len(layer._blocks) == 4
+    # 选中「张三」整块 + 「18」整块
+    for e in (layer._blocks[2], layer._blocks[3]):
+        cur = e.textCursor()
+        cur.select(__import__("PySide6.QtGui", fromlist=["QTextCursor"]).QTextCursor.Document)
+        e.setTextCursor(cur)
+        from PySide6.QtWidgets import QTextEdit
+        sel = __import__("PySide6.QtWidgets", fromlist=["QTextEdit"]).QTextEdit.ExtraSelection()
+        sel.cursor = cur
+        e.setExtraSelections([sel])
+    sel_text = layer._selection_text()
+    ok_al6 = sel_text == "\t\n张三\t18"
+    record("AL6 表格选区复制保持列对齐", ok_al6, f"sel={sel_text!r}")
+
+    # AL7 顶部图标按钮尺寸与 Dock 一致（38×38、icon 19×19）
+    dock = ed.canvas.toolbar
+    dock_any = dock._buttons["select"]
+    ok_al7 = (
+        dock_any.width() == 38 and dock_any.height() == 38
+        and ed._top_buttons["copy"].iconSize().width() == dock_any.iconSize().width()
+    )
+    record("AL7 顶部图标与 Dock 尺寸一致", ok_al7,
+           f"top={ed._top_buttons['copy'].iconSize().width()} dock={dock_any.iconSize().width()}")
+
+    for w in (ed,):
         w.hide()
         w.deleteLater()
     app.processEvents()
@@ -6330,6 +6466,7 @@ if __name__ == "__main__":
     test_v37_pen_arrow_joint()
     test_v38_layout_redesign()
     test_v39_menu_buttons_and_panel_window()
+    test_v40_icon_bar_round_text_and_table_copy()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

@@ -87,6 +87,7 @@ ROTATABLE_KINDS = ("rect", "ellipse", "text")
 ROTATE_HANDLE_DIST = 26      # 旋转柄离顶边的距离（图像/逻辑坐标）
 ROTATE_HANDLE_R = 6          # 旋转柄绘制半径（屏幕像素）
 ROTATE_HANDLE_HIT = 12       # 旋转柄命中半径（屏幕像素）
+TEXT_BG_RADIUS = 9           # 文字标注背景 / 边框的圆角半径（v40）
 
 _ROTATE_CURSOR = None
 
@@ -524,6 +525,17 @@ def _draw_mirror_icon(p: QPainter) -> None:
         )
 
 
+def _draw_drop_caret(p: QPainter) -> None:
+    """图标右下角的下拉小三角：提示按钮点开会弹出菜单。"""
+    p.save()
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor(_ICON_INK)))
+    p.drawPolygon(QPolygonF([
+        QPointF(18, 20), QPointF(24, 20), QPointF(21, 23.5),
+    ]))
+    p.restore()
+
+
 def _draw_icon(name: str, p: QPainter) -> None:
     p.setBrush(Qt.NoBrush)
     p.setPen(_icon_pen(2))
@@ -646,6 +658,19 @@ def _draw_icon(name: str, p: QPainter) -> None:
     elif name == "✕":
         p.drawLine(7, 7, 19, 19)
         p.drawLine(19, 7, 7, 19)
+    elif name == "变换":
+        # 方框 + 环绕弧箭头：整图旋转 / 镜像的入口
+        p.drawRect(QRectF(6, 6, 11, 11))
+        _arc_arrow(p, S / 2 - 1, S / 2 - 1, 9.5, 300, 285)
+        _draw_drop_caret(p)
+    elif name == "缩放":
+        # 放大镜：圆形镜片 + 手柄（放缩下拉按钮的图案）
+        p.drawEllipse(QRectF(3.5, 3.5, 12, 12))
+        p.drawLine(13.5, 13.5, 20, 20)
+        p.setPen(_icon_pen(1.5))
+        p.drawLine(9.5, 6.5, 9.5, 12.5)
+        p.drawLine(6.5, 9.5, 12.5, 9.5)
+        _draw_drop_caret(p)
 
 
 _ICONS: dict[tuple[str, str, str], QIcon] = {}
@@ -1193,7 +1218,7 @@ def _draw_shape_raw(p: QPainter, s: Shape, base_image: QImage, dpr: float,
             if want_bg:
                 p.setPen(Qt.NoPen)
                 p.setBrush(QBrush(s.bg_color))
-                p.drawRoundedRect(box, 3, 3)
+                p.drawRoundedRect(box, TEXT_BG_RADIUS, TEXT_BG_RADIUS)
             if want_border:
                 bpen = QPen(bc)
                 bpen.setWidth(max(1, int(getattr(s, "bg_border_width", 2))))
@@ -1202,7 +1227,7 @@ def _draw_shape_raw(p: QPainter, s: Shape, base_image: QImage, dpr: float,
                     getattr(s, "bg_border_style", "solid"), Qt.SolidLine))
                 p.setPen(bpen)
                 p.setBrush(Qt.NoBrush)
-                p.drawRoundedRect(box, 3, 3)
+                p.drawRoundedRect(box, TEXT_BG_RADIUS, TEXT_BG_RADIUS)
         if rotated_text:
             path = QPainterPath()
             path.addText(QPointF(s.pos), font, s.text)
@@ -2111,6 +2136,71 @@ def _reading_order(lines: list[dict]) -> list[str]:
     return out + [t for t in no_box if t]
 
 
+# ------------------------------------------------------------------ 表格取字
+def _group_ocr_rows(lines: list[dict]) -> list[list[dict]]:
+    """按 y 坐标把识别框聚成行，行内按 x 从左到右（表格布局的公共步骤）。"""
+    items = [d for d in lines if d.get("box") and str(d.get("text", ""))]
+    items = sorted(items, key=lambda d: (d["box"][1], d["box"][0]))
+    rows: list[dict] = []
+    for d in items:
+        x1, y1, x2, y2 = d["box"]
+        cy = (y1 + y2) / 2.0
+        tol = max(6.0, (y2 - y1) * 0.6)
+        for row in rows:
+            if abs(row["cy"] - cy) <= tol:
+                row["items"].append(d)
+                n = len(row["items"])
+                row["cy"] = (row["cy"] * (n - 1) + cy) / n
+                break
+        else:
+            rows.append({"cy": cy, "items": [d]})
+    return [sorted(r["items"], key=lambda d: d["box"][0]) for r in rows]
+
+
+def _ocr_table_layout(lines: list[dict]) -> tuple[list[list[str]], dict] | None:
+    """判断识别结果是否为表格，返回 (TSV 网格, {单元格文本id:(行,列)})。
+
+    判定条件：至少两行、至少两行有两格以上、单元格左边界能聚成两列以上。
+    这样普通多段落文字（每行一格）不会被误判成表格。
+    """
+    rows = _group_ocr_rows(lines)
+    if len(rows) < 2 or len([r for r in rows if len(r) >= 2]) < 2:
+        return None
+    xs = sorted(d["box"][0] for r in rows for d in r)
+    widths = [d["box"][2] - d["box"][0] for r in rows for d in r]
+    med_w = sorted(widths)[len(widths) // 2] if widths else 20.0
+    tol = max(14.0, med_w * 0.6)
+    cols: list[list[float]] = []
+    for x in xs:
+        if not cols or x - sum(cols[-1]) / len(cols[-1]) > tol:
+            cols.append([x])
+        else:
+            cols[-1].append(x)
+    if len(cols) < 2:
+        return None
+    centers = [sum(g) / len(g) for g in cols]
+    grid: list[list[str]] = []
+    pos: dict[int, tuple[int, int]] = {}
+    for ri, row in enumerate(rows):
+        cells = [""] * len(centers)
+        for d in row:
+            ci = min(range(len(centers)), key=lambda i: abs(centers[i] - d["box"][0]))
+            txt = str(d.get("text", ""))
+            cells[ci] = (cells[ci] + " " + txt).strip() if cells[ci] else txt
+            pos[id(d)] = (ri, ci)
+        grid.append(cells)
+    return grid, pos
+
+
+def _ocr_copy_text(lines: list[dict]) -> str:
+    """OCR 结果 → 可复制文本：表格用 Tab 分列 / 换行分行，可直接粘进电子表格。"""
+    layout = _ocr_table_layout(lines)
+    if layout:
+        grid, _ = layout
+        return "\n".join("\t".join(cells) for cells in grid)
+    return "\n".join(_reading_order(lines))
+
+
 # ---------------------------------------------------------------------------
 class OcrBar(QWidget):
     """逐行取字模式的窄工具条：放在选区外侧，不遮挡原文。"""
@@ -2220,6 +2310,7 @@ class OcrLayer(QWidget):
         self.bar.closed.connect(self.closed.emit)
 
         self._blocks: list[QPlainTextEdit] = []
+        self._block_lines: list[dict] = []   # 与 _blocks 一一对应的识别项（表格选区用）
         self._lines: list[dict] = []
         self._closing = False
         self._armed = False
@@ -2233,6 +2324,7 @@ class OcrLayer(QWidget):
             e.hide()
             e.deleteLater()
         self._blocks = []
+        self._block_lines = []
         self._anchor = None
         self._head = None
 
@@ -2285,6 +2377,7 @@ class OcrLayer(QWidget):
             e.setGeometry(gx, gy, w, h)
             e.show()
             self._blocks.append(e)
+            self._block_lines.append(item)
 
         self.bar.set_status(len(self._lines), backend)
 
@@ -2371,7 +2464,7 @@ class OcrLayer(QWidget):
         self.bar.feedback("请先用鼠标拖选文字（可跨行），或点「复制全部」")
 
     def copy_all(self) -> None:
-        self._copy("\n".join(_reading_order(self._lines)))
+        self._copy(_ocr_copy_text(self._lines))
 
     # ------------------------------------------------------- 跨行选择（v36）
     def _ordered_blocks(self) -> list:
@@ -2465,6 +2558,26 @@ class OcrLayer(QWidget):
             e.setExtraSelections([])
 
     def _selection_text(self) -> str:
+        # 表格：把选中的文字按原单元格位置填回网格，Tab 分列 / 换行分行，
+        # 直接粘进 Excel / WPS 能对上原来的行列。未选中的单元格保持空白。
+        layout = _ocr_table_layout(self._lines)
+        if layout:
+            grid, pos = layout
+            out = [["" for _ in row] for row in grid]
+            for e, item in zip(self._blocks, self._block_lines):
+                sels = e.extraSelections()
+                if not sels:
+                    continue
+                txt = sels[0].cursor.selectedText().replace("\u2029", "\n")
+                if not txt:
+                    continue
+                rc = pos.get(id(item))
+                if rc is not None:
+                    r, c = rc
+                    out[r][c] = (out[r][c] + " " + txt).strip() if out[r][c] else txt
+            if any(any(cell for cell in row) for row in out):
+                return "\n".join("\t".join(cells) for cells in out)
+        # 普通文本：按阅读顺序逐行拼接
         parts = []
         for e in self._ordered_blocks():
             sels = e.extraSelections()
@@ -3396,7 +3509,7 @@ class Overlay(QWidget):
         if not usable:
             # 后端没有位置信息（Windows OCR / Tesseract 兜底）时降级成整块
             # 文本面板，保证「可选取、可复制」不丢。
-            self.show_ocr_result("\n".join(_reading_order(lines)), backend)
+            self.show_ocr_result(_ocr_copy_text(lines), backend)
             return
 
         self._commit_text()
