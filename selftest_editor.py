@@ -447,13 +447,13 @@ def test_overlay() -> None:
         and ov2.toolbar._actions["确定"].isVisible()
         and ov2.toolbar._actions["✕"].isVisible()
         and ov2.toolbar._actions["复制"].isVisible()
-        and ov2.toolbar._actions["取字"].isVisible()
+        and not ov2.toolbar._actions["取字"].isVisible()   # v43：确认条去掉取字
         and ov2.toolbar._actions["钉在桌面"].isVisible()
         and not ov2.toolbar._actions["撤销"].isVisible()
         and not ov2.toolbar._actions["保存"].isVisible()
     )
     record(
-        "B2 确认模式只留操作条(复制/取字/钉图/取消/确定)",
+        "B2 确认模式只留操作条(确定/复制/钉图/取消)",
         ok_b2,
         f"tools_hidden={tools_hidden} 确定={ov2.toolbar._actions['确定'].isVisible()} "
         f"复制={ov2.toolbar._actions['复制'].isVisible()}",
@@ -479,20 +479,25 @@ def test_overlay() -> None:
     ov4._confirm_mode = True
     ov4.sel = QRect(50, 40, 60, 30)
 
-    # B4a 给出鼠标位置 → 条浮在鼠标右下方（near + 14），而不是选区角上
+    # B4a 给出鼠标位置 → v43「确定」按钮中心对准鼠标 x、整条浮在鼠标下方；
+    # 鼠标太靠左时贴边收缩（x 被夹到 0），y 仍为 near+14
     ov4._place_toolbar(near=QPoint(20, 20))
     g = ov4.toolbar.geometry()
+    conf_a = ov4.toolbar._actions["确定"]
+    left_a = ov4.toolbar.layout().getContentsMargins()[0]
+    conf_cx_a = g.x() + left_a + conf_a.sizeHint().width() / 2
     ok_b4a = (
-        g.x() == 34
+        g.x() == 0
         and g.y() == 34
+        and conf_cx_a >= 20                      # 贴边收缩后确定在鼠标右侧、可见
         and g.x() >= 0 and g.y() >= 0
         and (g.x() + g.width()) <= 800
         and (g.y() + g.height()) <= 600
     )
     record(
-        "B4a 确认条浮在鼠标位置(near)",
+        "B4a 确认条浮在鼠标下方(v43确定对准)",
         ok_b4a,
-        f"geom=({g.x()},{g.y()},{g.width()},{g.height()}) 期望x=34 y=34(near+14)",
+        f"geom=({g.x()},{g.y()},{g.width()},{g.height()}) 确定中心x={conf_cx_a:.0f} 期望条顶y=34",
     )
 
     # B4b 选区贴近底边 → 翻到选区上方，且不越界
@@ -510,22 +515,25 @@ def test_overlay() -> None:
         f"geom=({g2.x()},{g2.y()},{g2.width()},{g2.height()}) 选区top=500",
     )
 
-    # B4c 选择完成时 _apply_selection 记录鼠标位置，确认条浮在鼠标旁
+    # B4c 选择完成时 _apply_selection 记录鼠标位置，确认条「确定」中心对准鼠标
     ov4.sel = QRect(300, 200, 200, 150)
     ov4._apply_selection(QRect(300, 200, 200, 150), near=QPoint(340, 240))
     g3 = ov4.toolbar.geometry()
+    conf_c = ov4.toolbar._actions["确定"]
+    left_c = ov4.toolbar.layout().getContentsMargins()[0]
+    conf_cx_c = g3.x() + left_c + conf_c.sizeHint().width() / 2
     ok_b4c = (
         ov4._confirm_mode is True
         and ov4._confirm_pos == QPoint(340, 240)
-        and g3.x() == 354
-        and g3.y() == 254
+        and conf_cx_c == 340                     # 确定中心正好对准鼠标 x
+        and g3.y() == 254                        # 整条在鼠标下方 14px
         and (g3.x() + g3.width()) <= 800
         and (g3.y() + g3.height()) <= 600
     )
     record(
-        "B4c _apply_selection 记录鼠标位置并浮确认条",
+        "B4c _apply_selection 记录鼠标并把确定对准鼠标",
         ok_b4c,
-        f"geom=({g3.x()},{g3.y()},{g3.width()},{g3.height()}) anchor={ov4._confirm_pos} confirm={ov4._confirm_mode}",
+        f"geom=({g3.x()},{g3.y()},{g3.width()},{g3.height()}) 确定中心x={conf_cx_c:.0f} anchor={ov4._confirm_pos}",
     )
 
     # B4d 确认模式下再次调用 _place_toolbar()（模拟点击其他位置/移动选区）按钮位置不变
@@ -4367,7 +4375,7 @@ def test_v26_copy_button() -> None:
     import i18n_docs
     from snapeditor import Shape
 
-    # Z1 确认模式：复制按钮可见，且排在「确定 / ✕」最左侧
+    # Z1 确认模式（v43）：顺序「确定 / 复制 / 钉在桌面 / ✕取消」，取字已去掉
     base = QImage(400, 200, QImage.Format_RGB32)
     base.fill(QColor(30, 120, 220))
     ov = Overlay(base, dpr=2.0)
@@ -4385,12 +4393,11 @@ def test_v26_copy_button() -> None:
             if b is w:
                 order.append(k)
     ok_z1 = (
-        "复制" in order and "确定" in order and "✕" in order
-        and order.index("复制") < order.index("✕") < order.index("确定")
-        and order[-1] == "确定"
+        order == ["确定", "复制", "钉在桌面", "✕"]
+        and "取字" not in shown
         and all(k not in shown for k in ("撤销", "保存", "长截图"))
     )
-    record("Z1 确认模式复制在最左、确定在最右", ok_z1, f"order={order} shown={shown}")
+    record("Z1 确认模式顺序确定/复制/钉图/取消", ok_z1, f"order={order} shown={shown}")
     ov.toolbar.set_confirm_mode(False)
 
     # Z2/Z3 点复制：发原图（不含标注），不进编辑器
@@ -4557,9 +4564,9 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v40", "v41", "v42", "关闭截图编辑与截屏助手两个窗口",
-             "合计 250 项", "合计 368 项", "合计 375 项", "合计 381 项",
-             "dist/v16", "dist/v41", "dist/v42")
+    marks = ("v27", "v40", "v41", "v42", "v43", "关闭截图编辑与截屏助手两个窗口",
+             "合计 250 项", "合计 368 项", "合计 375 项", "合计 381 项", "合计 386 项",
+             "dist/v16", "dist/v41", "dist/v42", "dist/v43")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
     lang_marks = ("command panel", "コマンドパネル", "명령 패널",
@@ -6037,7 +6044,7 @@ def test_v38_layout_redesign() -> None:
     record("AJ9 遮罩模式条可就地切换三种模式", ok_aj9,
            f"visible={strip_visible} win={win_mode} full={full_mode} rect={back_rect}")
 
-    # AJ10 确认条顺序：复制 -> 取字 -> 钉图 -> X -> 确定，确定是带文字的深色主按钮
+    # AJ10 确认条顺序（v43）：确定 -> 复制 -> 钉图 -> X取消，取字去掉，确定是深色主按钮
     ov._apply_selection(QRect(120, 120, 560, 300), near=QPoint(200, 180))
     app.processEvents()
     lay = ov.toolbar._lay
@@ -6049,18 +6056,21 @@ def test_v38_layout_redesign() -> None:
                 order.append(k)
     conf = ov.toolbar._actions["确定"]
     ok_aj10 = (
-        order == ["复制", "取字", "钉在桌面", "✕", "确定"]
+        order == ["确定", "复制", "钉在桌面", "✕"]
+        and not ov.toolbar._actions["取字"].isVisible()
         and conf.text() == "确定"
         and conf.width() > conf.height()
         and conf.property("kind") == "primary"
     )
     record("AJ10 确认条顺序与深色主按钮", ok_aj10, f"order={order} w={conf.width()}")
 
-    # AJ11 确认条浮在鼠标位置（v42）：AJ10 传的 near=(200,180)，条应落在 (214,194) 附近
+    # AJ11 确认条「确定」中心对准鼠标（v43）：AJ10 传的 near=(200,180)
     tb = ov.toolbar.geometry()
-    ok_aj11 = tb.left() == 214 and tb.top() == 194
-    record("AJ11 确认条浮在鼠标位置", ok_aj11,
-           f"bar=({tb.left()},{tb.top()}) 期望(214,194)=near+14")
+    left_aj = ov.toolbar.layout().getContentsMargins()[0]
+    conf_cx = tb.left() + left_aj + conf.sizeHint().width() / 2
+    ok_aj11 = conf_cx == 200 and tb.top() == 194
+    record("AJ11 确定按钮对准鼠标", ok_aj11,
+           f"bar=({tb.left()},{tb.top()}) 确定中心x={conf_cx:.0f} 期望x=200 y=194")
 
     # AJ12 选区描边是暖橙色（不是旧的蓝色）
     shot = ov.grab().toImage()
@@ -6574,18 +6584,21 @@ def test_v42_confirm_at_cursor_and_top_dock() -> None:
     base = QImage(800, 600, QImage.Format_RGB32)
     base.fill(QColor("#ffffff"))
 
-    # AN1 选择结束时传入鼠标位置 near → 确认条浮在 near+14，锚点被记住
+    # AN1 选择结束时传入鼠标位置 near → v43「确定」中心对准鼠标 x、条在鼠标下方
     ov = Overlay(base, dpr=1.0)
     ov.resize(800, 600)
     ov._apply_selection(QRect(50, 40, 200, 150), near=QPoint(240, 180))
     g = ov.toolbar.geometry()
+    conf = ov.toolbar._actions["确定"]
+    left = ov.toolbar.layout().getContentsMargins()[0]
+    conf_cx = g.x() + left + conf.sizeHint().width() / 2
     ok_an1 = (
         ov._confirm_mode is True
         and ov._confirm_pos == QPoint(240, 180)
-        and g.x() == 254 and g.y() == 194
+        and conf_cx == 240 and g.y() == 194
     )
-    record("AN1 选择完成确认条浮在鼠标位置", ok_an1,
-           f"geom=({g.x()},{g.y()}) anchor={ov._confirm_pos}")
+    record("AN1 选择完成确定按钮对准鼠标", ok_an1,
+           f"geom=({g.x()},{g.y()}) 确定中心x={conf_cx:.0f} anchor={ov._confirm_pos}")
 
     # AN2 后续无参重定位不漂移（仍在鼠标锚点处）
     ov.sel = QRect(300, 300, 200, 150)   # 模拟选区被移动
@@ -6659,6 +6672,86 @@ def test_v42_confirm_at_cursor_and_top_dock() -> None:
     app.processEvents()
 
 
+def test_v43_confirm_order_and_ok_under_cursor() -> None:
+    """Stage AO：v43 确认条「确定/复制/钉在桌面/取消」+ 确定按钮对准鼠标。"""
+    import sys
+    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtWidgets import QApplication
+
+    from snapeditor import Overlay
+
+    print("\n--- Stage AO: v43 确认条顺序 / 确定对准鼠标 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    base = QImage(900, 600, QImage.Format_RGB32)
+    base.fill(QColor("#ffffff"))
+
+    ov = Overlay(base, dpr=1.0)
+    ov.resize(900, 600)
+    ov._apply_selection(QRect(150, 120, 500, 300), near=QPoint(430, 260))
+    app.processEvents()
+
+    # AO1 按钮顺序 = 确定/复制/钉在桌面/✕，取字不再出现
+    lay = ov.toolbar._lay
+    order = []
+    for i in range(lay.count()):
+        w = lay.itemAt(i).widget()
+        for k, b in ov.toolbar._actions.items():
+            if b is w:
+                order.append(k)
+    ok_ao1 = (
+        order == ["确定", "复制", "钉在桌面", "✕"]
+        and not ov.toolbar._actions["取字"].isVisible()
+    )
+    record("AO1 确认条顺序确定/复制/钉图/取消且无取字", ok_ao1,
+           f"order={order} 取字vis={ov.toolbar._actions['取字'].isVisible()}")
+
+    # AO2 「确定」是带文字的深色主按钮，且排在最左
+    conf = ov.toolbar._actions["确定"]
+    ok_ao2 = (
+        order[0] == "确定"
+        and conf.text() == "确定"
+        and conf.property("kind") == "primary"
+        and conf.width() > conf.height()
+    )
+    record("AO2 确定是带文字深色主按钮且排最左", ok_ao2,
+           f"first={order[0]} text={conf.text()!r} kind={conf.property('kind')}")
+
+    # AO3 确定按钮水平中心对准鼠标 x，整条在鼠标下方 14px
+    g = ov.toolbar.geometry()
+    left = ov.toolbar.layout().getContentsMargins()[0]
+    conf_cx = g.x() + left + conf.sizeHint().width() / 2
+    ok_ao3 = conf_cx == 430 and g.y() == 274
+    record("AO3 确定按钮中心对准鼠标且条在鼠标下方", ok_ao3,
+           f"bar=({g.x()},{g.y()}) 确定中心x={conf_cx:.0f} 期望(430,274)")
+
+    # AO4 再次无参重定位不漂移
+    ov.sel = QRect(400, 400, 200, 120)
+    ov._place_toolbar()
+    g2 = ov.toolbar.geometry()
+    ok_ao4 = (g2 == g)
+    record("AO4 确认条不随选区漂移", ok_ao4,
+           f"before=({g.x()},{g.y()}) after=({g2.x()},{g2.y()})")
+
+    # AO5 鼠标贴右下角 → 收缩可见、不翻到左上
+    ov2 = Overlay(base, dpr=1.0)
+    ov2.resize(900, 600)
+    ov2._apply_selection(QRect(700, 480, 180, 100), near=QPoint(895, 595))
+    g3 = ov2.toolbar.geometry()
+    ok_ao5 = (
+        0 <= g3.x() and 0 <= g3.y()
+        and g3.x() + g3.width() <= 900
+        and g3.y() + g3.height() <= 600
+        and g3.x() > 450 and g3.y() > 300
+    )
+    record("AO5 鼠标贴右下角时贴边收缩不镜像", ok_ao5,
+           f"geom=({g3.x()},{g3.y()},{g3.width()},{g3.height()})")
+
+    ov.hide(); ov.deleteLater()
+    ov2.hide(); ov2.deleteLater()
+    app.processEvents()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -6709,6 +6802,7 @@ if __name__ == "__main__":
     test_v40_icon_bar_round_text_and_table_copy()
     test_v41_top_style_dropdown_icons_and_wrapped_cells()
     test_v42_confirm_at_cursor_and_top_dock()
+    test_v43_confirm_order_and_ok_under_cursor()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

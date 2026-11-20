@@ -2743,7 +2743,7 @@ class Toolbar(QWidget):
 
     三个阶段（phase）决定显示哪些按钮：
       full    —— 截屏遮罩里的完整编辑态：全部工具 + 撤销 + 整图变换 + 动作
-      confirm —— 选区刚确定：「取字 / 复制 / 钉在桌面 / ✕ / 确定」
+      confirm —— 选区刚确定：「确定 / 复制 / 钉在桌面 / ✕取消」
       dock    —— 窗口编辑器底部 Dock：7 种工具 + 撤销 + 钉在桌面 + 复制
     """
 
@@ -2887,8 +2887,10 @@ class Toolbar(QWidget):
     def _apply_phase(self, phase: str) -> None:
         tools = [("t", "select")] + [("t", k) for k, _ in TOOLS]
         if phase == "confirm":
-            order = [("a", "复制"), ("a", "取字"), ("a", "钉在桌面"),
-                     ("s", "4"), ("a", "✕"), ("a", "确定")]
+            # v43：「确定 / 复制 / 钉在桌面 / 取消」——确定排最左便于浮在鼠标下直接点，
+            # 去掉取字（OCR 入口在主窗口与编辑器顶栏都有，确认条不再重复）。
+            order = [("a", "确定"), ("a", "复制"), ("a", "钉在桌面"),
+                     ("s", "4"), ("a", "✕")]
         elif phase == "dock":
             order = tools + [("s", "0"), ("a", "撤销")]
             # v41：钉在桌面 / 复制已上移到顶部图标栏，编辑器 Dock 不再重复；
@@ -2966,7 +2968,7 @@ class Toolbar(QWidget):
             self._lay.addWidget(w)
 
     def set_confirm_mode(self, on: bool) -> None:
-        """选择阶段（确认前）：只留「取字 / 复制 / 钉在桌面 / ✕ / 确定」。"""
+        """选择阶段（确认前）：只留「确定 / 复制 / 钉在桌面 / ✕取消」。"""
         self.set_phase("confirm" if on else self._phase)
 
     def set_confirm_tip(self, text_key: str) -> None:
@@ -4681,10 +4683,11 @@ class Overlay(QWidget):
     def _place_toolbar(self, near: QPoint | None = None) -> None:
         """放置「确定/取消」工具条。
 
-        - 确认模式（选择刚完成）：v42 起把按钮浮在鼠标附近——用选择结束
-          瞬间记下的 _confirm_pos（或本次传入的 near）作锚点，只做「贴边
-          收缩」保证整条按钮完整可见，不镜像翻转，也不会随后续鼠标漂移。
-          没有锚点时（如全屏/窗口截图未给出鼠标位置）退回选区外侧定位。
+        - 确认模式（选择刚完成）：v43 起把「确定」按钮的水平中心对准鼠标、
+          整条浮在鼠标正下方——用选择结束瞬间记下的 _confirm_pos（或本次
+          传入的 near）作锚点，只做「贴边收缩」保证整条完整可见，不镜像
+          翻转，也不会随后续鼠标漂移。没有锚点时（全屏/窗口截图未给出
+          鼠标位置）退回选区外侧定位。
         - 非确认模式（取字收起恢复等）：跟随选区下方。
         """
         if not self.sel:
@@ -4699,12 +4702,22 @@ class Overlay(QWidget):
             y = min(y, max(0, self.height() - tb.height()))
             return max(0, x), max(0, y)
 
-        # 确认模式：按钮浮在鼠标位置，方便用户框完就直接点「确定」
+        # 确认模式：「确定」按钮浮在鼠标正下方，方便用户框完就直接点
         if self._confirm_mode:
             anchor = self._confirm_pos if self._confirm_pos is not None else near
             if anchor is not None:
-                # 浮在鼠标右下方；贴边收缩，不随后续鼠标移动而漂移
-                x, y = clamp(anchor.x() + gap, anchor.y() + gap)
+                # 让「确定」按钮水平中心对准鼠标 x，整条落在鼠标下方 gap。
+                # 用 sizeHint + 左边距算偏移：切到 confirm 阶段后按钮几何可能
+                # 尚未随新布局刷新，直接读 conf_btn.x() 会拿到旧（最右）位置。
+                conf_btn = self.toolbar._actions.get("确定")
+                if conf_btn is not None:
+                    left = self.toolbar.layout().getContentsMargins()[0]
+                    btn_cx = left + conf_btn.sizeHint().width() / 2
+                else:
+                    btn_cx = 48          # 兜底：左边距 9 + 确定按钮半宽约 39
+                x = round(anchor.x() - btn_cx)
+                y = anchor.y() + gap
+                x, y = clamp(x, y)
             else:
                 # 无鼠标锚点（窗口/全屏截图）：退回选区下方，空间不足翻上方
                 x = self.sel.left()
