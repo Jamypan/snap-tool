@@ -1307,5 +1307,40 @@ _ROWS.update({
         "테두리 선 스타일", "Style de la bordure", "Rahmenlinienstil",
         "Estilo del borde",
     ),
+
+    # v39：主窗口 / 编辑器顶部按钮新增文案
+    "最小化": (
+        "最小化", "最小化", "Minimize", "最小化", "최소화",
+        "Réduire", "Minimieren", "Minimizar",
+    ),
+    "最大化": (
+        "最大化", "最大化", "Maximize", "最大化", "최대화",
+        "Agrandir", "Maximieren", "Maximizar",
+    ),
+    "还原": (
+        "还原", "還原", "Restore", "元に戻す", "복원",
+        "Restaurer", "Wiederherstellen", "Restaurar",
+    ),
+    "关于": (
+        "关于", "關於", "About", "概要", "정보",
+        "À propos", "Info", "Acerca de",
+    ),
+    "版本信息 · 联系邮箱": (
+        "版本信息 · 联系邮箱", "版本資訊 · 聯絡信箱", "Version info · contact email",
+        "バージョン情報 · 連絡先メール", "버전 정보 · 문의 이메일",
+        "Informations de version · e-mail de contact",
+        "Versionsinfo · Kontakt-E-Mail", "Información de versión · correo de contacto",
+    ),
+    "托盘常驻 · 关闭窗口不会退出程序": (
+        "托盘常驻 · 关闭窗口不会退出程序",
+        "托盤常駐 · 關閉視窗不會結束程式",
+        "Stays in tray · closing the window won't quit",
+        "トレイ常駐 · ウィンドウを閉じても終了しません",
+        "트레이 상주 · 창을 닫아도 종료되지 않습니다",
+        "Resident dans la barre · fermer la fenêtre ne quitte pas l'application",
+        "Im Infobereich · Fenster schließen beendet das Programm nicht",
+        "Permanece en la bandeja · cerrar la ventana no sale del programa",
+    ),
+
 })
 

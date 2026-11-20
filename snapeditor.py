@@ -15,6 +15,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QSize, QT
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QFont,
     QFontMetrics,
     QIcon,
@@ -86,6 +87,40 @@ ROTATABLE_KINDS = ("rect", "ellipse", "text")
 ROTATE_HANDLE_DIST = 26      # 旋转柄离顶边的距离（图像/逻辑坐标）
 ROTATE_HANDLE_R = 6          # 旋转柄绘制半径（屏幕像素）
 ROTATE_HANDLE_HIT = 12       # 旋转柄命中半径（屏幕像素）
+
+_ROTATE_CURSOR = None
+
+
+def rotate_cursor() -> QCursor:
+    """旋转柄悬停用的环形箭头光标：一眼看出这里可以转。"""
+    global _ROTATE_CURSOR
+    if _ROTATE_CURSOR is None:
+        pm = QPixmap(32, 32)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor("#1c1c1e"), 2.0)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(QRectF(6, 6, 20, 20), -70 * 16, 300 * 16)
+        # 弧末端的箭头（约 230°，切线朝右上）
+        a = math.radians(230)
+        ex, ey = 16 + 10 * math.cos(a), 16 + 10 * math.sin(a)
+        t = math.radians(230 + 90)
+        tx, ty = math.cos(t), math.sin(t)
+        nx, ny = -ty, tx
+        p.setBrush(QBrush(QColor("#1c1c1e")))
+        p.setPen(Qt.NoPen)
+        p.drawPolygon(QPolygonF([
+            QPointF(ex + tx * 6, ey + ty * 6),
+            QPointF(ex - tx * 2 + nx * 4, ey - ty * 2 + ny * 4),
+            QPointF(ex - tx * 2 - nx * 4, ey - ty * 2 - ny * 4),
+        ]))
+        p.end()
+        _ROTATE_CURSOR = QCursor(pm, 16, 16)
+    return _ROTATE_CURSOR
+
 ROTATE_SNAP_STEP = 15        # 按住 Shift 拖动时吸附的角度步长
 
 
@@ -1370,9 +1405,10 @@ class StylePanel(QWidget):
         self._bold_check.toggled.connect(lambda on: self._emit("bold", on))
         root.addWidget(self._bold_check)
 
-        # --- 旋转角度（矩形 / 椭圆 / 文字）---
+        # v39：旋转角度不再出现在样式面板（旋转柄可以直接拖）。
+        # 保留控件对象供旧接口兼容，但不加进布局、永远隐藏。
         self._angle_label = QLabel(t("旋转角度"))
-        root.addWidget(self._angle_label)
+        self._angle_label.setVisible(False)
         self._angle_box = QWidget()
         angle_row = QHBoxLayout(self._angle_box)
         angle_row.setContentsMargins(0, 0, 0, 0)
@@ -1387,7 +1423,7 @@ class StylePanel(QWidget):
         self._angle_value.setObjectName("angleValue")
         self._angle_value.setFixedWidth(38)
         angle_row.addWidget(self._angle_value)
-        root.addWidget(self._angle_box)
+        self._angle_box.setVisible(False)
 
         # --- 文字背景色（文字）---
         # 与封闭图形的「填充色」用同一套交互：预设色块 + 独立透明度滑块，
@@ -3721,8 +3757,8 @@ class Overlay(QWidget):
         self._rotate_base_angle = shape_angle(s)
         self._rotate_start_pos = QPoint(pos)
         self._rotate_center = shape_rotate_center(s)
-        self.setCursor(Qt.CrossCursor)
-        self._cursor_cache = Qt.CrossCursor
+        self.setCursor(rotate_cursor())
+        self._cursor_cache = rotate_cursor()
 
     def _apply_shape_rotate(self, pos: QPoint, snap: bool = False) -> None:
         s = self._rotating_shape
@@ -4080,7 +4116,7 @@ class Overlay(QWidget):
             if self.sel.contains(pos) and self._hit_arrow_endpoint(pos):
                 cur = Qt.SizeAllCursor          # 箭头端点：提示可拉伸
             elif self._hit_rotate_handle(pos):
-                cur = Qt.CrossCursor            # 旋转柄：提示可绕中心旋转
+                cur = rotate_cursor()           # 旋转柄：环形箭头提示可旋转
             elif corner:
                 cur = shape_corner_cursor(corner)   # 形状四角：斜向缩放
             else:

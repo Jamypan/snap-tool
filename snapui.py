@@ -50,6 +50,7 @@ from ui_theme import (
     Card,
     IconButton,
     PanelRow,
+    PillButton,
     apply_shadow,
     group_title,
     paint_icon,
@@ -128,10 +129,9 @@ code { background:#f3f4f6; padding:1px 4px; }
 </style></head><body>
 
 <h2>1. 启动与常驻</h2>
-<p>双击 <code>run-silent.bat</code> 启动后，屏幕<b>底部居中会浮出一条迷你悬浮条</b>：左边是橙色相机图标，中间依次是「框选 / 窗口 / 全屏」三个模式按钮（当前模式为深色底加橙点）、「滚动长截图」与「贴图」，右边是当前热键提示和「⋯」。
-<b>关掉悬浮条只会收回托盘，程序不会退出</b>；要彻底退出请点「⋯ → 帮助 → 关于与退出」或托盘右键「退出」。
-按住悬浮条空白处可把整条拖到屏幕任意位置，托盘右键「显示主窗口」可随时叫回来，左键单击托盘图标则直接截图。</p>
-<p>点「⋯」弹出<b>双列命令面板</b>：左列「截图 / 编辑与输出」，右列「设置 / 帮助」，共 15 行。每行左侧图标、中间标题与说明、右侧当前取值或快捷键——<b>平滑度、默认模式、界面语言、热键都能在面板里就地切换</b>，点一下循环到下一个取值，改完立即生效并自动记住。点面板外任意位置即收起。</p>
+<p>双击 <code>run-silent.bat</code> 启动后，屏幕中央会显示<b>两列命令面板</b>，这就是程序主窗口：左列「截图 / 编辑与输出」，右列「设置 / 帮助」，共 15 行。每行左侧图标、中间标题与说明、右侧当前取值或快捷键——<b>平滑度、默认模式、界面语言、热键都能就地切换</b>，点一下循环到下一个取值，改完立即生效并自动记住。
+<b>关掉窗口只会收回托盘，程序不会退出</b>；要彻底退出请点面板<b>右上角的「退出」按钮</b>或托盘右键「退出」。托盘右键「显示主窗口」可随时叫回来，左键单击托盘图标则直接截图。</p>
+<p>「关于」保留在右列「帮助」组最后一行，点它查看版本信息与联系邮箱。程序不再有常驻桌面的悬浮条，也不会一直压在其它窗口上面。</p>
 
 <h2>2. 三种截图模式</h2>
 <table>
@@ -146,8 +146,8 @@ code { background:#f3f4f6; padding:1px 4px; }
 另有不进编辑器的独立「滚动长截图」命令，见第 9 节。</p>
 
 <h2>3. 全局热键</h2>
-<p>默认 <b>Ctrl + Shift + A</b> 唤起截图，使用的模式由命令面板里的「默认模式」决定（会记住，重启后仍有效，悬浮条上用深色底加橙点标出当前模式）。
-点「⋯」在「设置 → 设置热键…」或托盘右键「设置热键…」可改成任意组合：打开后直接按键录制，也可以勾选修饰键 + 选主键。
+<p>默认 <b>Ctrl + Shift + A</b> 唤起截图，使用的模式由命令面板里的「默认模式」决定（会记住，重启后仍有效，面板「截图」组里会用浅橙底高亮当前模式）。
+点主窗口「截图热键」一行或托盘右键「设置热键…」可改成任意组合：打开后直接按键录制，也可以勾选修饰键 + 选主键。
 面板里的「贴图热键」同理，保存时立即生效，无需重启。</p>
 <p class="hint">若提示「无法注册」，说明该组合已被其它程序占用或属于系统保留组合，换一个即可，原设置不受影响。
 至少需要 Ctrl / Alt / Shift / Win 中的一个修饰键。热键配置保存在 <code>%APPDATA%\\SnapTool\\settings.json</code>。</p>
@@ -162,17 +162,17 @@ code { background:#f3f4f6; padding:1px 4px; }
 <tr><td>文字背景透明度</td><td>选中文字后启用「<b>文字背景色</b>」，下面多出「<b>背景透明度</b>」滑块（0~100%），操作方式与封闭图形的「填充透明度」一样，但两者的颜色和透明度<b>各自独立记忆</b>，改一个不影响另一个</td></tr>
 <tr><td>文字背景边框</td><td>选中文字后勾选「<b>启用边框</b>」，可给文字的圆角背景框描边：<b>边框颜色</b>可选预设色或「<b>∅ 透明</b>」（透明等于不描边），并有独立的<b>边框线宽</b>与<b>边框线型</b>（实线 / 虚线 / 点线）。背景与边框可分别开关，边框也能单独显示而不填背景；旋转文字时背景框与边框一起转，Ctrl+Z 可恢复</td></tr>
 <tr><td>文字输入位置</td><td>用文字工具点击后输入，按回车提交时文字会<b>留在输入时看到的位置</b>，不再往上跳一个字高；画布放大 / 缩小、高 DPI 屏幕下同样对齐。双击已有文字改内容时，输入框会盖在原字上，改完坐标不变（旋转过的文字也一样）</td></tr>
-<tr><td>视图放缩</td><td><b>Ctrl + 滚轮</b>以光标为锚点放大 / 缩小，或菜单「视图(&V)」：放大（Ctrl+=）、缩小（Ctrl+-）、实际大小 1:1（Ctrl+1）、适应窗口（Ctrl+0）；放大后<b>按住鼠标中键拖动</b>可平移画布。状态栏显示当前比例，导出始终是原图全分辨率</td></tr>
+<tr><td>视图放缩</td><td><b>Ctrl + 滚轮</b>以光标为锚点放大 / 缩小，或点顶部<b>「缩放 ▾」下拉按钮</b>：放大（Ctrl+=）、缩小（Ctrl+-）、实际大小 1:1（Ctrl+1）、适应窗口（Ctrl+0）；放大后<b>按住鼠标中键拖动</b>可平移画布。导出始终是原图全分辨率</td></tr>
 <tr><td>箭头</td><td>两端有圆形控制柄，拖动可改长度与方向（可拖过另一端反向）</td></tr>
 <tr><td>矩形 / 椭圆四角</td><td>选中后外接矩形的<b>四个角</b>出现圆形控制柄，拖动任一角即可改变宽高与形状：对角保持固定、可拖过对角翻转、宽高有最小值保护；截图遮罩与程序窗口编辑器都可用，画布放缩后手柄大小与命中范围不变。马赛克、画笔等其它标注仍只可整体拖动或拉伸端点</td></tr>
-<tr><td>形状旋转</td><td>选中<b>矩形 / 椭圆 / 文字</b>后，上方会出现一个圆形<b>旋转柄</b>：拖动它即可绕形状中心任意旋转，按住 <b>Shift</b> 吸附到 15° 整数倍；样式面板里的「<b>旋转角度</b>」滑块可精确设定 -180°~180°。菜单「编辑 → 旋转选中形状」提供 90° 步进（Ctrl+[ / Ctrl+]）。旋转后四角控制柄、选中虚线框与点选命中都会跟着转；截图遮罩与程序窗口编辑器都支持。马赛克、箭头 / 直线、画笔保持原样</td></tr>
+<tr><td>形状旋转</td><td>选中<b>矩形 / 椭圆 / 文字</b>后，上方会出现一个圆形<b>旋转柄</b>：鼠标靠近时光标变成<b>环形箭头</b>提示可以旋转；拖动它即可绕形状中心任意旋转，按住 <b>Shift</b> 吸附到 15° 整数倍，Ctrl+[ / Ctrl+] 提供 90° 步进。旋转后四角控制柄、选中虚线框与点选命中都会跟着转；样式面板里不再显示旋转角度。马赛克、箭头 / 直线、画笔保持原样</td></tr>
 <tr><td>整图旋转 / 镜像</td><td>程序窗口工具条右侧一组按钮：顺旋（顺时针 90° Ctrl+R）、逆旋（逆时针 90° Ctrl+Shift+R）、左右（镜像 Ctrl+H）、上下（镜像 Ctrl+Shift+H）；底图与已有标注一起变，<b>文字标注的字形也跟着旋转</b>（不再保持水平）；镜像时文字仍可读、不做反字。Ctrl+Z 可撤销，角度一并恢复</td></tr>
-<tr><td>画笔端点箭头</td><td>菜单「编辑 → 样式面板」打开面板，勾选「起点加箭头 / 终点加箭头」；无选中时设新建画笔默认，选中画笔时改当前线。也可用菜单「编辑 → 画笔端点箭头」</td></tr>
+<tr><td>画笔端点箭头</td><td>选中画笔后弹出的样式面板里勾选「起点加箭头 / 终点加箭头」；无选中时设新建画笔默认，选中画笔时改当前线</td></tr>
 <tr><td>撤销</td><td>Ctrl + Z，或编辑器底部 Dock 的「撤销」（整图变换也能撤销）</td></tr>
 <tr><td>复制 / 保存 / 取消</td><td>选区外侧确认条最左的「复制」：复制原图并关闭截图编辑与截屏助手两个窗口，不打开编辑器、只留托盘；点「确定」才打开截图编辑窗口；已进入编辑器后用 Ctrl+Enter 更新成图，顶部「保存」存盘；Esc 或顶部「✕」取消</td></tr>
-<tr><td>滚动长截图</td><td>独立命令，不进入编辑器：悬浮条的长截图按钮 / 命令面板「滚动长截图…」/ 托盘右键均可启动，详见第 9 节</td></tr>
+<tr><td>滚动长截图</td><td>独立命令，不进入编辑器：主窗口「滚动长截图…」一行 / 托盘右键均可启动，详见第 9 节</td></tr>
 </table>
-<p class="hint">编辑器窗口没有标题栏：顶部一行是「☰ 菜单」、缩放胶囊（− 100% ＋）、「保存」与「关闭 Esc」；中间是奶油色画布，图片带柔和投影；<b>底部居中是 Dock</b>——选择、矩形、椭圆、箭头、直线、画笔、马赛克、文字、撤销、钉在桌面、复制（深色主按钮）；右侧浮层是选中标注的样式面板，没选中标注时不出现。点「☰」是分组菜单（编辑与输出 / 变换 / 视图 / 帮助），所有快捷键在菜单收起后依然可用。</p>
+<p class="hint">编辑器窗口没有系统标题栏：顶部一行从左到右是<b>复制 / 另存为 / 钉在桌面 / 取字 / 图像变换 ▾ / 缩放 ▾</b>，右侧是<b>保存 / 最小化 / 最大化 / 关闭</b>；双击顶部空白处也能最大化/还原，右下角可拖拽调节大小。中间是奶油色画布，图片带柔和投影；<b>底部居中是 Dock</b>——选择、矩形、椭圆、箭头、直线、画笔、马赛克、文字、撤销、钉在桌面、复制（深色主按钮）；右侧浮层是选中标注的样式面板，没选中标注时不出现。原来的 ☰ 菜单已取消，所有命令都在顶部按钮里，快捷键仍然可用。</p>
 <p class="hint">视图放缩只改变屏幕上的显示比例，不会缩放、重采样导出图片；坐标换算、取字行块、文字输入都会跟着比例同步，因此放大后仍能精确标注。马赛克是纯像素化效果，没有颜色、线宽、线型等可调样式：使用马赛克工具或选中马赛克标注时，样式面板都不会弹出。</p>
 <p class="hint">旋转 90° 后图片宽高互换，矩形/箭头/画笔/文字等标注位置跟着变换；文字按包围盒中心映射，字形与底图一起旋转（镜像时保持可读，不变成反字）。导出始终是全分辨率。</p>
 
@@ -195,15 +195,15 @@ code { background:#f3f4f6; padding:1px 4px; }
 
 <h2>8. 常见问题</h2>
 <ul>
-<li><b>按热键没反应：</b>多半是热键被别的程序占用。托盘会弹注册失败提示，去命令面板「设置热键…」换一个组合；也可以直接点悬浮条上的「框选」按钮。</li>
-<li><b>提示「已经在运行」却看不到程序：</b>托盘图标可能被折叠到通知区（点 ^ 展开），或悬浮条被拖到了屏幕边缘看不见的位置。重复启动时会先把它唤醒并显示，弹窗里选「是」即可结束它并重启，或直接双击 restart.bat。</li>
+<li><b>按热键没反应：</b>多半是热键被别的程序占用。托盘会弹注册失败提示，去命令面板「设置热键…」换一个组合；也可以直接点主窗口里的「框选截图」一行。</li>
+<li><b>提示「已经在运行」却看不到程序：</b>托盘图标可能被折叠到通知区（点 ^ 展开），或窗口被拖到了屏幕边缘看不见的位置。重复启动时会先把它唤醒并显示，弹窗里选「是」即可结束它并重启，或直接双击 restart.bat。</li>
 <li><b>改了代码没变化：</b>程序是单实例 + 托盘常驻，旧进程仍在跑旧代码，双击 restart.bat 即可用新代码重启。</li>
 <li><b>高分屏坐标不准：</b>程序已开启 per-monitor DPI 感知；若仍偏移，重启程序后再试。</li>
 <li><b>杀软误报：</b>全局热键 + 屏幕捕获容易被误报，未签名的 exe 需要加入信任。</li>
 </ul>
 
 <h2>9. 滚动长截图</h2>
-<p>这是与三种截图模式并列的<b>独立命令</b>，从悬浮条的长截图按钮、命令面板「滚动长截图…」或托盘右键「滚动长截图…」启动。它<b>不进入编辑器、也不需要框选</b>：<b>单击目标窗口即自动向下滚屏</b>。</p>
+<p>这是与三种截图模式并列的<b>独立命令</b>，从主窗口「滚动长截图…」一行或托盘右键「滚动长截图…」启动。它<b>不进入编辑器、也不需要框选</b>：<b>单击目标窗口即自动向下滚屏</b>。</p>
 <ol>
 <li>启动后先隐藏本程序所有窗口，再抓一帧底图并显示遮罩；</li>
 <li>移动鼠标，目标窗口会高亮并显示标题；<b>单击左键选中窗口</b>，程序取它的客户区（自动排除标题栏与边框）作为滚动区域，<b>立即开始</b>逐帧抓屏、模板匹配拼成长图；</li>
@@ -227,7 +227,7 @@ code { background:#f3f4f6; padding:1px 4px; }
 
 CLI_HELP = f"""{APP_NAME} —— 命令行参数
 
-  python snap.py              正常启动：底部悬浮条 + 托盘常驻
+  python snap.py              正常启动：主窗口命令面板 + 托盘常驻
   python snap.py --shot       启动后立即截一次图（使用默认截图模式）
   python snap.py --restart    结束后台残留实例并重新启动（不弹确认框）
   python snap.py --selftest   只跑后端自检，不进入界面
@@ -239,7 +239,7 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
 也可直接双击 restart.bat 一键重启。启动诊断见 %APPDATA%\\SnapTool\\startup.log。
 
 三种截图模式：框选（拖鼠标选区域）、窗口（悬停高亮并单击）、全屏（自动选中整个虚拟屏幕）。
-另有独立命令「滚动长截图…」（悬浮条长截图按钮 / 命令面板 / 托盘右键）：单击目标窗口即自动向下滚屏并拼接成长图，不框选、不进编辑器；滚动中左键暂停 / 继续、右键或「确定 ✓」结束、到底自动结束。
+另有独立命令「滚动长截图…」（主窗口 / 托盘右键）：单击目标窗口即自动向下滚屏并拼接成长图，不框选、不进编辑器；滚动中左键暂停 / 继续、右键或「确定 ✓」结束、到底自动结束。
 默认模式与全局热键保存在 %APPDATA%\\SnapTool\\settings.json，
 可在命令面板或托盘菜单「设置热键…」里修改。
 
@@ -397,24 +397,23 @@ class _BarCard(Card):
 
 
 class CommandPanel(QWidget):
-    """「⋯」展开的完整命令面板（设计稿第 2 屏）。
+    """完整命令面板 —— 从 v39 起就是程序的主窗口本体（设计稿第 2 屏）。
 
     两列布局：左列截图命令 + 编辑输出，右列设置 + 帮助。
-    所有行都是 PanelRow（QPushButton 子类），点击后先收起面板再执行。
+    所有行都是 PanelRow（QPushButton 子类）。「退出」单独放在标题栏右侧，
+    「关于」保留在帮助组原位置。
     """
 
     def __init__(self, owner: "MainWindow") -> None:
-        super().__init__(None, Qt.Popup | Qt.FramelessWindowHint)
+        super().__init__(owner)
         self._owner = owner
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.StrongFocus)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         self.card = Card(self, radius=PANEL_RADIUS, bg=CREAM, border=LINE)
-        self.card.setMinimumWidth(600)
-        apply_shadow(self.card, blur=48, dy=18, alpha=64)
+        self.card.setMinimumWidth(620)
         outer.addWidget(self.card)
 
         root = QVBoxLayout(self.card)
@@ -445,6 +444,13 @@ class CommandPanel(QWidget):
             f"padding:3px 9px;font-size:10.5px;{FONT_QSS}"
         )
         head.addWidget(self._badge, 0, Qt.AlignVCenter)
+        # v39：退出从「关于与退出」里拆出来，单独做成面板顶部的按钮
+        self._btn_quit = PillButton(t("退出"), "exit", "plain", self.card, height=28)
+        self._btn_quit.setObjectName("quitTop")
+        self._btn_quit.clicked.connect(
+            lambda _=False: self._owner.quit_requested.emit()
+        )
+        head.addWidget(self._btn_quit, 0, Qt.AlignVCenter)
         root.addLayout(head)
 
         sep = QWidget(self.card)
@@ -507,7 +513,6 @@ class CommandPanel(QWidget):
             lambda: owner.pin_clipboard_requested.emit(), "Ctrl+Shift+P")
         self._dir_row = add(left, "dir", "folder", "打开保存目录", "",
                             lambda: owner.open_dir_requested.emit())
-        left.addStretch(1)
 
         self._lbl_hotkey = group_title("", self.card)
         group(right, "g_set", self._lbl_hotkey)
@@ -530,9 +535,8 @@ class CommandPanel(QWidget):
             lambda: owner.help_requested.emit("help"))
         add(right, "help_cli", "info", "命令行参数", "--shot / --restart / --selftest",
             lambda: owner.help_requested.emit("cli"))
-        add(right, "about", "smile", "关于与退出", "版本信息 · 联系邮箱 · 退出程序",
-            self._about_or_quit)
-        right.addStretch(1)
+        add(right, "about", "smile", "关于", "版本信息 · 联系邮箱",
+            lambda: self._owner.about_requested.emit(), obj="about")
 
         # 兼容旧接口：面板里不再单独放「更改…」按钮
         self._b_change = QPushButton(self.card)
@@ -555,7 +559,7 @@ class CommandPanel(QWidget):
         super().hideEvent(ev)
 
     def _fire(self, slot) -> None:
-        self.hide()
+        # v39：面板就是主窗口本体，点行时不能再 hide()，否则整个窗口消失
         slot()
 
     def _cycle_smooth(self) -> None:
@@ -573,15 +577,8 @@ class CommandPanel(QWidget):
         self._owner.mode_changed.emit(nxt)
 
     def _about_or_quit(self) -> None:
-        """「关于与退出」：弹出二级菜单，避免误触直接退出。"""
-        m = QMenu(self)
-        a_about = m.addAction(t("关于…"))
-        a_about.triggered.connect(lambda _=False: self._owner.about_requested.emit())
-        m.addSeparator()
-        a_quit = m.addAction(t("退出"))
-        a_quit.triggered.connect(lambda _=False: self._owner.quit_requested.emit())
-        pos = self.mapToGlobal(QPoint(self.width() - 250, self.height() - 90))
-        m.exec(pos)
+        """兼容旧调用：现在直接打开关于对话框。"""
+        self._owner.about_requested.emit()
 
     # ---------------------------------------------------------- 刷新
     def set_values(self, hotkey: Hotkey, pin_hotkey: Hotkey | None, mode: str,
@@ -602,7 +599,7 @@ class CommandPanel(QWidget):
 
     def retranslate_ui(self) -> None:
         self._title.setText(app_name())
-        self._sub.setText(t("托盘常驻 · 关闭面板不会退出程序"))
+        self._sub.setText(t("托盘常驻 · 关闭窗口不会退出程序"))
         self._badge.setText(t("已启动"))
         self._lbl_now.setText(t("截图"))
         self._lbl_edit.setText(t("编辑与输出"))
@@ -627,7 +624,9 @@ class CommandPanel(QWidget):
         self._rows["help_help"].set_texts(t("使用说明"), t("10 个完整操作文档"), "")
         self._rows["help_cli"].set_texts(t("命令行参数"),
                                          "--shot / --restart / --selftest", "")
-        self._rows["about"].set_texts(t("关于与退出"), t("版本信息 · 联系邮箱 · 退出程序"), "")
+        self._rows["about"].set_texts(t("关于"), t("版本信息 · 联系邮箱"), "")
+        self._btn_quit.setText(t("退出"))
+        self._btn_quit._restyle()
         self.adjustSize()
 
     def show_at(self, anchor: QWidget) -> None:
@@ -685,28 +684,39 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(app_name())
         self.setWindowIcon(icon)
-        self.setWindowFlags(
-            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        )
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setStyleSheet("QMainWindow{background:transparent;}QWidget{background:transparent;}")
+        # v39：命令面板就是主窗口本体——普通窗口，能最小化 / 缩放，
+        # 不再是无边框、常驻置顶、贴屏幕底部的迷你悬浮条。
+        self.setWindowFlags(Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setStyleSheet(f"QMainWindow{{background:{CREAM};}}")
 
         self._build_menu()
-        self._build_bar()
         self._panel = CommandPanel(self)
+        self.setCentralWidget(self._panel)
         # 兼容旧属性名：自测与内部逻辑仍按主窗口读这些控件
+        self.card = self._panel.card
         self._sub = self._panel._sub
         self._tip = self._panel._tip
         self._lbl_now = self._panel._lbl_now
+        self._lbl_edit = self._panel._lbl_edit
         self._lbl_hotkey = self._panel._lbl_hotkey
         self._lbl_mode = self._panel._lbl_mode
         self._mode_buttons = self._panel._mode_buttons
         self._b_change = self._panel._b_change
+        self._quick = {m: self._panel._rows[f"mode_{m}"] for m in CAPTURE_MODES}
+        self._b_long = self._panel._b_long
+        self._b_pin = self._panel._rows["pin_clipboard"]
+        # 「⋯」已随悬浮条取消：保留隐藏占位，老代码读属性不会炸
+        self._b_more = QPushButton(self)
+        self._b_more.setVisible(False)
+        self.hotkey_label = QLabel("", self)
+        self.hotkey_label.setVisible(False)
         self.set_hotkey(hotkey)
         self.set_mode(mode)
         self.set_pen_smooth(pen_smooth)
         self.set_save_dir(save_dir)
         self.adjustSize()
+        self.setMinimumSize(700, 500)
         LANG.changed.connect(self.retranslate_ui)
 
     # ------------------------------------------------------------ 菜单动作
@@ -785,81 +795,7 @@ class MainWindow(QMainWindow):
         m_help.addAction(a_about)
         self._actions["about"] = a_about
 
-    # ------------------------------------------------------------ 悬浮条
-    def _build_bar(self) -> None:
-        central = QWidget(self)
-        self.setCentralWidget(central)
-        lay = QVBoxLayout(central)
-        lay.setContentsMargins(18, 14, 18, 20)
-        lay.setSpacing(0)
-
-        self.card = _BarCard(central, self._drag_by)
-        self.card.setFixedHeight(BAR_HEIGHT)
-        apply_shadow(self.card, blur=38, dy=12, alpha=58)
-        lay.addWidget(self.card)
-
-        row = QHBoxLayout(self.card)
-        row.setContentsMargins(12, 9, 12, 9)
-        row.setSpacing(6)
-
-        self._logo = LogoButton(self.card, 36)
-        self._logo.setToolTip(t("截屏助手"))
-        self._logo.clicked.connect(
-            lambda _=False: self.capture_requested.emit(self._mode)
-        )
-        row.addWidget(self._logo, 0, Qt.AlignVCenter)
-        row.addWidget(self._vline())
-
-        self._quick: dict[str, IconButton] = {}
-        for mode in CAPTURE_MODES:
-            b = IconButton(MODE_ICONS[mode], mode_label(mode), self.card,
-                           size=BTN_SIZE, radius=BTN_RADIUS)
-            b.setCheckable(True)
-            b.clicked.connect(lambda _=False, m=mode: self._on_quick_mode(m))
-            row.addWidget(b, 0, Qt.AlignVCenter)
-            self._quick[mode] = b
-        row.addWidget(self._vline())
-
-        self._b_long = IconButton("long", t("滚动长截图…"), self.card,
-                                  size=BTN_SIZE, radius=BTN_RADIUS)
-        # 自绘按钮不画文字，但保留 text 供读屏 / 自测按文案查找
-        self._b_long.setText(t("滚动长截图…"))
-        self._b_long.setObjectName("long")
-        self._b_long.clicked.connect(
-            lambda _=False: self.long_capture_requested.emit()
-        )
-        row.addWidget(self._b_long, 0, Qt.AlignVCenter)
-
-        self._b_pin = IconButton("pin", t("贴出剪贴板图片"), self.card,
-                                 size=BTN_SIZE, radius=BTN_RADIUS)
-        self._b_pin.clicked.connect(
-            lambda _=False: self.pin_clipboard_requested.emit()
-        )
-        row.addWidget(self._b_pin, 0, Qt.AlignVCenter)
-        row.addWidget(self._vline())
-
-        self.hotkey_label = QLabel("", self.card)
-        self.hotkey_label.setTextFormat(Qt.RichText)
-        self.hotkey_label.setStyleSheet(
-            f"color:{INK3};font-size:11px;padding:0 6px;{FONT_QSS}"
-        )
-        row.addWidget(self.hotkey_label, 0, Qt.AlignVCenter)
-
-        self._b_more = IconButton("more", t("命令面板"), self.card,
-                                  size=BTN_SIZE, radius=BTN_RADIUS)
-        self._b_more.setCheckable(True)
-        self._b_more.clicked.connect(lambda _=False: self.toggle_panel())
-        row.addWidget(self._b_more, 0, Qt.AlignVCenter)
-
-    def _vline(self) -> QWidget:
-        w = QWidget(self.card)
-        w.setFixedSize(1, 24)
-        w.setStyleSheet(f"background:{LINE};")
-        holder = QWidget(self.card)
-        hl = QHBoxLayout(holder)
-        hl.setContentsMargins(4, 0, 4, 0)
-        hl.addWidget(w)
-        return holder
+    # v39：悬浮条已移除，命令面板即主窗口本体。
 
     def _on_quick_mode(self, mode: str) -> None:
         """点某个模式按钮：立刻截图，并把它记住成默认模式。"""
@@ -868,39 +804,30 @@ class MainWindow(QMainWindow):
         self.capture_requested.emit(mode)
 
     def toggle_panel(self) -> None:
-        import time as _time
-        if self._panel.isVisible():
-            self._panel.hide()
-            self._b_more.setChecked(False)
-            return
-        # 面板是 Qt.Popup：点「⋯」时它先被外部点击关掉，click 再来一次。
-        # 200ms 内视为同一次点击，避免关了又立刻弹出来。
-        if _time.monotonic() - self._panel._last_hide < 0.2:
-            self._b_more.setChecked(False)
-            return
-        self._b_more.setChecked(True)
-        self._panel.set_values(self._hotkey, self._pin_hotkey, self._mode,
-                               language_label(LANG.preference), self._pen_smooth,
-                               self._save_dir)
-        self._panel.show_at(self._b_more)
+        """兼容旧调用：命令面板就是主窗口，显示 / 激活它。"""
+        if self.isHidden():
+            self.show()
+        self.raise_()
+        self.activateWindow()
 
     def hide_panel(self) -> None:
-        self._panel.hide()
-        self._b_more.setChecked(False)
+        """兼容旧调用：面板不再单独收起，最小化到托盘。"""
+        self._minimize_to_tray()
 
-    # ------------------------------------------------------------ 拖动 / 定位
+    # ------------------------------------------------------------ 定位
     def _drag_by(self, delta: QPoint) -> None:
         self.move(self.pos() + delta)
 
     def _place_default(self) -> None:
-        """默认贴在屏幕底部居中（避开任务栏）。"""
+        """默认在屏幕中央显示（v39 起不再贴屏幕底部）。"""
         screen = QApplication.primaryScreen()
         if screen is None:
             return
         avail = screen.availableGeometry()
         self.adjustSize()
         w, h = self.width(), self.height()
-        self.move(avail.left() + (avail.width() - w) // 2, avail.bottom() - h - 6)
+        self.move(avail.left() + max(0, (avail.width() - w) // 2),
+                  avail.top() + max(0, (avail.height() - h) // 2))
 
     def showEvent(self, ev) -> None:  # noqa: N802
         if not self._placed:
@@ -915,9 +842,8 @@ class MainWindow(QMainWindow):
             self.mode_changed.emit(idx)
 
     def _sync_quick(self) -> None:
-        for mode, btn in self._quick.items():
-            btn.setChecked(mode == self._mode)
-            btn.set_dot(True)
+        for mode, row in self._quick.items():
+            row.set_highlight(mode == self._mode)
 
     def set_pen_smooth(self, level: str) -> None:
         if level not in PEN_SMOOTH_LEVELS:
@@ -933,7 +859,11 @@ class MainWindow(QMainWindow):
 
     def set_hotkey(self, hk: Hotkey) -> None:
         self._hotkey = hk
-        self.hotkey_label.setText(f"{hk.label()}")
+        self.hotkey_label.setText(hk.label())
+        if hasattr(self, "_panel"):
+            self._panel._hk_row.set_texts(
+                t("截图热键"), t("点击修改，立即生效"), hk.label()
+            )
 
     def set_pin_hotkey(self, hk: Hotkey) -> None:
         self._pin_hotkey = hk
@@ -976,14 +906,6 @@ class MainWindow(QMainWindow):
             self._menus["pen_smooth"].setTitle(t("画笔平滑度"))
             for level, a in self._pen_smooth_actions.items():
                 a.setText(t(PEN_SMOOTH_LABELS[level]))
-        for mode, btn in self._quick.items():
-            btn.setToolTip(mode_label(mode))
-        self._b_long.setText(t("滚动长截图…"))
-        self._b_pin.setText(t("贴出剪贴板图片"))
-        self._logo.setToolTip(app_name())
-        self._b_long.setToolTip(t("滚动长截图…"))
-        self._b_pin.setToolTip(t("贴出剪贴板图片"))
-        self._b_more.setToolTip(t("命令面板"))
         self.set_hotkey(self._hotkey)
         self._panel.retranslate_ui()
         self.adjustSize()

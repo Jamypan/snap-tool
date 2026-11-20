@@ -73,6 +73,7 @@ from snapeditor import (
     paint_shape_corner_handles,
     paint_shape_rotate_handle,
     rotate_angle_from_drag,
+    rotate_cursor,
     shape_angle,
     shape_corner_cursor,
     shape_corner_points,
@@ -632,7 +633,7 @@ class Canvas(QWidget):
         self._rotate_base_angle = shape_angle(s)
         self._rotate_start_pos = QPoint(pos)
         self._rotate_center = shape_rotate_center(s)
-        self.setCursor(Qt.CrossCursor)
+        self.setCursor(rotate_cursor())
 
     def _apply_shape_rotate(self, pos: QPoint, snap: bool = False) -> None:
         s = self._rotating_shape
@@ -976,7 +977,7 @@ class Canvas(QWidget):
             if self._hit_arrow_endpoint(pos):
                 self.setCursor(Qt.SizeAllCursor)
             elif self._hit_rotate_handle(pos):
-                self.setCursor(Qt.CrossCursor)
+                self.setCursor(rotate_cursor())   # 环形箭头：提示可旋转
             elif corner:
                 self.setCursor(shape_corner_cursor(corner))
             elif self._select_shape_at_hint(pos):
@@ -1539,7 +1540,7 @@ class EditorWindow(QMainWindow):
         self.canvas.close_requested.connect(self.closed.emit)
 
         self._build_menu()
-        self._build_hamburger()
+        self._build_hamburger()   # 仅作兼容占位，界面上不再有 ☰
 
         self._grip = QSizeGrip(self.canvas)
         self._grip.setFixedSize(14, 14)
@@ -1567,18 +1568,38 @@ class EditorWindow(QMainWindow):
             pass
 
     def _build_topbar(self) -> None:
+        """v39：去掉 ☰，常用命令全部平铺成窗口顶部的按钮。"""
         bar = self.topbar
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(14, 9, 14, 9)
-        lay.setSpacing(8)
+        lay.setSpacing(7)
 
-        self.btn_menu = IconButton("menu", t("菜单"), bar, size=34, radius=11)
-        self.btn_menu.setCheckable(True)
-        self.btn_menu.clicked.connect(lambda _=False: self._show_menu())
-        lay.addWidget(self.btn_menu)
+        self._top_buttons: dict[str, PillButton] = {}
+        for key, label_key, icon_name, slot in (
+            ("copy", "复制", "copy",
+             lambda _=False: self.copy_requested.emit(self.canvas.compose())),
+            ("saveas", "另存为…", "folder",
+             lambda _=False: self.save_requested.emit(self.canvas.compose())),
+            ("pin", "钉在桌面", "pin",
+             lambda _=False: self.pin_requested.emit(self.canvas.compose())),
+            ("ocr", "取字", "text",
+             lambda _=False: self.ocr_requested.emit(self.canvas.base.copy())),
+        ):
+            b = PillButton(t(label_key), icon_name, "plain", bar, height=30)
+            b.setObjectName(f"top_{key}")
+            b.clicked.connect(slot)
+            lay.addWidget(b)
+            self._top_buttons[key] = b
 
-        # 缩放比例胶囊：点开是视图菜单
+        # 图像变换：四个动作收进一个下拉按钮
+        self.btn_transform = PillButton(t("图像变换") + "  ▾", None, "plain", bar, height=30)
+        self.btn_transform.setObjectName("topTransform")
+        self.btn_transform.clicked.connect(lambda _=False: self._show_transform_menu())
+        lay.addWidget(self.btn_transform)
+
+        # 缩放：放大 / 缩小 / 1:1 / 适应窗口合并进一个下拉按钮
         self.zoom_pill = QPushButton("", bar)
+        self.zoom_pill.setObjectName("zoomPill")
         self.zoom_pill.setCursor(Qt.PointingHandCursor)
         self.zoom_pill.setFocusPolicy(Qt.NoFocus)
         self.zoom_pill.setFixedHeight(30)
@@ -1593,12 +1614,35 @@ class EditorWindow(QMainWindow):
         lay.addStretch(1)
 
         self.btn_save = PillButton(t("保存"), "save", "plain", bar, height=30)
+        self.btn_save.setObjectName("topSave")
         self.btn_save.clicked.connect(
             lambda _=False: self.save_requested.emit(self.canvas.compose())
         )
         lay.addWidget(self.btn_save)
 
-        self.btn_close = PillButton(f"{t('关闭')}   Esc", "close", "plain", bar, height=30)
+        # v39：标准窗口控制——最小化 / 最大化(还原) / 关闭
+        self.btn_min = PillButton("—", None, "plain", bar, height=30)
+        self.btn_min.setObjectName("winMin")
+        self.btn_min.setFixedWidth(34)
+        self.btn_min.setToolTip(t("最小化"))
+        self.btn_min.clicked.connect(lambda _=False: self.showMinimized())
+        lay.addWidget(self.btn_min)
+
+        self.btn_max = PillButton("□", None, "plain", bar, height=30)
+        self.btn_max.setObjectName("winMax")
+        self.btn_max.setFixedWidth(34)
+        self.btn_max.setToolTip(t("最大化"))
+        self.btn_max.clicked.connect(lambda _=False: self._toggle_maximized())
+        lay.addWidget(self.btn_max)
+
+        # 兼容旧代码：btn_menu 仍指向一个隐藏按钮，☰ 不再出现在界面上
+        self.btn_menu = QPushButton(bar)
+        self.btn_menu.setVisible(False)
+
+        self.btn_close = PillButton("✕", "close", "plain", bar, height=30)
+        self.btn_close.setObjectName("winClose")
+        self.btn_close.setFixedWidth(38)
+        self.btn_close.setToolTip(t("关闭"))
         self.btn_close.clicked.connect(lambda _=False: self.closed.emit())
         lay.addWidget(self.btn_close)
 
@@ -1609,11 +1653,16 @@ class EditorWindow(QMainWindow):
             grip.move(self.canvas.width() - 16, self.canvas.height() - 16)
             grip.raise_()
 
-    def _show_menu(self) -> None:
-        self.btn_menu.setChecked(True)
-        pos = self.btn_menu.mapToGlobal(QPoint(0, self.btn_menu.height() + 6))
-        self._hamburger.exec(pos)
-        self.btn_menu.setChecked(False)
+    def _show_transform_menu(self) -> None:
+        """整图旋转 / 镜像四项收进一个下拉按钮。"""
+        m = QMenu(self)
+        for i in range(4):
+            a = self._actions.get(f"transform{i}")
+            if a is not None:
+                m.addAction(a)
+        m.exec(self.btn_transform.mapToGlobal(
+            QPoint(0, self.btn_transform.height() + 4)
+        ))
 
     def _show_view_menu(self) -> None:
         m = QMenu(self)
@@ -1622,6 +1671,16 @@ class EditorWindow(QMainWindow):
             if a is not None:
                 m.addAction(a)
         m.exec(self.zoom_pill.mapToGlobal(QPoint(0, self.zoom_pill.height() + 4)))
+
+    def _toggle_maximized(self) -> None:
+        """最大化 / 还原切换，按钮图标与提示同步。"""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+        mx = self.isMaximized()
+        self.btn_max.setText("❐" if mx else "□")
+        self.btn_max.setToolTip(t("还原") if mx else t("最大化"))
 
     # 菜单文案的简体中文 key，retranslate_ui 与构造共用
     _FILE_TEXTS = ("复制到剪贴板\tCtrl+Enter", "另存为…\tCtrl+S",
@@ -1646,7 +1705,8 @@ class EditorWindow(QMainWindow):
         ))):
             a = QAction(t(text_key), self)
             a.triggered.connect(slot)
-            m_file.addAction(a)
+            if i < 3:  # v39：关闭编辑器从菜单移除，顶部已有 ✕
+                m_file.addAction(a)
             self._actions[f"file{i}"] = a
 
         m_edit = mb.addMenu(t("编辑(&E)"))
@@ -1658,7 +1718,8 @@ class EditorWindow(QMainWindow):
         ))):
             a = QAction(t(text_key), self)
             a.triggered.connect(slot)
-            m_edit.addAction(a)
+            if i == 1:  # v39：撤销 / 样式面板属于重复命令，已从菜单移除
+                m_edit.addAction(a)
             self._actions[f"edit{i}"] = a
 
         # 整图变换：底图和标注一起变，可用 Ctrl+Z 撤销
@@ -1676,7 +1737,7 @@ class EditorWindow(QMainWindow):
             self._actions[f"transform{i}"] = a
 
         # 形状旋转：只作用于当前选中的矩形 / 椭圆 / 文字，90° 步进
-        m_rotate = m_edit.addMenu(t("旋转选中形状"))
+        m_rotate = QMenu(t("旋转选中形状"), self)  # v39：不挂到菜单，仅留兼容对象
         self._menus["rotate"] = m_rotate
         for i, (text_key, deg, shortcut) in enumerate(zip(
             self._ROTATE_TEXTS, (90, -90), ("Ctrl+[", "Ctrl+]"),
@@ -1686,11 +1747,12 @@ class EditorWindow(QMainWindow):
             a.triggered.connect(
                 lambda _=False, d=deg: self.canvas.rotate_selected(d)
             )
+            # v39：菜单里不再出现，但动作对象保留（快捷键 / 兼容旧接口）
             m_rotate.addAction(a)
             self._actions[f"rotate{i}"] = a
 
         # 端点箭头：既是新建画笔/直线的默认，也作用于当前选中的画笔或直线
-        m_pen = m_edit.addMenu(t("端点箭头"))
+        m_pen = QMenu(t("端点箭头"), self)  # v39：不挂到菜单，仅留兼容对象
         self._menus["pen"] = m_pen
         for i, (text_key, st, en) in enumerate(zip(
             self._PEN_TEXTS,
@@ -1701,6 +1763,7 @@ class EditorWindow(QMainWindow):
             a.triggered.connect(
                 lambda _=False, s=st, e=en: self.canvas.set_pen_arrows(s, e)
             )
+            # v39：菜单里不再出现，动作对象保留（样式面板仍可勾选）
             m_pen.addAction(a)
             self._actions[f"pen{i}"] = a
 
@@ -1717,7 +1780,7 @@ class EditorWindow(QMainWindow):
             a = QAction(t(text_key), self)
             a.setShortcut(shortcut)
             a.triggered.connect(lambda _=False, f=slot: f())
-            m_view.addAction(a)
+            # v39：放缩四项合并到顶部「缩放」下拉按钮，不进菜单栏
             self._actions[f"view{i}"] = a
         self.canvas.zoom_changed.connect(self._show_zoom)
         self._show_zoom(self.canvas.view_scale)
@@ -1732,7 +1795,7 @@ class EditorWindow(QMainWindow):
     def _build_hamburger(self) -> None:
         """把「文件 / 编辑 / 视图」三组命令平铺进一个弹出菜单（设计稿第 5 屏）。"""
         m = QMenu(self)
-        for key in ("file", "edit", "view"):
+        for key in ("file", "edit"):   # v39：视图已合并进顶部缩放下拉按钮
             src = self._menus.get(key)
             if src is None:
                 continue
@@ -1767,16 +1830,27 @@ class EditorWindow(QMainWindow):
         ):
             for i, text_key in enumerate(keys):
                 self._actions[f"{prefix}{i}"].setText(t(text_key))
-        self.btn_menu.setToolTip(t("菜单"))
+        for key, label_key in zip(("copy", "saveas", "pin", "ocr"),
+                                   ("复制", "另存为…", "钉在桌面", "取字")):
+            b = getattr(self, "_top_buttons", {}).get(key)
+            if b is not None:
+                b.setText(t(label_key))
+                b._restyle()
+        self.btn_transform.setText(t("图像变换") + "  ▾")
         self.btn_save.setText(t("保存"))
-        self.btn_close.setText(f"{t('关闭')}   Esc")
         self.btn_save._restyle()
+        self.btn_min.setToolTip(t("最小化"))
+        self.btn_max.setToolTip(
+            t("还原") if self.isMaximized() else t("最大化")
+        )
+        self.btn_close.setText("✕")
+        self.btn_close.setToolTip(t("关闭"))
         self.btn_close._restyle()
         self._show_zoom(self.canvas.view_scale)
 
     def _show_zoom(self, scale: float) -> None:
         text = t("缩放 {pct}%", pct=int(round(scale * 100)))
-        self.zoom_pill.setText(text)
+        self.zoom_pill.setText(text + "  ▾")   # 明确提示这是个下拉按钮
         self.zoom_pill.adjustSize()
         # 比例显示在顶部胶囊里，状态栏只用来存文本（自测读 currentMessage）
         self.statusBar().showMessage(text)

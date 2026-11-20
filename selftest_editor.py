@@ -586,7 +586,7 @@ def test_quit_silent() -> None:
 
     from hotkeys import Hotkey
     from snap import App
-    from snapui import MainWindow, make_icon
+    from snapui import CommandPanel, MainWindow, make_icon
 
     # D1 退出态：主窗口安静关闭（accept），不最小化到托盘、不发提示信号
     mw = MainWindow(make_icon(), Hotkey(), "rect", Path("."))
@@ -985,12 +985,10 @@ def test_image_transform() -> None:
                     return a.menu()
         return None
 
-    m_t = find_submenu("图像变换")
-    m_p = find_submenu("端点箭头")
-    ok_menu = (
-        m_t is not None and len(m_t.actions()) == 4
-        and m_p is not None and len(m_p.actions()) == 4
-    )
+    # v39：变换在顶部下拉按钮里；端点箭头已从菜单移除，只在样式面板里可勾
+    m_t = ed._menus["transform"]
+    m_p = ed._menus["pen"]
+    ok_menu = (len(m_t.actions()) == 4 and len(m_p.actions()) == 4)
     if m_t:
         m_t.actions()[0].trigger()          # 顺时针 90°
     if m_p:
@@ -2924,7 +2922,7 @@ def test_v19_features() -> None:
            f"{cv_s._to_image(anchor).y()} export={composed.width()}x{composed.height()}")
 
     ed_s = EditorWindow(make_image(160, 90), [], None)
-    acts = ed_s._menus["view"].actions()
+    acts = [ed_s._actions[f"view{i}"] for i in range(4)]  # v39：视图下拉按钮的动作
     ok_menu = (len(acts) == 4 and all(a.text() for a in acts)
                and all(not a.shortcut().isEmpty() for a in acts))
     bad_lang_s = []
@@ -4558,13 +4556,13 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v38", "关闭截图编辑与截屏助手两个窗口",
-             "合计 250 项", "合计 353 项", "dist/v16", "dist/v38")
+    marks = ("v27", "v39", "关闭截图编辑与截屏助手两个窗口",
+             "合计 250 项", "合计 360 项", "dist/v16", "dist/v39")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
-    lang_marks = ("floating bar", "フローティング", "플로팅",
-                  "barre flottante", "schwebende Leiste",
-                  "barra flotante", "懸浮條")
+    lang_marks = ("command panel", "コマンドパネル", "명령 패널",
+                  "panneau de commandes", "Befehlsfenster",
+                  "panel de comandos", "命令面板")
     missing_lang = [m for m in lang_marks if m not in docs]
     ok_aa6 = (
         not missing
@@ -5888,7 +5886,7 @@ def test_v38_layout_redesign() -> None:
     import snap_editor
     from hotkeys import Hotkey
     from snapeditor import BORDER_SOFT, Overlay
-    from snapui import MainWindow, make_icon
+    from snapui import CommandPanel, MainWindow, make_icon
 
     print("\n--- Stage AJ: 方案 E 界面改造 ---")
     app = QApplication.instance() or QApplication(sys.argv)
@@ -5898,61 +5896,67 @@ def test_v38_layout_redesign() -> None:
     mw.show()
     app.processEvents()
 
-    # AJ1 主窗口是贴底的迷你悬浮条，不再是带标题栏 / 菜单栏的方窗
+    # AJ1 v39：命令面板就是主窗口本体，普通窗口、不再贴底悬浮
     ok_aj1 = (
-        bool(mw.windowFlags() & Qt.FramelessWindowHint)
-        and mw.card.height() == ui_theme.BAR_HEIGHT
-        and mw.card.height() <= 64
-        and mw.height() <= 120
-        and not mw.menuBar().isVisible()
+        not bool(mw.windowFlags() & Qt.FramelessWindowHint)
+        and not bool(mw.windowFlags() & Qt.WindowStaysOnTopHint)
+        and isinstance(mw.centralWidget(), CommandPanel)
+        and mw.centralWidget() is mw._panel
+        and mw._panel.isVisible()
+        and len(mw._panel._rows) == 15
     )
-    record("AJ1 主窗口=无边框迷你悬浮条(<=64px 卡片)", ok_aj1,
-           f"card={mw.card.height()} win={mw.height()} menu={mw.menuBar().isVisible()}")
+    record("AJ1 主窗口=两列命令面板(普通窗口)", ok_aj1,
+           f"central={type(mw.centralWidget()).__name__} rows={len(mw._panel._rows)}")
 
-    # AJ2 悬浮条五键：三种截图 + 长截图 + 贴图，点击各自发信号
+    panel = mw._panel
+
+    # AJ2 面板里的三种截图 + 长截图 + 贴图，点击各发对应信号
     fired: list = []
     mw.capture_requested.connect(lambda m: fired.append(("cap", m)))
     mw.long_capture_requested.connect(lambda: fired.append(("long", "")))
     mw.pin_clipboard_requested.connect(lambda: fired.append(("pin", "")))
-    mw._quick["rect"].click()
-    mw._quick["window"].click()
-    mw._quick["fullscreen"].click()
-    mw._b_long.click()
-    mw._b_pin.click()
+    for key in ("mode_rect", "mode_window", "mode_fullscreen",
+                "long_capture", "pin_clipboard"):
+        panel._rows[key].click()
     expect = [("cap", "rect"), ("cap", "window"), ("cap", "fullscreen"),
               ("long", ""), ("pin", "")]
-    ok_aj2 = fired == expect
-    record("AJ2 悬浮条五键各发对应信号", ok_aj2, f"fired={fired}")
+    record("AJ2 面板五条截图/贴图行各发对应信号", fired == expect, f"fired={fired}")
 
-    # AJ3 点模式按钮会把该模式记成默认模式
+    # AJ3 点模式行会把该模式记成默认模式并高亮
     seen_modes: list = []
     mw.mode_changed.connect(lambda m: seen_modes.append(m))
-    mw._quick["fullscreen"].click()
+    panel._rows["mode_fullscreen"].click()
     ok_aj3 = (mw._mode == "fullscreen" and seen_modes[-1] == "fullscreen"
-              and mw._quick["fullscreen"].isChecked()
-              and not mw._quick["rect"].isChecked())
-    record("AJ3 点模式按钮同时更新默认模式与高亮", ok_aj3,
+              and panel._rows["mode_fullscreen"]._highlight
+              and not panel._rows["mode_rect"]._highlight)
+    record("AJ3 点模式行同时更新默认模式与高亮", ok_aj3,
            f"mode={mw._mode} seen={seen_modes[-1:]}")
 
-    # AJ4 「⋯」展开完整命令面板：15 行、四组标题、再点收起
-    mw.toggle_panel()
-    app.processEvents()
-    panel = mw._panel
-    rows = list(panel._rows)
+    # AJ4 面板四组标题 + 关于仍在帮助组 + 退出独立在顶部
     groups = (panel._lbl_now.text(), panel._lbl_edit.text(),
               panel._lbl_hotkey.text(), panel._lbl_mode.text())
     ok_aj4 = (
-        panel.isVisible() and len(rows) == 15
-        and groups == ("截图", "编辑与输出", "设置", "帮助")
+        groups == ("截图", "编辑与输出", "设置", "帮助")
+        and panel._rows["about"].title_label.text() == "关于"
+        and panel._btn_quit.objectName() == "quitTop"
         and panel._b_long.objectName() == "long"
     )
-    record("AJ4 命令面板 15 行 / 四组标题", ok_aj4, f"rows={len(rows)} groups={groups}")
-    mw.toggle_panel()
-    app.processEvents()
-    ok_aj4b = not panel.isVisible()
-    record("AJ4b 再点「⋯」收起面板", ok_aj4b, f"visible={panel.isVisible()}")
+    record("AJ4 四组标题 / 关于原位 / 退出在顶部", ok_aj4,
+           f"groups={groups} about={panel._rows['about'].title_label.text()}")
 
-    # AJ5 面板各行接到正确信号（关于与退出是二级菜单，不在此列）
+    # AJ4b 顶部退出按钮直接发退出；关窗口只是收进托盘
+    quit_hits: list = []
+    min_hits: list = []
+    mw.quit_requested.connect(lambda: quit_hits.append(1))
+    mw.minimize_requested.connect(lambda: min_hits.append(1))
+    panel._btn_quit.click()
+    ev = __import__("PySide6.QtGui", fromlist=["QCloseEvent"]).QCloseEvent()
+    mw.closeEvent(ev)
+    record("AJ4b 退出按钮发退出；关窗口回托盘不退出",
+           bool(quit_hits) and bool(min_hits) and ev.isAccepted() is False,
+           f"quit={quit_hits} minimize={min_hits} accepted={ev.isAccepted()}")
+
+    # AJ5 面板各行接到正确信号（关于直接开对话框，退出在标题栏）
     hits: list = []
     mw.ocr_capture_requested.connect(lambda: hits.append("ocr"))
     mw.pin_clipboard_requested.connect(lambda: hits.append("pin"))
@@ -5983,28 +5987,29 @@ def test_v38_layout_redesign() -> None:
     record("AJ6 平滑度/默认模式行可循环切换", ok_aj6,
            f"smooth={smooth} mode={modes_cycle[-1:]}")
 
-    # AJ7 切到英文后面板 / 悬浮条无中文残留
+    # AJ7 英文化后主窗口无中文残留
     i18n.LANG.set_preference("en", persist=False)
     app.processEvents()
-    texts = [panel._title.text(), panel._sub.text(), panel._badge.text(),
+    texts = [mw.windowTitle(), panel._title.text(), panel._sub.text(),
+             panel._badge.text(), panel._btn_quit.text(),
              panel._lbl_now.text(), panel._lbl_edit.text(),
              panel._lbl_hotkey.text(), panel._lbl_mode.text()]
     for row in panel._rows.values():
         texts += [row.title_label.text(), row.desc_label.text(), row.key_label.text()]
-    texts += [mw._b_long.text(), mw._b_pin.toolTip(), mw._b_more.toolTip()]
     cjk = [x for x in texts if _re.search(r"[\u4e00-\u9fff]", x)]
     i18n.LANG.set_preference("zh_CN", persist=False)
     app.processEvents()
-    record("AJ7 英文化后悬浮条/面板无中文残留", not cjk, f"残留={cjk[:3]}")
+    record("AJ7 英文化后主窗口无中文残留", not cjk, f"残留={cjk[:3]}")
 
-    # AJ8 悬浮条默认贴在屏幕底部居中
+    # AJ8 主窗口默认在屏幕中央（不再贴底）
     mw.show()
     app.processEvents()
     avail = QApplication.primaryScreen().availableGeometry()
-    dx = abs((mw.x() + mw.width() // 2) - (avail.left() + avail.width() // 2))
-    dy = abs((mw.y() + mw.height()) - avail.bottom())
-    ok_aj8 = dx <= 8 and dy <= 16
-    record("AJ8 悬浮条贴屏幕底部居中", ok_aj8, f"dx={dx} dy={dy}")
+    cx = mw.x() + mw.width() // 2
+    cy = mw.y() + mw.height() // 2
+    dx = abs(cx - (avail.left() + avail.width() // 2))
+    dy = abs(cy - (avail.top() + avail.height() // 2))
+    record("AJ8 主窗口默认屏幕居中", dx <= 8 and dy <= 8, f"dx={dx} dy={dy}")
 
     # AJ9 遮罩顶部模式条：三个模式可点，就地切换
     img = QImage(900, 560, QImage.Format_RGB32)
@@ -6106,16 +6111,24 @@ def test_v38_layout_redesign() -> None:
     )
     record("AJ14 Dock = 选择+7工具+撤销+钉图+复制", ok_aj14, f"order={order2}")
 
-    # AJ15 汉堡弹出合并菜单：三组 section + 图像变换子菜单
-    acts = ed._hamburger.actions()
-    subs = [a.menu() for a in acts if a.menu() is not None]
-    has_sections = all(any(a.isSeparator() and a.text() == sec for a in acts)
-                       for sec in ("文件(&F)", "编辑(&E)", "视图(&V)"))
-    has_transform = any(s is not None and s.title() == "图像变换" for s in subs)
-    has_view = any("适应窗口" in a.text() for a in acts)
-    ok_aj15 = has_sections and has_transform and has_view
-    record("AJ15 汉堡菜单含三组与子菜单", ok_aj15,
-           f"sections={has_sections} transform={has_transform} view={has_view}")
+    # AJ15 顶部按钮取代 ☰；重复命令已从菜单移除；放缩合并到下拉
+    top_keys = set(ed._top_buttons)
+    file_texts = " ".join(a.text() for a in ed._menus["file"].actions())
+    edit_texts = " ".join(a.text() for a in ed._menus["edit"].actions())
+    gone = ("关闭编辑器" not in file_texts and "撤销" not in edit_texts
+            and "样式面板" not in edit_texts)
+    view_actions = [ed._actions[f"view{i}"] for i in range(4)]
+    has_view = all(a.shortcut() and a.text() for a in view_actions)
+    has_window = all(hasattr(ed, k) for k in ("btn_min", "btn_max", "btn_close"))
+    ok_aj15 = (
+        not ed.btn_menu.isVisible()
+        and {"copy", "saveas", "pin", "ocr"} <= top_keys
+        and ed.btn_transform.objectName() == "topTransform"
+        and ed.zoom_pill.objectName() == "zoomPill"
+        and gone and has_view and has_window
+    )
+    record("AJ15 顶部按钮 / 精简菜单 / 缩放下拉 / 窗口控制", ok_aj15,
+           f"top={sorted(top_keys)} gone={gone} view={has_view} win={has_window}")
 
     # AJ16 菜单栏隐藏后快捷键仍然生效（action 已挂到窗口）
     shortcuts = [a for a in ed.actions() if not a.shortcut().isEmpty()]
@@ -6129,10 +6142,141 @@ def test_v38_layout_redesign() -> None:
         "from ui_theme import" in Path(f).read_text(encoding="utf-8")
         for f in ("snapui.py", "snap_editor.py", "snapeditor.py")
     )
-    record("AJ17 悬浮条/面板/编辑器共用 ui_theme", ok_aj17,
+    record("AJ17 主窗口/面板/编辑器共用 ui_theme", ok_aj17,
            f"orange={ui_theme.ORANGE} cream={ui_theme.CREAM}")
 
     for w in (ov, ed, mw):
+        w.hide()
+        w.deleteLater()
+    app.processEvents()
+    tmp.cleanup()
+
+
+def test_v39_menu_buttons_and_panel_window() -> None:
+    """Stage AK：v39 主窗口面板化 / 顶部按钮 / 精简菜单 / 最大化 / 旋转柄光标。"""
+    import sys
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QCloseEvent, QImage
+    from PySide6.QtWidgets import QApplication
+
+    from hotkeys import Hotkey
+    from snap_editor import EditorWindow
+    from snapeditor import Overlay, StylePanel, rotate_cursor
+    from snapui import MainWindow, make_icon
+
+    print("\n--- Stage AK: v39 界面调整 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    tmp = TemporaryDirectory(prefix="snaptool-ak-")
+    src_ui = Path("snapui.py").read_text(encoding="utf-8")
+    src_ed = Path("snap_editor.py").read_text(encoding="utf-8")
+    src_sd = Path("snapeditor.py").read_text(encoding="utf-8")
+
+    mw = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp.name))
+    mw.show()
+    app.processEvents()
+
+    # AK1 命令面板就是主窗口本体；悬浮条代码彻底移除
+    ok_ak1 = (
+        mw.centralWidget() is mw._panel
+        and mw._panel.isVisible()
+        and not bool(mw.windowFlags() & Qt.FramelessWindowHint)
+        and not bool(mw.windowFlags() & Qt.WindowStaysOnTopHint)
+        and "def _build_bar" not in src_ui
+    )
+    record("AK1 主窗口=命令面板、悬浮条移除", ok_ak1,
+           f"central={type(mw.centralWidget()).__name__} frameless={bool(mw.windowFlags() & Qt.FramelessWindowHint)}")
+
+    # AK2 关于留在帮助组原位；退出独立在面板顶部
+    quit_hits: list = []
+    about_hits: list = []
+    mw.quit_requested.connect(lambda: quit_hits.append(1))
+    mw.about_requested.connect(lambda: about_hits.append(1))
+    mw._panel._btn_quit.click()
+    mw._panel._rows["about"].click()
+    ok_ak2 = (
+        mw._panel._rows["about"].text() == "关于"
+        and mw._panel._btn_quit.objectName() == "quitTop"
+        and quit_hits == [1] and about_hits == [1]
+        and mw._panel._btn_quit.parent() is mw._panel.card
+    )
+    record("AK2 关于原位 / 退出顶部按钮", ok_ak2,
+           f"quit={quit_hits} about={about_hits}")
+
+    # AK3 关窗口只收托盘，不退出
+    hits_min: list = []
+    mw.minimize_requested.connect(lambda: hits_min.append(1))
+    ev = QCloseEvent()
+    mw.closeEvent(ev)
+    record("AK3 关窗口回托盘不退出",
+           not ev.isAccepted() and hits_min == [1],
+           f"accepted={ev.isAccepted()} min={hits_min}")
+    mw.hide()
+
+    # AK4 编辑器顶部一排按钮，☰ 不再显示
+    img = QImage(500, 320, QImage.Format_RGB32)
+    img.fill(QColor("#ffffff"))
+    ed = EditorWindow(img, [], None)
+    ed.show()
+    app.processEvents()
+    top_keys = set(ed._top_buttons)
+    ok_ak4 = (
+        not ed.btn_menu.isVisible()
+        and {"copy", "saveas", "pin", "ocr"} <= top_keys
+        and ed.btn_transform.objectName() == "topTransform"
+        and "def _build_hamburger" in src_ed   # 兼容占位仍在，但界面无 ☰
+    )
+    record("AK4 顶部按钮取代汉堡菜单", ok_ak4, f"top={sorted(top_keys)}")
+
+    # AK5 红框 5 项不在可见菜单；放缩/变换各自收进下拉
+    file_texts = " ".join(a.text() for a in ed._menus["file"].actions())
+    edit_texts = " ".join(a.text() for a in ed._menus["edit"].actions())
+    gone = all(k not in file_texts + edit_texts for k in
+               ("关闭编辑器", "撤销", "样式面板", "旋转选中形状", "端点箭头"))
+    view_acts = [ed._actions[f"view{i}"] for i in range(4)]
+    tr_acts = ed._menus["transform"].actions()
+    ok_ak5 = (
+        gone and len(view_acts) == 4 and len(tr_acts) == 4
+        and all(a.text() and not a.shortcut().isEmpty() for a in view_acts)
+        and "▾" in ed.zoom_pill.text() and "▾" in ed.btn_transform.text()
+    )
+    record("AK5 精简菜单 + 放缩/变换下拉", ok_ak5,
+           f"gone={gone} view={len(view_acts)} transform={len(tr_acts)}")
+
+    # AK6 顶部最小化/最大化/关闭 + 双击标题栏 + 右下拖拽角
+    ed._toggle_maximized()
+    app.processEvents()
+    mx1 = ed.isMaximized()
+    icon1 = ed.btn_max.text()
+    ed._toggle_maximized()
+    app.processEvents()
+    ok_ak6 = (
+        mx1 and not ed.isMaximized() and icon1 == "❐"
+        and ed.btn_min.objectName() == "winMin"
+        and ed.btn_close.objectName() == "winClose"
+        and ed._grip is not None
+        and bool(ed.topbar._window is ed)
+    )
+    record("AK6 最大化/还原 + 窗口按钮 + 拖拽角", ok_ak6,
+           f"max={mx1} icon={icon1} grip={ed._grip is not None}")
+
+    # AK7 样式面板不再显示旋转角度；旋转柄用环形箭头光标
+    sp = StylePanel(None, show_pen_arrows=True)
+    cur = rotate_cursor()
+    ok_ak7 = (
+        not sp._angle_label.isVisible()
+        and not sp._angle_box.isVisible()
+        and "root.addWidget(self._angle_box)" not in src_sd
+        and cur.shape() != Qt.CrossCursor
+        and "cur = rotate_cursor()" in src_sd
+        and "self.setCursor(rotate_cursor())" in src_ed
+    )
+    record("AK7 样式面板无旋转角度 + 旋转柄旋转光标", ok_ak7,
+           f"angle={sp._angle_box.isVisible()} cursor={cur.shape()}")
+
+    for w in (ed, mw):
         w.hide()
         w.deleteLater()
     app.processEvents()
@@ -6185,6 +6329,7 @@ if __name__ == "__main__":
     test_v36_ocr_multiline_and_cursor()
     test_v37_pen_arrow_joint()
     test_v38_layout_redesign()
+    test_v39_menu_buttons_and_panel_window()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
