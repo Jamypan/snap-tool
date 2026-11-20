@@ -189,8 +189,10 @@ class Canvas(QWidget):
         self._text_edit: QLineEdit | None = None
         self._editing_shape: Shape | None = None
 
-        # 浮动工具条（排除"长截图"，窗口编辑器里没有滚动拼接的概念）
-        self.toolbar = Toolbar(self, exclude=("长截图", "确定"))
+        # 浮动工具条：排除「长截图」（编辑器无滚动拼接）；v41 再排除
+        # 「钉在桌面 / 复制」——顶部图标栏已有这两个，底部 Dock 不重复。
+        self.toolbar = Toolbar(
+            self, exclude=("长截图", "确定", "钉在桌面", "复制"))
         self.toolbar.hide()
         self.toolbar.tool_changed.connect(self._set_tool)
         self.toolbar.undo_clicked.connect(self.undo)
@@ -1585,20 +1587,31 @@ class EditorWindow(QMainWindow):
         lay.addSpacing(118)
         lay.addStretch(1)
 
-        def icon_btn(icon_name: str, tip: str, slot, objname: str) -> QPushButton:
-            """与 Dock 完全一致的 38×38 纯图标按钮。"""
+        def icon_btn(icon_name: str, tip: str, slot, objname: str,
+                     primary: bool = False) -> QPushButton:
+            """与 Dock 完全一致的 38×38 纯图标按钮。
+
+            primary=True 时套用 Dock「复制」主按钮的黑色底 + 白图标，
+            但依旧不带文字（用户要求：复制黑底、不要文字）。
+            """
             b = QPushButton(bar)
             b.setObjectName(objname)
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
             b.setToolTip(tip)
-            b.setIcon(toolbar_icon(icon_name))
+            b.setIcon(toolbar_icon(icon_name, "#ffffff" if primary else None))
             b.setIconSize(QSize(19, 19))
             b.setFixedSize(38, 38)
-            b.setStyleSheet(
-                "QPushButton{background:transparent;border:none;border-radius:13px;}"
-                "QPushButton:hover{background:#f5f0e8;}"
-            )
+            if primary:
+                b.setStyleSheet(
+                    "QPushButton{background:#1c1c1e;border:none;border-radius:13px;}"
+                    "QPushButton:hover{background:#34302c;}"
+                )
+            else:
+                b.setStyleSheet(
+                    "QPushButton{background:transparent;border:none;border-radius:13px;}"
+                    "QPushButton:hover{background:#f5f0e8;}"
+                )
             b.clicked.connect(slot)
             return b
 
@@ -1615,7 +1628,9 @@ class EditorWindow(QMainWindow):
              lambda _=False: self.ocr_requested.emit(self.canvas.base.copy())),
         )
         for key, _label, tip, icon_name, slot in specs:
-            b = icon_btn(icon_name, tip, slot, f"top_{key}")
+            # v41：复制用黑底白图标（与 Dock 主按钮一致），纯图标不带文字
+            b = icon_btn(icon_name, tip, slot, f"top_{key}",
+                         primary=(key == "copy"))
             lay.addWidget(b)
             self._top_buttons[key] = b
 
@@ -1743,12 +1758,13 @@ class EditorWindow(QMainWindow):
         # 整图变换：底图和标注一起变，可用 Ctrl+Z 撤销
         m_transform = m_edit.addMenu(t("图像变换"))
         self._menus["transform"] = m_transform
-        for i, (text_key, mode, shortcut) in enumerate(zip(
+        for i, (text_key, mode, shortcut, icon_name) in enumerate(zip(
             self._TRANSFORM_TEXTS,
             ("cw", "ccw", "flip_h", "flip_v"),
             ("Ctrl+R", "Ctrl+Shift+R", "Ctrl+H", "Ctrl+Shift+H"),
+            ("顺旋", "逆旋", "左右", "上下"),
         )):
-            a = QAction(t(text_key), self)
+            a = QAction(toolbar_icon(icon_name), t(text_key), self)
             a.setShortcut(shortcut)
             a.triggered.connect(lambda _=False, m=mode: self.canvas.transform_image(m))
             m_transform.addAction(a)
@@ -1789,13 +1805,15 @@ class EditorWindow(QMainWindow):
         m_view = mb.addMenu(t("视图(&V)"))
         self._menus["view"] = m_view
         _ = None
-        for i, (text_key, slot, shortcut) in enumerate(zip(
+        for i, (text_key, slot, shortcut, icon_name) in enumerate(zip(
             self._VIEW_TEXTS,
             (self.canvas.zoom_in, self.canvas.zoom_out,
              self.canvas.zoom_actual, self.canvas.zoom_fit),
             ("Ctrl+=", "Ctrl+-", "Ctrl+1", "Ctrl+0"),
+            ("放大", "缩小", "实际大小", "适应窗口"),
         )):
-            a = QAction(t(text_key), self)
+            # v41：下拉命令全部带按钮图标
+            a = QAction(toolbar_icon(icon_name), t(text_key), self)
             a.setShortcut(shortcut)
             a.triggered.connect(lambda _=False, f=slot: f())
             # v39：放缩四项合并到顶部「缩放」下拉按钮，不进菜单栏

@@ -4556,8 +4556,9 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v40", "关闭截图编辑与截屏助手两个窗口",
-             "合计 250 项", "合计 368 项", "dist/v16", "dist/v40")
+    marks = ("v27", "v40", "v41", "关闭截图编辑与截屏助手两个窗口",
+             "合计 250 项", "合计 368 项", "合计 375 项",
+             "dist/v16", "dist/v41")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
     lang_marks = ("command panel", "コマンドパネル", "명령 패널",
@@ -5182,11 +5183,12 @@ def test_v34_pin_to_desktop() -> None:
     pin_btn = tb._actions.get("钉在桌面")
     # 父工具条未 show，isVisible() 恒 False；用 isHidden() 判断显式显隐
     ok_af6a = pin_btn is not None and not pin_btn.isHidden()
-    # 编辑器工具条从不调用 set_confirm_mode，钉按钮默认显示
+    # v41：编辑器底部 Dock 不再重复钉在桌面 / 复制（顶部图标栏已有），
+    # 但按钮对象仍在、信号仍连着，顶部按钮照常可用。
     from snap_editor import Canvas as _Canvas
     ed_tb = _Canvas(make_image(20, 20), [], None).toolbar
     ed_pin = ed_tb._actions.get("钉在桌面")
-    ok_af6b = ed_pin is not None and not ed_pin.isHidden()
+    ok_af6b = ed_pin is not None and ed_pin.isHidden()
     ov = Overlay(img, 1.0)
     ok_af6c = hasattr(ov, "pin_requested") and "钉在桌面" in tb._tip_keys.get("action:钉在桌面", "钉在桌面")
     # 行为级：模拟选区后点钉按钮 → 发 pin_requested
@@ -6090,7 +6092,7 @@ def test_v38_layout_redesign() -> None:
     record("AJ13 编辑器无标题栏 / 顶部行 / 底部 Dock", ok_aj13,
            f"phase={dock._phase} dock_y={dg.top()} canvas_h={ed.canvas.height()}")
 
-    # AJ14 Dock 顺序：选择 + 7 工具 + 撤销 + 钉图 + 复制（带文字深色）
+    # AJ14 Dock 顺序：选择 + 7 工具 + 撤销（v41 钉图/复制上移到顶部，不重复）
     order2 = []
     for i in range(dock._lay.count()):
         w = dock._lay.itemAt(i).widget()
@@ -6100,16 +6102,13 @@ def test_v38_layout_redesign() -> None:
         for k, b in dock._actions.items():
             if b is w:
                 order2.append(k)
-    copy_b = dock._actions["复制"]
     ok_aj14 = (
         order2[:8] == ["select", "rect", "ellipse", "arrow", "line", "pen",
                        "mosaic", "text"]
-        and order2[-3:] == ["撤销", "钉在桌面", "复制"]
-        and copy_b.text() == "复制"
-        and copy_b.property("kind") == "primary"
+        and order2[8:] == ["撤销"]
         and dock._buttons["select"].isChecked()
     )
-    record("AJ14 Dock = 选择+7工具+撤销+钉图+复制", ok_aj14, f"order={order2}")
+    record("AJ14 Dock = 选择+7工具+撤销", ok_aj14, f"order={order2}")
 
     # AJ15 顶部按钮取代 ☰；重复命令已从菜单移除；放缩合并到下拉
     top_keys = set(ed._top_buttons)
@@ -6419,6 +6418,140 @@ def test_v40_icon_bar_round_text_and_table_copy() -> None:
     tmp.cleanup()
 
 
+def test_v41_top_style_dropdown_icons_and_wrapped_cells() -> None:
+    """Stage AM：v41 顶部按钮风格 / 下拉图标 / 箭头清晰 / 圆角 / 单元格多行。"""
+    import sys
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from PySide6.QtGui import QImage, QColor, QPixmap, QPainter
+    from PySide6.QtWidgets import QApplication
+
+    from snap_editor import EditorWindow
+    from snapeditor import (
+        TEXT_BG_RADIUS, _draw_icon, _ICON_SIZE, _group_ocr_rows,
+        _ocr_copy_text, _ocr_table_layout, toolbar_icon,
+    )
+
+    print("\n--- Stage AM: v41 按钮风格 / 下拉图标 / OCR 多行单元格 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    tmp = TemporaryDirectory(prefix="snaptool-am-")
+    img = QImage(500, 320, QImage.Format_RGB32)
+    img.fill(QColor("#ffffff"))
+    ed = EditorWindow(img, [], None)
+    ed.show()
+    app.processEvents()
+    src_e = Path("snap_editor.py").read_text(encoding="utf-8")
+
+    # AM1 复制按钮黑底白图标、无文字；其余顶部按钮与 Dock 同款透明底
+    cp = ed._top_buttons["copy"]
+    ok_am1 = (
+        cp.text() == ""
+        and "#1c1c1e" in cp.styleSheet()
+        and all(not b.text() and b.width() == 38 and b.height() == 38
+                for b in ed._top_buttons.values())
+        and "background:transparent;border:none;border-radius:13px;"
+        in ed._top_buttons["save"].styleSheet()
+    )
+    record("AM1 复制黑底纯图标 / 其余顶部按钮 Dock 风格", ok_am1,
+           f"copyStyle={cp.styleSheet()[:60]!r}")
+
+    # AM2 底部 Dock 不再有钉在桌面 / 复制（顶部已有，避免重复）
+    dock = ed.canvas.toolbar
+    order = []
+    for i in range(dock._lay.count()):
+        w = dock._lay.itemAt(i).widget()
+        for k, b in list(dock._buttons.items()) + list(dock._actions.items()):
+            if b is w:
+                order.append(k)
+    ok_am2 = (
+        "钉在桌面" not in order and "复制" not in order
+        and order[-1] == "撤销"
+        and dock._actions["钉在桌面"].isHidden()
+        and dock._actions["复制"].isHidden()
+    )
+    record("AM2 底部 Dock 去掉重复钉图/复制", ok_am2, f"order_tail={order[-3:]}")
+
+    # AM3 变换 / 缩放两组下拉命令都带按钮图标
+    icons_ok = []
+    for grp, names in (("transform", ("顺旋", "逆旋", "左右", "上下")),
+                       ("view", ("放大", "缩小", "实际大小", "适应窗口"))):
+        for i in range(4):
+            a = ed._actions[f"{grp}{i}"]
+            icons_ok.append(
+                not a.icon().isNull()
+                and a.icon().pixmap(_ICON_SIZE, _ICON_SIZE).width() > 0
+            )
+    ok_am3 = all(icons_ok) and "QAction(toolbar_icon(icon_name)" in src_e
+    record("AM3 下拉命令全部带图标", ok_am3, f"icons={icons_ok}")
+
+    # AM4 箭头图标头部用当前墨色绘制（浅底可见），与直线有差异
+    def icon_img(name):
+        pm = QPixmap(_ICON_SIZE, _ICON_SIZE)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        _draw_icon(name, p)
+        p.end()
+        return pm.toImage()
+
+    arrow, line = icon_img("arrow"), icon_img("line")
+    diff = sum(1 for y in range(_ICON_SIZE) for x in range(_ICON_SIZE)
+               if arrow.pixelColor(x, y).rgba() != line.pixelColor(x, y).rgba())
+    ok_am4 = diff > 20 and "p.setBrush(QBrush(QColor(_ICON_INK)))" in Path(
+        "snapeditor.py").read_text(encoding="utf-8")
+    record("AM4 箭头图标清晰（头部与主色一致）", ok_am4, f"diff={diff}")
+
+    # AM5 文字背景圆角继续加大（>= 12）
+    ok_am5 = TEXT_BG_RADIUS >= 12
+    record("AM5 文字背景圆角加大", ok_am5, f"radius={TEXT_BG_RADIUS}")
+
+    # AM6 单元格内两行文字合并成一个单元格（不再是两行）、按 y 顺序
+    wrap_lines = [
+        # 第一行：中/右两列各跨两行，左侧标签垂直居中——真实表格的典型排版
+        {"text": "后端开发、Java/Web开发、测试开发、移", "box": [160, 68, 420, 85]},
+        {"text": "网络工程师、网络规划与设计、系统运", "box": [456, 69, 700, 84]},
+        {"text": "主流对口岗位", "box": [16, 79, 105, 98]},
+        {"text": "动开发、嵌入式、数据/AI应用", "box": [157, 92, 351, 110]},
+        {"text": "维、网络运维、网络安全、技术支持", "box": [456, 92, 685, 108]},
+        # 第二行：普通单行（表格判定要求至少两行）
+        {"text": "典型雇主", "box": [16, 140, 105, 158]},
+        {"text": "互联网公司", "box": [157, 140, 351, 158]},
+        {"text": "运营商", "box": [456, 140, 685, 158]},
+    ]
+    groups = _group_ocr_rows(wrap_lines)
+    layout = _ocr_table_layout(wrap_lines)
+    tsv = _ocr_copy_text(wrap_lines)
+    ok_am6 = (
+        len(groups) == 2
+        and layout is not None and len(layout[0]) == 2
+        and layout[0][0][0] == "主流对口岗位"
+        and layout[0][0][1] == "后端开发、Java/Web开发、测试开发、移动开发、嵌入式、数据/AI应用"
+        and layout[0][0][2].startswith("网络工程师、网络规划与设计、系统运维")
+        and len(tsv.splitlines()) == 2 and all(r.count("\t") == 2 for r in tsv.splitlines())
+    )
+    record("AM6 单元格内多行文字合并为单格", ok_am6, f"rows={len(groups)} tsv={tsv!r}")
+
+    # AM7 真实多列表格结构不被破坏（3 行 3 列）
+    table = [
+        {"text": "A1", "box": [10, 10, 60, 28]},
+        {"text": "B1", "box": [110, 10, 160, 28]},
+        {"text": "C1", "box": [210, 10, 260, 28]},
+        {"text": "A2", "box": [10, 50, 60, 68]},
+        {"text": "B2", "box": [110, 50, 160, 68]},
+        {"text": "C2", "box": [210, 50, 260, 68]},
+    ]
+    lay = _ocr_table_layout(table)
+    ok_am7 = lay is not None and len(lay[0]) == 2 and len(lay[0][0]) == 3
+    record("AM7 多行多列表格结构正确", ok_am7,
+           f"grid={lay[0] if lay else None}")
+
+    ed.hide()
+    ed.deleteLater()
+    app.processEvents()
+    tmp.cleanup()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -6467,6 +6600,7 @@ if __name__ == "__main__":
     test_v38_layout_redesign()
     test_v39_menu_buttons_and_panel_window()
     test_v40_icon_bar_round_text_and_table_copy()
+    test_v41_top_style_dropdown_icons_and_wrapped_cells()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

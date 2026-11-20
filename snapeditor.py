@@ -87,7 +87,7 @@ ROTATABLE_KINDS = ("rect", "ellipse", "text")
 ROTATE_HANDLE_DIST = 26      # 旋转柄离顶边的距离（图像/逻辑坐标）
 ROTATE_HANDLE_R = 6          # 旋转柄绘制半径（屏幕像素）
 ROTATE_HANDLE_HIT = 12       # 旋转柄命中半径（屏幕像素）
-TEXT_BG_RADIUS = 9           # 文字标注背景 / 边框的圆角半径（v40）
+TEXT_BG_RADIUS = 14          # 文字标注背景 / 边框的圆角半径（v41 再加大）
 
 _ROTATE_CURSOR = None
 
@@ -453,7 +453,10 @@ def _arrow_at(p: QPainter, x: float, y: float, tx: float, ty: float,
     bx, by = x - tx * size, y - ty * size
     w = size * wing_ratio
     p.setPen(Qt.NoPen)
-    p.setBrush(QBrush(QColor(245, 247, 250)))
+    # v41：箭头头部改用当前描边色，不再写死近白色——浅色 Dock 上旧版
+    # 箭头头部几乎看不见，与「直线」图标糊在一起。镜像图标另用自己的
+    # 淡白三角表达「原件/镜像」，不受此处影响。
+    p.setBrush(QBrush(QColor(_ICON_INK)))
     p.drawPolygon(
         QPolygonF(
             [
@@ -671,6 +674,32 @@ def _draw_icon(name: str, p: QPainter) -> None:
         p.drawLine(9.5, 6.5, 9.5, 12.5)
         p.drawLine(6.5, 9.5, 12.5, 9.5)
         _draw_drop_caret(p)
+    elif name in ("放大", "缩小", "实际大小", "适应窗口"):
+        # v41：缩放下拉四项各自的图标，让下拉命令一眼可辨
+        if name in ("放大", "缩小"):
+            p.drawEllipse(QRectF(3, 3, 12, 12))
+            p.drawLine(13, 13, 20.5, 20.5)
+            p.setPen(_icon_pen(1.8))
+            p.drawLine(6.5, 9, 11.5, 9)
+            if name == "放大":
+                p.drawLine(9, 6.5, 9, 11.5)
+        elif name == "实际大小":
+            # 1:1 —— 圆角方框内用字体渲染「1:1」，比手画字形清晰
+            p.drawRoundedRect(QRectF(2, 5.5, 20, 14), 3, 3)
+            f = QFont("Microsoft YaHei UI")
+            f.setPixelSize(9)
+            f.setBold(True)
+            p.setFont(f)
+            p.drawText(QRectF(2, 5.5, 20, 14), Qt.AlignCenter, "1:1")
+        else:  # 适应窗口：四角向外箭头
+            p.drawLine(4, 9, 4, 4)
+            p.drawLine(4, 4, 9, 4)
+            p.drawLine(15, 4, 20, 4)
+            p.drawLine(20, 4, 20, 9)
+            p.drawLine(4, 15, 4, 20)
+            p.drawLine(4, 20, 9, 20)
+            p.drawLine(15, 20, 20, 20)
+            p.drawLine(20, 20, 20, 15)
 
 
 _ICONS: dict[tuple[str, str, str], QIcon] = {}
@@ -2138,23 +2167,60 @@ def _reading_order(lines: list[dict]) -> list[str]:
 
 # ------------------------------------------------------------------ 表格取字
 def _group_ocr_rows(lines: list[dict]) -> list[list[dict]]:
-    """按 y 坐标把识别框聚成行，行内按 x 从左到右（表格布局的公共步骤）。"""
+    """把识别框聚成表格的「逻辑行」，行内按 x 从左到右。
+
+    v41：改用「纵向空隙 + 传递合并」代替旧的中心点距离。旧算法只比中心 y，
+    一个单元格内的两行文字（行高约 17px、中心相距约 24px）会被拆成两行，
+    连同左侧单元格一起错位整张表。新规则：
+
+    * 两框纵向重叠、或上下空隙很小（≈ 行高的 1/3）即归入同一逻辑行；
+    * 通过中间框传递连接（A 连 B、B 连 C ⇒ A/B/C 同行），这正是「左侧
+      单元格垂直居中、跨住右侧两行文字」的真实排版；
+    * 表格行之间的空隙明显更大（截图实测 ≈ 22px），不会被误并。
+    """
     items = [d for d in lines if d.get("box") and str(d.get("text", ""))]
     items = sorted(items, key=lambda d: (d["box"][1], d["box"][0]))
+    if not items:
+        return []
+    heights = sorted(d["box"][3] - d["box"][1] for d in items)
+    med_h = heights[len(heights) // 2] if heights else 18.0
+    gap_tol = max(4.0, med_h * 0.35)
     rows: list[dict] = []
     for d in items:
         x1, y1, x2, y2 = d["box"]
-        cy = (y1 + y2) / 2.0
-        tol = max(6.0, (y2 - y1) * 0.6)
+        hit = None
         for row in rows:
-            if abs(row["cy"] - cy) <= tol:
-                row["items"].append(d)
-                n = len(row["items"])
-                row["cy"] = (row["cy"] * (n - 1) + cy) / n
+            if y1 <= row["bottom"] + gap_tol and y2 >= row["top"] - gap_tol:
+                hit = row
                 break
+        if hit is None:
+            rows.append({"top": y1, "bottom": y2, "items": [d]})
         else:
-            rows.append({"cy": cy, "items": [d]})
+            hit["items"].append(d)
+            hit["top"] = min(hit["top"], y1)
+            hit["bottom"] = max(hit["bottom"], y2)
+    # 行内按 x 从左到右；同一列的上下两行由 _ocr_table_layout 再按 y 排序拼接
     return [sorted(r["items"], key=lambda d: d["box"][0]) for r in rows]
+
+
+def _join_cell_fragments(frags: list[dict]) -> str:
+    """同一单元格内按「从上到下」拼接多段文字。
+
+    中/日/韩文字之间没有词边界，直接相接（截图里单元格换行只是排版折行，
+    并非两个词）；含英文 / 数字等拉丁片段时才补一个空格，避免粘成一团。
+    """
+    frags = sorted(frags, key=lambda d: (d["box"][1], d["box"][0]))
+    out = ""
+    for d in frags:
+        part = str(d.get("text", ""))
+        if not part:
+            continue
+        if out:
+            sep = "" if (_is_cjk(out[-1:]) and _is_cjk(part[:1])) else " "
+            out += sep + part
+        else:
+            out = part
+    return out
 
 
 def _ocr_table_layout(lines: list[dict]) -> tuple[list[list[str]], dict] | None:
@@ -2183,11 +2249,15 @@ def _ocr_table_layout(lines: list[dict]) -> tuple[list[list[str]], dict] | None:
     pos: dict[int, tuple[int, int]] = {}
     for ri, row in enumerate(rows):
         cells = [""] * len(centers)
+        # v41：先按列收集整格里所有的文字片段，再按 y 从上到下拼成一段。
+        # 旧版直接按 x 顺序把片段用空格连起来，跨行单元格会出现「下半行
+        # 在前、上半行在后」且中间多一个空格的问题。
+        buckets: list[list[dict]] = [[] for _ in centers]
         for d in row:
             ci = min(range(len(centers)), key=lambda i: abs(centers[i] - d["box"][0]))
-            txt = str(d.get("text", ""))
-            cells[ci] = (cells[ci] + " " + txt).strip() if cells[ci] else txt
+            buckets[ci].append(d)
             pos[id(d)] = (ri, ci)
+        cells = [_join_cell_fragments(b) for b in buckets]
         grid.append(cells)
     return grid, pos
 
@@ -2820,8 +2890,13 @@ class Toolbar(QWidget):
             order = [("a", "复制"), ("a", "取字"), ("a", "钉在桌面"),
                      ("s", "4"), ("a", "✕"), ("a", "确定")]
         elif phase == "dock":
-            order = tools + [("s", "0"), ("a", "撤销"), ("s", "3"),
-                             ("a", "钉在桌面"), ("a", "复制")]
+            order = tools + [("s", "0"), ("a", "撤销")]
+            # v41：钉在桌面 / 复制已上移到顶部图标栏，编辑器 Dock 不再重复；
+            # 两者都排除时连分隔线一起去掉，避免留下一条悬空的竖线。
+            tail = [("a", k) for k in ("钉在桌面", "复制")
+                    if k not in self._excluded]
+            if tail:
+                order += [("s", "3")] + tail
         else:
             order = list(self._order)
             order = [tok for tok in order if tok[1] not in self._excluded]
