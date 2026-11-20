@@ -506,14 +506,17 @@ class CommandPanel(QWidget):
         self._b_long = add(left, "long_capture", "long", "滚动长截图…",
                            "点击窗口自动滚屏成长图",
                            lambda: owner.long_capture_requested.emit(), obj="long")
+        self._b_long.set_pro(True)          # v44：高级功能金色标识
 
         left.addSpacing(4)
         self._lbl_edit = group_title("", self.card)
         group(left, "g_edit", self._lbl_edit)
-        add(left, "ocr", "text", "OCR 取字", "识别选区文字 · 离线 RapidOCR",
-            lambda: owner.ocr_capture_requested.emit(), "离线")
-        add(left, "pin_clipboard", "pin", "贴出剪贴板图片", "钉成桌面浮窗 · 可拖动缩放",
-            lambda: owner.pin_clipboard_requested.emit(), "Ctrl+Shift+P")
+        ocr_row = add(left, "ocr", "text", "OCR 取字", "识别选区文字 · 离线 RapidOCR",
+                      lambda: owner.ocr_capture_requested.emit(), "离线")
+        ocr_row.set_pro(True)               # v44：高级功能金色标识
+        pin_row = add(left, "pin_clipboard", "pin", "贴出剪贴板图片", "钉成桌面浮窗 · 可拖动缩放",
+                      lambda: owner.pin_clipboard_requested.emit(), "Ctrl+Shift+P")
+        pin_row.set_pro(True)               # v44：高级功能金色标识
         self._dir_row = add(left, "dir", "folder", "打开保存目录", "",
                             lambda: owner.open_dir_requested.emit())
 

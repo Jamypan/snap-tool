@@ -3641,13 +3641,14 @@ def test_v22_shape_rotation() -> None:
     sh2.angle = 0.0
     step_ok = cv.rotate_selected(90)
     cv._refresh_style_panel()
+    # v44：角度控件已彻底移除（原来是无 parent 的独立小窗），旋转仍走菜单步进
     ok_v9 = (
         step_ok and abs(sh2.angle - 90.0) < 0.01
-        and cv.style_panel._angle_slider.value() == 90
-        and not cv.style_panel._angle_box.isHidden()
+        and not hasattr(cv.style_panel, "_angle_slider")
+        and not hasattr(cv.style_panel, "_angle_box")
     )
-    record("V9 菜单 90° 步进 + 样式面板角度回填", ok_v9,
-           f"angle={sh2.angle} slider={cv.style_panel._angle_slider.value()}")
+    record("V9 菜单 90° 步进 + 角度控件已移除", ok_v9,
+           f"angle={sh2.angle} has_angle_ui={hasattr(cv.style_panel, '_angle_slider')}")
 
     tx2 = Shape(kind="text", text="ABC", pos=QPoint(500, 400))
     cv.shapes.append(tx2)
@@ -3656,10 +3657,9 @@ def test_v22_shape_rotation() -> None:
     ok_v10 = (
         cv._hit_rotate_handle(cv._rotate_handle_pos())
         and cv.rotate_selected(90) and abs(tx2.angle - 90.0) < 0.01
-        and not cv.style_panel._angle_box.isHidden()
         and tx2.kind in ROTATABLE_KINDS
     )
-    record("V10 Canvas 文字可旋转、角度控件可见", ok_v10,
+    record("V10 Canvas 文字可旋转（角度工具条已移除）", ok_v10,
            f"angle={tx2.angle}")
 
     # ---------------- V11 Overlay ----------------
@@ -4564,9 +4564,9 @@ def test_v27_copy_closes_windows() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     help_zh = Path("snapui.py").read_text(encoding="utf-8")
     docs = Path("i18n_docs.py").read_text(encoding="utf-8")
-    marks = ("v27", "v40", "v41", "v42", "v43", "关闭截图编辑与截屏助手两个窗口",
+    marks = ("v27", "v40", "v41", "v42", "v43", "v44", "关闭截图编辑与截屏助手两个窗口",
              "合计 250 项", "合计 368 项", "合计 375 项", "合计 381 项", "合计 386 项",
-             "dist/v16", "dist/v41", "dist/v42", "dist/v43")
+             "合计 392 项", "dist/v16", "dist/v41", "dist/v42", "dist/v43", "dist/v44")
     missing = [m for m in marks if m not in readme]
     # v38 新界面在 8 语言文档里都要出现对应说法
     lang_marks = ("command panel", "コマンドパネル", "명령 패널",
@@ -6279,15 +6279,16 @@ def test_v39_menu_buttons_and_panel_window() -> None:
     sp = StylePanel(None, show_pen_arrows=True)
     cur = rotate_cursor()
     ok_ak7 = (
-        not sp._angle_label.isVisible()
-        and not sp._angle_box.isVisible()
-        and "root.addWidget(self._angle_box)" not in src_sd
+        not hasattr(sp, "_angle_label")
+        and not hasattr(sp, "_angle_box")
+        and not hasattr(sp, "_angle_slider")
+        and "_angle_box = QWidget()" not in src_sd
         and cur.shape() != Qt.CrossCursor
         and "cur = rotate_cursor()" in src_sd
         and "self.setCursor(rotate_cursor())" in src_ed
     )
-    record("AK7 样式面板无旋转角度 + 旋转柄旋转光标", ok_ak7,
-           f"angle={sp._angle_box.isVisible()} cursor={cur.shape()}")
+    record("AK7 样式面板无旋转角度工具条 + 旋转柄旋转光标", ok_ak7,
+           f"has_angle_ui={hasattr(sp, '_angle_box')} cursor={cur.shape()}")
 
     for w in (ed, mw):
         w.hide()
@@ -6752,6 +6753,104 @@ def test_v43_confirm_order_and_ok_under_cursor() -> None:
     app.processEvents()
 
 
+def test_v44_no_angle_toolbar_and_pro_marks() -> None:
+    """Stage AP：v44 旋转角度工具条彻底移除 + 4 项高级功能金色 PRO 标识。"""
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication, QWidget
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtCore import QPoint, QRect
+
+    from snapeditor import StylePanel, Shape, Overlay
+    from snap_editor import EditorWindow
+    from snapui import MainWindow, make_icon
+    from hotkeys import Hotkey
+
+    print("\n--- Stage AP: v44 移除角度工具条 / PRO 高级功能标识 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    # AP1 样式面板不再有任何角度控件（根因：_angle_box 无 parent → 独立系统窗）
+    sp = StylePanel(None, show_pen_arrows=True)
+    angle_attrs = [a for a in dir(sp) if "angle" in a.lower()]
+    src_sd = Path(__file__).with_name("snapeditor.py").read_text(encoding="utf-8")
+    ok_ap1 = (
+        not angle_attrs
+        and "_angle_box = QWidget()" not in src_sd
+    )
+    record("AP1 样式面板无角度控件（无独立小窗）", ok_ap1,
+           f"angle_attrs={angle_attrs}")
+
+    # AP2 旋转功能本身仍可用（菜单 90° 步进 + 旋转柄命中）
+    img = QImage(400, 300, QImage.Format_RGB32)
+    img.fill(QColor("white"))
+    ed = EditorWindow(img, [], None)
+    cv = ed.canvas
+    sh = Shape(kind="rect", rect=QRect(60, 60, 100, 60))
+    cv.shapes.append(sh)
+    cv._selected = sh
+    cv._on_select_changed()
+    stepped = cv.rotate_selected(90)
+    hit_handle = cv._hit_rotate_handle(cv._rotate_handle_pos())
+    ok_ap2 = stepped and abs(sh.angle - 90.0) < 0.01 and hit_handle
+    record("AP2 旋转功能仍可用（无角度条也能转）", ok_ap2,
+           f"angle={sh.angle} handle={hit_handle}")
+
+    # AP3 编辑器顶栏：钉在桌面 / 取字是金色 PRO；复制黑底、保存普通
+    pin = ed._top_buttons["pin"]
+    ocr = ed._top_buttons["ocr"]
+    copy = ed._top_buttons["copy"]
+    save = ed._top_buttons["save"]
+    ok_ap3 = (
+        pin.property("pro") is True and "#e8a33d" in pin.styleSheet()
+        and ocr.property("pro") is True and "#e8a33d" in ocr.styleSheet()
+        and not copy.property("pro") and "#1c1c1e" in copy.styleSheet()
+        and not save.property("pro")
+    )
+    record("AP3 顶栏钉图/取字金色PRO，复制黑底不变", ok_ap3,
+           f"pin={pin.property('pro')} ocr={ocr.property('pro')}")
+
+    # AP4 图像变换下拉：左右/上下镜像 PRO；顺旋/逆旋保持基础
+    tf = [ed._actions[f"transform{i}"] for i in range(4)]
+    ok_ap4 = (
+        tf[0].property("pro") is not True and tf[1].property("pro") is not True
+        and tf[2].property("pro") is True and tf[3].property("pro") is True
+        and "PRO" in tf[2].text() and "PRO" in tf[3].text()
+        and "PRO" not in tf[0].text() and "PRO" not in tf[1].text()
+    )
+    record("AP4 镜像2项PRO，顺旋逆旋仍基础", ok_ap4,
+           f"texts={[a.text() for a in tf]}")
+
+    # AP5 遮罩工具条：4 项高级功能按钮 kind=pro，复制仍 primary
+    tb = Overlay(img, dpr=1.0).toolbar
+    pro_keys = ("左右", "上下", "长截图", "取字", "钉在桌面")
+    ok_ap5 = (
+        all(tb._actions[k].property("kind") == "pro" for k in pro_keys)
+        and tb._actions["复制"].property("kind") != "pro"
+        and "QPushButton[kind=\"pro\"]" in src_sd
+    )
+    record("AP5 遮罩工具条5项PRO，复制非PRO", ok_ap5,
+           f"pro_kinds={[tb._actions[k].property('kind') for k in pro_keys]} "
+           f"copy={tb._actions['复制'].property('kind')!r}")
+
+    # AP6 主窗口命令面板：长截图/OCR/贴出剪贴板 3 行 PRO，其他行普通
+    mw = MainWindow(make_icon(), Hotkey(), "rect", Path(tempfile.gettempdir()))
+    p = mw._panel
+    ok_ap6 = (
+        p._rows["long_capture"].is_pro()
+        and p._rows["ocr"].is_pro()
+        and p._rows["pin_clipboard"].is_pro()
+        and not p._rows["dir"].is_pro()
+    )
+    record("AP6 命令面板3行PRO，其它行普通", ok_ap6,
+           f"long={p._rows['long_capture'].is_pro()} dir={p._rows['dir'].is_pro()}")
+
+    for w in (ed, mw, sp):
+        w.hide(); w.deleteLater()
+    app.processEvents()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -6803,6 +6902,7 @@ if __name__ == "__main__":
     test_v41_top_style_dropdown_icons_and_wrapped_cells()
     test_v42_confirm_at_cursor_and_top_dock()
     test_v43_confirm_order_and_ok_under_cursor()
+    test_v44_no_angle_toolbar_and_pro_marks()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

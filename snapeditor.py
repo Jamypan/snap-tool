@@ -1459,25 +1459,10 @@ class StylePanel(QWidget):
         self._bold_check.toggled.connect(lambda on: self._emit("bold", on))
         root.addWidget(self._bold_check)
 
-        # v39：旋转角度不再出现在样式面板（旋转柄可以直接拖）。
-        # 保留控件对象供旧接口兼容，但不加进布局、永远隐藏。
-        self._angle_label = QLabel(t("旋转角度"))
-        self._angle_label.setVisible(False)
-        self._angle_box = QWidget()
-        angle_row = QHBoxLayout(self._angle_box)
-        angle_row.setContentsMargins(0, 0, 0, 0)
-        angle_row.setSpacing(6)
-        self._angle_slider = QSlider(Qt.Horizontal)
-        self._angle_slider.setRange(-180, 180)
-        self._angle_slider.setValue(0)
-        self._angle_slider.setFocusPolicy(Qt.NoFocus)
-        self._angle_slider.valueChanged.connect(self._on_angle_changed)
-        angle_row.addWidget(self._angle_slider)
-        self._angle_value = QLabel("0°")
-        self._angle_value.setObjectName("angleValue")
-        self._angle_value.setFixedWidth(38)
-        angle_row.addWidget(self._angle_value)
-        self._angle_box.setVisible(False)
+        # v44：旋转角度工具条彻底移除。旧版本这里建了一个没有 parent 的
+        # QWidget（_angle_box），set_shape() 里 setVisible(True) 后会变成一个
+        # 带系统标题栏的独立小窗（蓝色滑块 + 0°），画矩形/椭圆/文字时弹出。
+        # 旋转仍可用——拖图形上的旋转柄，或用菜单的 90° 步进。
 
         # --- 文字背景色（文字）---
         # 与封闭图形的「填充色」用同一套交互：预设色块 + 独立透明度滑块，
@@ -1602,11 +1587,6 @@ class StylePanel(QWidget):
             self._pen_arrow_start,
             self._pen_arrow_end,
         ]
-        # 只有矩形 / 椭圆 / 文字能绕自身中心旋转
-        self._rotatable_only = [
-            self._angle_label, self._angle_box,
-        ]
-
         # 初始隐藏填充/背景色块（勾选「启用」后才显示）
         for b in self._fill_btns + self._bg_btns:
             b.setVisible(False)
@@ -1672,7 +1652,6 @@ class StylePanel(QWidget):
         self._fill_alpha_label.setText(t("填充透明度"))
         self._size_label.setText(t("字号"))
         self._bold_check.setText(t("加粗"))
-        self._angle_label.setText(t("旋转角度"))
         self._bg_label.setText(t("文字背景色"))
         self._bg_check.setText(t("启用"))
         self._bg_alpha_label.setText(t("背景透明度"))
@@ -1695,10 +1674,6 @@ class StylePanel(QWidget):
     # ---------------------------------------------------------- 工具方法
     def _emit(self, key: str, value) -> None:
         self.style_changed.emit({key: value})
-
-    def _on_angle_changed(self, value: int) -> None:
-        self._angle_value.setText(f"{int(value)}°")
-        self._emit("angle", float(value))
 
     def _make_preset_color_buttons(self, key: str) -> list:
         """生成一排预设颜色块，点击即 emit 对应的样式键。
@@ -1826,7 +1801,6 @@ class StylePanel(QWidget):
         kind = shape.kind if shape else None
         is_shape = kind in ("rect", "ellipse", "mosaic")
         is_text = kind == "text"
-        is_rotatable = kind in ROTATABLE_KINDS
         # 没有选中标注时也显示，方便先设好「新建画笔/直线」的默认箭头
         is_pen = self._show_pen_arrows and (
             kind in ("pen", "line") or shape is None
@@ -1851,8 +1825,6 @@ class StylePanel(QWidget):
             w.setVisible(not is_text)
         for w in self._pen_only:
             w.setVisible(is_pen)
-        for w in self._rotatable_only:
-            w.setVisible(is_rotatable)
         # 子组：先按类型整体显隐，再按「是否启用」显隐，避免选到非文字
         # 标注时把文字控件单独放出来
         for b in self._bg_btns:
@@ -1877,13 +1849,7 @@ class StylePanel(QWidget):
         self._size_slider.setValue(int(font_size))
         self._size_slider.blockSignals(False)
 
-        # 旋转角度（只对矩形 / 椭圆 / 文字可见）
-        angle = int(round(normalize_angle(shape_angle(shape)))) if shape else 0
-        angle = max(-180, min(180, angle))
-        self._angle_slider.blockSignals(True)
-        self._angle_slider.setValue(angle)
-        self._angle_slider.blockSignals(False)
-        self._angle_value.setText(f"{angle}°")
+        # v44：角度控件已移除，旋转只通过旋转柄 / 菜单 90° 步进完成。
 
         # 加粗
         bold = shape.bold if shape else False
@@ -2816,9 +2782,12 @@ class Toolbar(QWidget):
         def add_action(key: str, tip: str, sig: Signal, kind: str = "") -> None:
             b = QPushButton()
             b.setCursor(Qt.PointingHandCursor)
-            b.setToolTip(t(tip))
+            b.setToolTip(t(tip) + ("  · PRO 高级功能" if kind == "pro" else ""))
             b.setFocusPolicy(Qt.NoFocus)
-            b.setIcon(toolbar_icon(key, "#ffffff" if kind == "primary" else None))
+            b.setIcon(toolbar_icon(
+                key,
+                "#ffffff" if kind == "primary" else ("#1c1c1e" if kind == "pro" else None),
+            ))
             b.setIconSize(QSize(18, 18))
             if kind == "primary":
                 b.setFixedHeight(38)
@@ -2840,16 +2809,16 @@ class Toolbar(QWidget):
         add_sep()
         add_action("顺旋", "顺时针旋转 90° (Ctrl+R)", self.rot_cw_clicked)
         add_action("逆旋", "逆时针旋转 90° (Ctrl+Shift+R)", self.rot_ccw_clicked)
-        add_action("左右", "左右镜像 / 水平翻转 (Ctrl+H)", self.flip_h_clicked)
-        add_action("上下", "上下镜像 / 垂直翻转 (Ctrl+Shift+H)", self.flip_v_clicked)
+        add_action("左右", "左右镜像 / 水平翻转 (Ctrl+H)", self.flip_h_clicked, "pro")
+        add_action("上下", "上下镜像 / 垂直翻转 (Ctrl+Shift+H)", self.flip_v_clicked, "pro")
 
         add_sep()
-        add_action("长截图", "滚动长截图", self.long_clicked)
-        add_action("取字", "识别选区文字 (OCR)", self.ocr_clicked)
+        add_action("长截图", "滚动长截图", self.long_clicked, "pro")
+        add_action("取字", "识别选区文字 (OCR)", self.ocr_clicked, "pro")
         add_action("保存", "另存为文件 (Ctrl+S)", self.save_clicked)
 
         add_sep()
-        add_action("钉在桌面", "钉在桌面：把当前截图贴成可移动的浮窗", self.pin_clicked)
+        add_action("钉在桌面", "钉在桌面：把当前截图贴成可移动的浮窗", self.pin_clicked, "pro")
         add_action("复制", "复制到剪贴板 (Enter)", self.copy_clicked, "primary")
 
         add_sep()
@@ -2873,6 +2842,9 @@ class Toolbar(QWidget):
             'QPushButton[kind="primary"] { background:#1c1c1e; color:#ffffff;'
             " padding:0 15px; font-size:13px; font-weight:600; border-radius:13px; }"
             'QPushButton[kind="primary"]:hover { background:#34302c; }'
+            # v44：高级功能金色底 + 深墨图标（PRO 标识，功能不变）
+            'QPushButton[kind="pro"] { background:#e8a33d; border:none; border-radius:13px; }'
+            'QPushButton[kind="pro"]:hover { background:#d99426; }'
         )
 
     # ---------------------------------------------------------------- 阶段
@@ -2984,7 +2956,8 @@ class Toolbar(QWidget):
             kind, _, name = key.partition(":")
             btn = self._buttons.get(name) if kind == "tool" else self._actions.get(name)
             if btn is not None:
-                btn.setToolTip(t(text_key))
+                is_pro = btn.property("kind") == "pro"
+                btn.setToolTip(t(text_key) + ("  · PRO 高级功能" if is_pro else ""))
         if self._phase == "dock":
             copy_b = self._actions.get("复制")
             if copy_b is not None:

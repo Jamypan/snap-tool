@@ -47,6 +47,10 @@ DIM = "#2b3036"          # 遮罩外的深色底
 CANVAS_BG = "#efece7"    # 编辑器画布底
 HOVER = "#f5f0e8"        # 悬停底色
 GREEN = "#1f8a5f"        # 「已启动」徽标文字
+# v44：高级功能（PRO）金色系——与「当前选中」的暖橙刻意区分
+PRO = "#e8a33d"          # 高级功能金（图标方块底 / 角标）
+PRO_SOFT = "#fff4e2"     # 高级功能浅金底（整行背景）
+PRO_LINE = "#f0d7a8"     # 高级功能描边
 
 FONT_FAMILY = '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Segoe UI",sans-serif'
 FONT_QSS = f"font-family:{FONT_FAMILY};"
@@ -481,6 +485,7 @@ class PanelRow(QPushButton):
         super().__init__(parent)
         self._icon_name = icon_name
         self._highlight = False
+        self._pro = False            # v44：高级功能金色 PRO 标识
         self._key = key
         # 自绘不画文字，但保留按钮 text 供读屏 / 自测按文案查找
         self.setText(title)
@@ -544,6 +549,15 @@ class PanelRow(QPushButton):
             self._highlight = on
             self.update()
 
+    def set_pro(self, on: bool) -> None:
+        """标为高级功能：金色浅底 + 金色图标方块 + 图标右下角金色小点。"""
+        if on != self._pro:
+            self._pro = on
+            self.update()
+
+    def is_pro(self) -> bool:
+        return self._pro
+
     def paintEvent(self, ev) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -552,19 +566,35 @@ class PanelRow(QPushButton):
             p.setPen(Qt.NoPen)
             p.setBrush(qcolor(SOFT))
             p.drawRoundedRect(r, ROW_RADIUS, ROW_RADIUS)
+        elif self._pro:
+            # v44：高级功能整行浅金底（选中态仍以 SOFT 优先）
+            p.setPen(QPen(qcolor(PRO_LINE), 1))
+            p.setBrush(qcolor(PRO_SOFT))
+            p.drawRoundedRect(r, ROW_RADIUS, ROW_RADIUS)
         elif self.underMouse():
             p.setPen(Qt.NoPen)
             p.setBrush(qcolor(HOVER))
             p.drawRoundedRect(r, ROW_RADIUS, ROW_RADIUS)
         # 图标方块
         g = QRectF(self._badge.geometry().adjusted(0, 0, 0, 0))
-        p.setPen(QPen(qcolor("#ffd9bd" if self._highlight else LINE), 1))
-        p.setBrush(qcolor("#ffffff"))
+        if self._pro:
+            p.setPen(QPen(qcolor(PRO), 1))
+            p.setBrush(qcolor(PRO))
+        else:
+            p.setPen(QPen(qcolor("#ffd9bd" if self._highlight else LINE), 1))
+            p.setBrush(qcolor("#ffffff"))
         p.drawRoundedRect(g.adjusted(0.5, 0.5, -0.5, -0.5), 10, 10)
         side = 16.0
         box = QRectF(g.center().x() - side / 2, g.center().y() - side / 2, side, side)
         paint_icon(p, self._icon_name, box,
-                   qcolor(ORANGE if self._highlight else INK2), 1.7)
+                   qcolor(INK if self._pro else (ORANGE if self._highlight else INK2)), 1.7)
+        # v44：高级功能在图标方块右下角加一枚金色小圆点（金色方块已足够醒目，
+        # 不再叠 PRO 文字，避免和右侧快捷键提示重叠）
+        if self._pro:
+            dot = QRectF(g.right() - 4, g.bottom() - 4, 11, 11)
+            p.setPen(QPen(qcolor("#ffffff"), 1.5))
+            p.setBrush(qcolor(PRO))
+            p.drawEllipse(dot)
         p.end()
 
 

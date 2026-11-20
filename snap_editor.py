@@ -1600,24 +1600,32 @@ class EditorWindow(QMainWindow):
         dock_lay.setSpacing(3)
 
         def icon_btn(icon_name: str, tip: str, slot, objname: str,
-                     primary: bool = False) -> QPushButton:
+                     primary: bool = False, pro: bool = False) -> QPushButton:
             """与 Dock 完全一致的 38×38 纯图标按钮。
 
             primary=True 时套用 Dock「复制」主按钮的黑色底 + 白图标，
             但依旧不带文字（用户要求：复制黑底、不要文字）。
+            pro=True 时套用高级功能金色底 + 深墨图标（v44）。
             """
             b = QPushButton(top_dock)
             b.setObjectName(objname)
+            b.setProperty("pro", pro)
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
-            b.setToolTip(tip)
-            b.setIcon(toolbar_icon(icon_name, "#ffffff" if primary else None))
+            b.setToolTip(tip + ("  · PRO 高级功能" if pro else ""))
+            b.setIcon(toolbar_icon(icon_name, "#ffffff" if primary
+                                   else ("#1c1c1e" if pro else None)))
             b.setIconSize(QSize(19, 19))
             b.setFixedSize(38, 38)
             if primary:
                 b.setStyleSheet(
                     "QPushButton{background:#1c1c1e;border:none;border-radius:13px;}"
                     "QPushButton:hover{background:#34302c;}"
+                )
+            elif pro:
+                b.setStyleSheet(
+                    "QPushButton{background:#e8a33d;border:none;border-radius:13px;}"
+                    "QPushButton:hover{background:#d99426;}"
                 )
             # v42：非主按钮不写死样式，交给 Dock 容器的 QSS 统一管理，
             # 与底部 Dock 的普通按钮（透明底 + 悬停浅底 + 13px 圆角）完全一致。
@@ -1638,8 +1646,10 @@ class EditorWindow(QMainWindow):
         )
         for key, _label, tip, icon_name, slot in specs:
             # v41：复制用黑底白图标（与 Dock 主按钮一致），纯图标不带文字
+            # v44：钉在桌面 / 取字是高级功能，用金色底 PRO 标识
             b = icon_btn(icon_name, tip, slot, f"top_{key}",
-                         primary=(key == "copy"))
+                         primary=(key == "copy"),
+                         pro=(key in ("pin", "ocr")))
             dock_lay.addWidget(b)
             self._top_buttons[key] = b
 
@@ -1775,7 +1785,13 @@ class EditorWindow(QMainWindow):
             ("Ctrl+R", "Ctrl+Shift+R", "Ctrl+H", "Ctrl+Shift+H"),
             ("顺旋", "逆旋", "左右", "上下"),
         )):
-            a = QAction(toolbar_icon(icon_name), t(text_key), self)
+            # v44：左右 / 上下镜像是高级功能，图标用金色 + 文案带 PRO 标记；
+            # 顺旋 / 逆旋仍是基础功能，保持原样。
+            is_pro = mode in ("flip_h", "flip_v")
+            ico = toolbar_icon(icon_name, "#e8a33d") if is_pro else toolbar_icon(icon_name)
+            label = t(text_key) + ("  · PRO" if is_pro else "")
+            a = QAction(ico, label, self)
+            a.setProperty("pro", is_pro)
             a.setShortcut(shortcut)
             a.triggered.connect(lambda _=False, m=mode: self.canvas.transform_image(m))
             m_transform.addAction(a)
@@ -1876,7 +1892,10 @@ class EditorWindow(QMainWindow):
             ("view", self._VIEW_TEXTS), ("rotate", self._ROTATE_TEXTS),
         ):
             for i, text_key in enumerate(keys):
-                self._actions[f"{prefix}{i}"].setText(t(text_key))
+                a = self._actions[f"{prefix}{i}"]
+                # v44：左右 / 上下镜像（transform 索引 2、3）切换语言后仍保留 PRO 标记
+                pro = prefix == "transform" and i in (2, 3)
+                a.setText(t(text_key) + ("  · PRO" if pro else ""))
         # v40：顶部是纯图标按钮，语言切换只更新提示，不再改文字
         for key, label_key in zip(("copy", "save", "pin", "ocr"),
                                    ("复制", "保存", "钉在桌面", "取字")):
