@@ -518,6 +518,10 @@ class ScrollControl:
             return False
         return rect.x <= x < rect.x + rect.w and rect.y <= y < rect.y + rect.h
 
+    def cursor_in_exclude(self) -> bool:
+        """公共只读入口：拼接线程判断光标是否已移到控制条（去点「确定」）。"""
+        return self._cursor_in_exclude()
+
     def _sync_baseline(self) -> None:
         """把当前已按住的键记成基线。
 
@@ -1005,13 +1009,11 @@ def stitch_scroll(
     # 底部预留：客户区最下面几十像素是浏览器状态条 / 浮层的高发区
     guard = min(max(0, int(bottom_guard)), max(0, rect.h // 6))
     grab_rect = ScreenRect(rect.x, rect.y, rect.w, max(1, rect.h - guard))
-    # 右侧滚动条附近既保证滚轮发给目标窗口，又不会 hover 到链接
-    cx = rect.x + rect.w - max(3, min(10, rect.w // 120))
-    cy = rect.y + grab_rect.h // 2
-    saved_cursor = get_cursor_pos()
-    set_cursor_pos(cx, cy)
-    time.sleep(0.12)
-
+    # v49：旧版每次翻页前都把光标 SetCursorPos 到窗口最右侧（贴近滚动条），
+    # 结果用户想移到「确定」按钮时会被一次次拉回去，几乎点不到。
+    # 选窗口时用户已经把光标点在了目标窗口里，滚轮本来就会发给它，
+    # 根本不需要抢光标。现在完全不动鼠标；用户一旦把光标移出窗口 / 移到
+    # 控制条上，_scroll() 就停发滚轮，把控制权彻底交还给用户。
     try:
         hidden = find_floating_overlays(grab_rect) if hide_overlays else []
     except Exception:  # noqa: BLE001  探测失败不阻断拼接
@@ -1028,7 +1030,8 @@ def stitch_scroll(
         "score": 0.0,
         "align_diff": 0.0,
         "height": 0,
-        "cursor_restored": False,
+        "cursor_restored": False,   # v49 起不再移动光标，保留字段兼容旧诊断
+        "cursor_parked": 0,         # 光标已移出抓取区 / 在控制条上，本帧停发滚轮
         "retries": 0,
         "notches": notches,
         "overlays_hidden": len(hidden),
@@ -1046,9 +1049,18 @@ def stitch_scroll(
         return "user-interrupt"
 
     def _scroll(extra: float = 0.0) -> None:
-        # 只在开头定位一次光标不够：用户一动鼠标，SendInput 的滚轮就会发给
-        # 光标下的其它窗口，页面不再滚动 → 下一帧被误判「到底」。
-        set_cursor_pos(cx, cy)
+        # 光标已离开抓取区，或正停在控制条上（用户去点「确定」）——
+        # 此时绝不能继续发滚轮：一是滚轮会落到别的窗口，二是会把用户的
+        # 鼠标抢回来。停发滚轮，页面静止，用户从容点击即可。
+        x, y = get_cursor_pos()
+        in_region = (
+            rect.x <= x < rect.x + rect.w and rect.y <= y < rect.y + rect.h
+        )
+        in_bar = bool(control is not None and control.cursor_in_exclude())
+        if not in_region or in_bar:
+            stats["cursor_parked"] += 1
+            _wait(0.05)
+            return
         _send_mouse_wheel(notches)
         wait = settle_seconds + extra
         if control is not None:
@@ -1359,8 +1371,8 @@ def stitch_scroll(
         return Image.fromarray(canvas), stats
 
     finally:
-        set_cursor_pos(*saved_cursor)
-        stats["cursor_restored"] = True
+        # v49：不再恢复光标位置。用户在拼接期间可能已经把鼠标移到「确定」
+        # 按钮上，强行写回起点只会让他觉得鼠标又被人抢走。
         restore_floating_overlays(hidden)
 
 

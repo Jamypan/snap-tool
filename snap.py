@@ -240,6 +240,23 @@ def place_bar_outside(
     return None
 
 
+def place_bar_near_cursor(
+    cursor: QPoint, screen: QRect, bw: int, bh: int,
+    btn_center_x: float, gap: int = 4,
+) -> QRect:
+    """v49：把控制条的「确定」按钮中心放到鼠标正下方约 20 像素。
+
+    旧版优先把整条放到选区外（窗口上方/下方），选区占满屏幕时还会跑到
+    屏幕角落；用户得先满屏找按钮，而且拼接线程每次翻页都把光标抢回窗口
+    右缘，根本移不过去。现在按钮跟着鼠标走，位置不够时再向屏幕内夹取。
+    """
+    x = int(round(cursor.x() - btn_center_x))
+    y = int(round(cursor.y() + gap))
+    x = max(screen.left(), min(x, screen.right() - bw))
+    y = max(screen.top(), min(y, screen.bottom() - bh))
+    return QRect(x, y, bw, bh)
+
+
 def bar_screen_rect(bar: QWidget, dpr: float) -> "snapback.ScreenRect":
     """控制条全局逻辑矩形 → 屏幕物理矩形（供 ScrollControl 过滤点击）。"""
     g = bar.geometry()
@@ -436,7 +453,8 @@ class BusyBar(QWidget):
         self._render_state()
         self._render_detail()
         self.finish_btn.setText(t("确定 ✓"))
-        self.hint.setText(t("左键暂停 / 继续 · 右键结束 · 点「确定」结束    Esc 结束"))
+        # v49：光标移出窗口后自动停滚，用户可以把鼠标放到这条上从容点确定
+        self.hint.setText(t("鼠标移出窗口即停滚 · 点「确定」结束    Esc 结束"))
 
 
 # ---------------------------------------------------------------------------
@@ -1294,11 +1312,16 @@ class App:
             int(round(vs.w / dpr)),
             int(round(vs.h / dpr)),
         )
-        pos = place_bar_outside(sel, screen, bw, bh)
-        outside = pos is not None
-        if not outside:
-            # 窗口占满整个虚拟屏：控制条只能放在角落，改由抓帧瞬间隐藏兜底
-            pos = QRect(screen.left() + 8, screen.top() + 8, bw, bh)
+        # v49：控制条跟着鼠标走——「确定」按钮中心对准鼠标正下方约 20px。
+        # 光标是物理像素，这里统一换算到逻辑坐标再和 screen / sel 比。
+        phys_x, phys_y = snapback.get_cursor_pos()
+        cursor = QPoint(int(round(phys_x / dpr)), int(round(phys_y / dpr)))
+        btn_w = self.busy.finish_btn.sizeHint().width() or 70
+        btn_center_x = bw - 12 - btn_w / 2   # root 右内边距 12 + 半个按钮宽
+        pos = place_bar_near_cursor(cursor, screen, bw, bh, btn_center_x)
+        # 落在选区内就用抓帧瞬间隐藏兜底；原来的「优先放到窗口外」会让按钮
+        # 跑到屏幕角落，用户得满屏找，不再是首选。
+        outside = not pos.intersects(sel)
         self.busy.move(pos.topLeft())
         self.busy.show()
 
@@ -1323,12 +1346,11 @@ class App:
             self._close_busy()
             self._restore_own_windows()
             qimg = pil_to_qimage(pil_img)
-            # v26：长截图完成也自动进剪贴板，预览窗口标题同步显示已复制
+            # v26：长截图完成也自动进剪贴板
             self._copy_to_clipboard(qimg)
-            self.preview = PreviewWindow(qimg, self.save_dir, copied=True)
-            self.preview.show()
-            self.preview.raise_()
-            self.preview.activateWindow()
+            # v49：不再只弹「预览」窗口（只能复制/保存/关闭，没法标注），
+            # 直接开编辑器，和普通截图走同一套标注 / 复制 / 保存流程。
+            self._open_editor(qimg, [])
             # v19：把「为什么结束」讲清楚，方便区分真到底与异常中断
             reason = stats.get("stop_reason")
             frames = stats.get("frames", 0)

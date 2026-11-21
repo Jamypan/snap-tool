@@ -2622,7 +2622,7 @@ def test_long_capture_v17() -> None:
         "点击窗口后自动滚动拼接成长图",
         "单击选择要截长屏的窗口，自动向下滚屏    右键 / Esc 取消",
         "已暂停 · 左键继续", "已拼 {frames} 帧 · {height}px", "确定 ✓",
-        "左键暂停 / 继续 · 右键结束 · 点「确定」结束    Esc 结束",
+        "鼠标移出窗口即停滚 · 点「确定」结束    Esc 结束",
         "已滚动到底，长截图自动结束",
     )
     keys_ok = all(len(i18n.ROWS.get(k, ())) == 8 for k in new_keys)
@@ -2640,7 +2640,7 @@ def test_long_capture_v17() -> None:
         and "finish_clicked.connect" in src_long
         and "set_exclude_rect" in src_long
         and "make_bar_hook" in src_long
-        and "place_bar_outside" in src_long
+        and "place_bar_near_cursor" in src_long
     )
     record("Q16 Worker 带控制器且控制条信号/隐藏钩子已接线", ok_q16,
            f"control={type(w.control).__name__} hooks={w.before_grab is None}")
@@ -2855,9 +2855,9 @@ def test_v19_features() -> None:
         record("S4 自适应减小滚轮步长", ok_s4,
                f"notches={st4['notches']} reason={st4['stop_reason']}")
 
-        # S6 每帧滚轮前重新锁定光标
-        ok_s6 = h4["cursor"] >= h4["wheels"] >= 1
-        record("S6 每帧滚轮前重新锁定光标", ok_s6,
+        # S6 v49：不再 SetCursorPos，滚轮照常发出
+        ok_s6 = h4["cursor"] == 0 and h4["wheels"] >= 1
+        record("S6 拼接不抢光标、滚轮照常发出", ok_s6,
                f"cursor={h4['cursor']} wheels={h4['wheels']}")
     finally:
         for n, fn in orig.items():
@@ -3103,18 +3103,16 @@ def test_v20_long_capture_quality() -> None:
             hide_overlays=False, bottom_guard=24,
         )
         guarded = [r for r in seen["rects"] if r.h == 216]
-        # 最后一次 set_cursor_pos 是把光标还给用户（saved_cursor=(0,0)）
-        active = seen["cursor"][:-1]
-        right_side = [p for p in active if p[0] >= 600 - 12]
+        # v49：拼接全程不再 SetCursorPos，光标留在用户点选窗口的位置
         ok_t5 = (
             len(guarded) == len(seen["rects"]) >= 1
             and st5["bottom_guard"] == 24
-            and len(right_side) == len(active) >= 1
-            and seen["cursor"][-1] == (0, 0)
+            and not seen["cursor"]
+            and st5["cursor_parked"] == 0
         )
-        record("T5 捕获区底部预留安全行、光标停在右侧滚动条而非画面中心",
+        record("T5 捕获区底部预留安全行、不再抢光标",
                ok_t5, f"rects={[r.h for r in seen['rects']]} "
-                      f"cursor_x={[p[0] for p in seen['cursor']]}")
+                      f"set_cursor_calls={len(seen['cursor'])}")
 
         # T11 到底补尾：正常帧都用缩短的捕获区，最后一帧用完整 rect
         # v46：用 top=0（内容完全贴在画布末尾＝这一帧没滚动）来表达「到底」；
@@ -4470,7 +4468,7 @@ def test_v26_copy_button() -> None:
         and "self.toolbar.copy_clicked.connect(self._copy_only)" in src_overlay_init
         and "self.raw_crop()" in src_copy
         and "self._copy_to_clipboard(qimg)" in src_long
-        and "copied=True" in src_long
+        and "self._open_editor(qimg, [])" in src_long
     )
     record("Z5 全屏/长截图完成自动复制接线", ok_z5,
            f"init={src_init.count('copy_only')} long={src_long.count('_copy_to_clipboard')}")
@@ -7319,6 +7317,89 @@ def test_v48_about_cleanup() -> None:
            f"datas={'THIRD-PARTY-LICENSES.txt' in spec}")
 
 
+def test_v49_long_capture_cursor_and_annotate() -> None:
+    """Stage AU  确定键跟鼠标 + 不抢光标 + 长截图后可直接标注。"""
+    from pathlib import Path
+
+    import numpy as np
+    import snapback as sb
+    from PIL import Image
+    from PySide6.QtCore import QPoint, QRect
+
+    import snap as snapmod
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    # AU1 确定按钮中心对准鼠标正下方
+    screen = QRect(0, 0, 1920, 1080)
+    bw, bh, btn_cx = 510, 72, 463
+    p1 = snapmod.place_bar_near_cursor(QPoint(1000, 400), screen, bw, bh, btn_cx)
+    ok_au1 = (p1.x() + btn_cx == 1000 and p1.y() == 404
+              and p1.width() == bw and p1.height() == bh)
+    # 贴右/贴底时被夹在屏幕内，不溢出
+    p2 = snapmod.place_bar_near_cursor(QPoint(1915, 1075), screen, bw, bh, btn_cx)
+    clamped = (screen.contains(p2) and p2.right() <= screen.right()
+               and p2.bottom() <= screen.bottom())
+    record("AU1 确定键落在鼠标正下方且贴边不溢出", ok_au1 and clamped,
+           f"p1={p1.getRect()} p2={p2.getRect()}")
+
+    # AU2 / AU3 光标离开抓取区 / 停在控制条上 → 停发滚轮，不抢鼠标
+    names = ("grab_region", "find_vertical_overlap", "_send_mouse_wheel",
+             "get_cursor_pos", "set_cursor_pos")
+    orig = {n: getattr(sb, n) for n in names}
+    calls: dict = {"wheels": 0, "cursor": 0}
+
+    def setup(cursor_xy, exclude=None):
+        calls.update(wheels=0, cursor=0)
+        frame = np.full((60, 60, 3), 120, dtype=np.uint8)
+        sb.grab_region = lambda _r: Image.fromarray(frame)
+        sb.find_vertical_overlap = lambda a, b, **kw: (0, 0.99)
+        sb._send_mouse_wheel = lambda n: calls.__setitem__(
+            "wheels", calls["wheels"] + 1)
+        sb.get_cursor_pos = lambda: cursor_xy
+        sb.set_cursor_pos = lambda x, y: calls.__setitem__(
+            "cursor", calls["cursor"] + 1)
+        return sb.ScrollControl(exclude_rect=exclude)
+
+    try:
+        ctrl_out = setup((9999, 9999))
+        _, st_out = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 60, 60), settle_seconds=0, max_frames=2,
+            hide_overlays=False, bottom_guard=0, control=ctrl_out,
+        )
+        ok_au2 = (calls["wheels"] == 0 and calls["cursor"] == 0
+                  and st_out["cursor_parked"] >= 1)
+
+        ctrl_bar = setup((5, 5), sb.ScreenRect(0, 0, 20, 20))
+        _, st_bar = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 60, 60), settle_seconds=0, max_frames=2,
+            hide_overlays=False, bottom_guard=0, control=ctrl_bar,
+        )
+        ok_au3 = (calls["wheels"] == 0 and calls["cursor"] == 0
+                  and st_bar["cursor_parked"] >= 1)
+    finally:
+        for n, v in orig.items():
+            setattr(sb, n, v)
+    record("AU2 鼠标移出窗口即停发滚轮、光标不被搬走", ok_au2,
+           f"wheels={calls['wheels']} parked={st_out['cursor_parked']}")
+    record("AU3 鼠标停在控制条上同样停发滚轮", ok_au3,
+           f"wheels={calls['wheels']} parked={st_bar['cursor_parked']}")
+
+    # AU4 长截图完成进编辑器；拼接核心里不再有抢光标的调用
+    src_snap = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
+    src_back = Path(__file__).with_name("snapback.py").read_text(encoding="utf-8")
+    ok_au4 = (
+        "self._open_editor(qimg, [])" in src_snap
+        and "PreviewWindow(qimg" not in src_snap
+        and "place_bar_near_cursor(" in src_snap
+        and "set_cursor_pos(cx, cy)" not in src_back
+        and "set_cursor_pos(*saved_cursor)" not in src_back
+        and "def cursor_in_exclude(" in src_back
+    )
+    record("AU4 长截图直接进编辑器且拼接不再抢光标", ok_au4,
+           f"editor={'self._open_editor(qimg, [])' in src_snap}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7375,6 +7456,7 @@ if __name__ == "__main__":
     test_v46_scroll_stitch_robustness()
     test_v47_default_split_rows()
     test_v48_about_cleanup()
+    test_v49_long_capture_cursor_and_annotate()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
