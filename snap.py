@@ -240,29 +240,6 @@ def place_bar_outside(
     return None
 
 
-def place_bar_near_cursor(
-    cursor: QPoint, screen: QRect, bw: int, bh: int,
-    btn_center_x: float, gap: int = 18,
-) -> QRect:
-    """v50：把控制条的「确定」按钮中心放到鼠标正下方一小段距离。
-
-    旧版优先把整条放到选区外（窗口上方/下方），选区占满屏幕时还会跑到
-    屏幕角落；用户得先满屏找按钮，而且拼接线程每次翻页都把光标抢回窗口
-    右缘，根本移不过去。现在按钮跟着鼠标走，位置不够时再向屏幕内夹取。
-
-    v50 修正：gap 必须大于忽略区向上的放宽量（10 物理像素 / dpr）。
-    v49 用 gap=4 且忽略区向上放宽 10px，结果鼠标初始位置就被算进
-    「控制条内」，拼接线程第一帧起就停发滚轮 —— 页面完全不滚动。
-    这里留 18px 间距，配合 bar_exclude_rect 只向左右下放宽，鼠标初始
-    位置始终在忽略区之外。
-    """
-    x = int(round(cursor.x() - btn_center_x))
-    y = int(round(cursor.y() + gap))
-    x = max(screen.left(), min(x, screen.right() - bw))
-    y = max(screen.top(), min(y, screen.bottom() - bh))
-    return QRect(x, y, bw, bh)
-
-
 def bar_screen_rect(bar: QWidget, dpr: float) -> "snapback.ScreenRect":
     """控制条全局逻辑矩形 → 屏幕物理矩形（供 ScrollControl 过滤点击）。"""
     g = bar.geometry()
@@ -272,18 +249,6 @@ def bar_screen_rect(bar: QWidget, dpr: float) -> "snapback.ScreenRect":
         int(round(g.width() * dpr)),
         int(round(g.height() * dpr)),
     )
-
-
-def bar_exclude_rect(bar: QWidget, dpr: float) -> "snapback.ScreenRect":
-    """控制条的点击忽略区（物理像素）。
-
-    只向左右下放宽 10px，**上边界绝不外扩**：控制条贴在鼠标正下方，
-    一旦把上边界也往外扩，鼠标初始位置就会被算进「点在控制条上」，
-    拼接线程随后每帧停发滚轮，页面完全不动（v49 的实际 bug）。
-    """
-    r = bar_screen_rect(bar, dpr)
-    m = int(round(10 * dpr))
-    return snapback.ScreenRect(r.x - m, r.y, r.w + 2 * m, r.h + m)
 
 
 def make_bar_hook(bar: QWidget, method: str):
@@ -390,13 +355,11 @@ class OcrWorker(QThread):
 # 长截图进行中的提示条
 # ---------------------------------------------------------------------------
 class BusyBar(QWidget):
-    """滚动长截图进行中的悬浮控制条。
+    """滚动长截图进行中的悬浮控制条（无按钮，纯状态提示）。
 
-    页面内**左键**：暂停 / 再点继续；**右键**：结束；点「确定 ✓」：结束；
+    页面内**左键**：暂停 / 再点继续；**右键** 或 **Esc**：结束；
     滚到底也会自动结束。控制条尽量放在窗口之外，避免被拍进长图。
     """
-
-    finish_clicked = Signal()
 
     def __init__(self) -> None:
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
@@ -414,16 +377,9 @@ class BusyBar(QWidget):
         self.detail = QLabel()
         self.title.setStyleSheet("color:#fff; font-size:14px; font-weight:bold;")
         self.detail.setStyleSheet("color:#cfcfcf; font-size:12px;")
-        self.finish_btn = QPushButton()
-        self.finish_btn.setObjectName("longFinish")
-        self.finish_btn.setCursor(Qt.PointingHandCursor)
-        self.finish_btn.setFocusPolicy(Qt.NoFocus)
-        self.finish_btn.setFixedHeight(30)
-        self.finish_btn.clicked.connect(lambda _checked=False: self.finish_clicked.emit())
         row.addWidget(self.title)
         row.addWidget(self.detail)
         row.addStretch(1)
-        row.addWidget(self.finish_btn)
         root.addLayout(row)
 
         self.hint = QLabel()
@@ -433,16 +389,12 @@ class BusyBar(QWidget):
         self.setStyleSheet(
             """
             QWidget { background:#1f1f1f; border:1px solid #3a3a3a; border-radius:8px; }
-            QPushButton#longFinish {
-                background:#16a34a; color:#fff; border:1px solid #22c55e;
-                border-radius:6px; padding:2px 12px; font-size:13px; font-weight:bold;
-            }
-            QPushButton#longFinish:hover { background:#22c55e; }
             """
         )
+        # 去掉确定按钮后收窄：文字够放即可，不再需要容纳按钮。
         # 固定尺寸：拼接过程中数字/语言变化都不会让控制条改变几何，
         # 否则 exclude_rect 与实际位置会不一致。
-        self.setFixedSize(510, 72)
+        self.setFixedSize(400, 72)
         self.retranslate_ui()
         LANG.changed.connect(self.retranslate_ui)
 
@@ -470,9 +422,8 @@ class BusyBar(QWidget):
     def retranslate_ui(self, _code: str = "") -> None:
         self._render_state()
         self._render_detail()
-        self.finish_btn.setText(t("确定 ✓"))
-        # v49：光标移出窗口后自动停滚，用户可以把鼠标放到这条上从容点确定
-        self.hint.setText(t("鼠标移出窗口即停滚 · 点「确定」结束    Esc 结束"))
+        # v51：去掉确定按钮，直接告诉用户三种结束方式
+        self.hint.setText(t("左键暂停 / 继续 · 右键或 Esc 结束 · 滚到底自动结束"))
 
 
 # ---------------------------------------------------------------------------
@@ -1330,23 +1281,23 @@ class App:
             int(round(vs.w / dpr)),
             int(round(vs.h / dpr)),
         )
-        # v49：控制条跟着鼠标走；v50 把间距加大到 18px，配合忽略区不上扩，
-        # 保证鼠标初始位置不在「控制条内」，滚轮能正常发出。
-        # 光标是物理像素，这里统一换算到逻辑坐标再和 screen / sel 比。
-        phys_x, phys_y = snapback.get_cursor_pos()
-        cursor = QPoint(int(round(phys_x / dpr)), int(round(phys_y / dpr)))
-        btn_w = self.busy.finish_btn.sizeHint().width() or 70
-        btn_center_x = bw - 12 - btn_w / 2   # root 右内边距 12 + 半个按钮宽
-        pos = place_bar_near_cursor(cursor, screen, bw, bh, btn_center_x)
-        # 落在选区内就用抓帧瞬间隐藏兜底；原来的「优先放到窗口外」会让按钮
-        # 跑到屏幕角落，用户得满屏找，不再是首选。
-        outside = not pos.intersects(sel)
+        # v51：恢复 v48 的摆位（控制条放窗口外，避免被拍进长图）。
+        # v49/v50 改成跟鼠标走 + 按「光标是否在控制条内」决定是否发滚轮，
+        # 实际导致页面完全不滚；确定按钮也一并去掉，改用右键 / Esc 结束。
+        pos = place_bar_outside(sel, screen, bw, bh)
+        outside = pos is not None
+        if not outside:
+            # 窗口占满整个虚拟屏：控制条只能放在角落，改由抓帧瞬间隐藏兜底
+            pos = QRect(screen.left() + 8, screen.top() + 8, bw, bh)
         self.busy.move(pos.topLeft())
         self.busy.show()
 
         control = snapback.ScrollControl()
-        # v50：上边界一律不外扩，否则鼠标初始位置被圈进忽略区 → 从头停滚
-        control.set_exclude_rect(bar_exclude_rect(self.busy, dpr))
+        r = bar_screen_rect(self.busy, dpr)
+        m = int(round(10 * dpr))   # 放宽一圈，点边框附近也不算「页面内点击」
+        control.set_exclude_rect(
+            snapback.ScreenRect(r.x - m, r.y - m, r.w + 2 * m, r.h + 2 * m)
+        )
 
         worker = StitchWorker(rect, control)
         if not outside:
@@ -1354,9 +1305,6 @@ class App:
             worker.after_grab = make_bar_hook(self.busy, "show")
         worker.progress.connect(self.busy.update_text)
         worker.state_changed.connect(self.busy.set_paused)
-        self.busy.finish_clicked.connect(
-            lambda: control.request_stop("user-confirm")
-        )
 
         def on_ok(pil_img, stats) -> None:
             self._close_busy()

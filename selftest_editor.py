@@ -2364,10 +2364,10 @@ def test_long_capture_v17() -> None:
         state["r"] = False
 
         c3 = sb.ScrollControl()
-        c3.request_stop("user-confirm")
+        c3.request_stop("user-right-click")
         c3.request_stop("other")
-        record("Q3 点确定结束且幂等",
-               c3.should_stop() and c3.stop_reason == "user-confirm",
+        record("Q3 右键结束且 request_stop 幂等",
+               c3.should_stop() and c3.stop_reason == "user-right-click",
                f"reason={c3.stop_reason}")
 
         c4 = sb.ScrollControl(exclude_rect=sb.ScreenRect(0, 0, 100, 100))
@@ -2512,7 +2512,7 @@ def test_long_capture_v17() -> None:
     bar_q = snapmod.BusyBar()
     bar_q.move(100, 50)
     br = snapmod.bar_screen_rect(bar_q, 2.0)
-    ok_q10 = (br.x, br.y, br.w, br.h) == (200, 100, 1020, 144)
+    ok_q10 = (br.x, br.y, br.w, br.h) == (200, 100, 800, 144)
     record("Q10 bar_screen_rect 按 DPR 换算物理矩形", ok_q10,
            f"{(br.x, br.y, br.w, br.h)}")
 
@@ -2582,10 +2582,9 @@ def test_long_capture_v17() -> None:
            f"full={full_q[0] if full_q else None} client={client_q[0] if client_q else None}")
 
     # ---------------- Q14  BusyBar 控制条 ----------------
-    fired = []
-    bar_q.finish_clicked.connect(lambda: fired.append(1))
-    bar_q.finish_btn.click()
-    btn_ok = bool(fired) and ("确定" in bar_q.finish_btn.text() or "✓" in bar_q.finish_btn.text())
+    no_btn = (not hasattr(bar_q, "finish_btn")
+              and not hasattr(bar_q, "finish_clicked"))
+    hint_ok = ("右键" in bar_q.hint.text() and "Esc" in bar_q.hint.text())
     bar_q.set_paused(True)
     paused_text = "暂停" in bar_q.title.text()
     bar_q.set_paused(False)
@@ -2596,13 +2595,13 @@ def test_long_capture_v17() -> None:
     for code in i18n.LANGS:
         i18n.LANG.set_preference(code, persist=False)
         app.processEvents()
-        if not (bar_q.finish_btn.text() and bar_q.hint.text() and bar_q.title.text()):
+        if not (bar_q.hint.text() and bar_q.title.text()):
             bad_lang_q.append(code)
     i18n.LANG.set_preference("zh_CN", persist=False)
     app.processEvents()
-    record("Q14 控制条有确定✓、暂停状态、帧数、8 语言即时刷新",
-           btn_ok and paused_text and running_text and detail_ok and not bad_lang_q,
-           f"btn={btn_ok} paused={paused_text} running={running_text} "
+    record("Q14 控制条无确定键、暂停状态、帧数、8 语言即时刷新",
+           no_btn and hint_ok and paused_text and running_text and detail_ok and not bad_lang_q,
+           f"no_btn={no_btn} hint={hint_ok} paused={paused_text} running={running_text} "
            f"detail={detail_ok} bad_lang={bad_lang_q}")
 
     # ---------------- Q15  8 语言帮助 / 词条 ----------------
@@ -2621,8 +2620,8 @@ def test_long_capture_v17() -> None:
     new_keys = (
         "点击窗口后自动滚动拼接成长图",
         "单击选择要截长屏的窗口，自动向下滚屏    右键 / Esc 取消",
-        "已暂停 · 左键继续", "已拼 {frames} 帧 · {height}px", "确定 ✓",
-        "鼠标移出窗口即停滚 · 点「确定」结束    Esc 结束",
+        "已暂停 · 左键继续", "已拼 {frames} 帧 · {height}px",
+        "左键暂停 / 继续 · 右键或 Esc 结束 · 滚到底自动结束",
         "已滚动到底，长截图自动结束",
     )
     keys_ok = all(len(i18n.ROWS.get(k, ())) == 8 for k in new_keys)
@@ -2637,12 +2636,12 @@ def test_long_capture_v17() -> None:
     ok_q16 = (
         isinstance(w.control, sb.ScrollControl)
         and hasattr(w, "state_changed") and w.before_grab is None
-        and "finish_clicked.connect" in src_long
         and "set_exclude_rect" in src_long
         and "make_bar_hook" in src_long
-        and "place_bar_near_cursor" in src_long
+        and "place_bar_outside" in src_long
+        and "finish_clicked" not in src_long
     )
-    record("Q16 Worker 带控制器且控制条信号/隐藏钩子已接线", ok_q16,
+    record("Q16 Worker 带控制器且隐藏钩子已接线、无确定按钮", ok_q16,
            f"control={type(w.control).__name__} hooks={w.before_grab is None}")
 
     # ---------------- Q17  主窗口副标题 ----------------
@@ -2855,9 +2854,9 @@ def test_v19_features() -> None:
         record("S4 自适应减小滚轮步长", ok_s4,
                f"notches={st4['notches']} reason={st4['stop_reason']}")
 
-        # S6 v49：不再 SetCursorPos，滚轮照常发出
-        ok_s6 = h4["cursor"] == 0 and h4["wheels"] >= 1
-        record("S6 拼接不抢光标、滚轮照常发出", ok_s6,
+        # S6 v51：恢复 v48 每帧锁定光标，保证滚轮发给目标窗口
+        ok_s6 = h4["cursor"] >= h4["wheels"] >= 1
+        record("S6 每帧滚轮前重新锁定光标、滚轮正常发出", ok_s6,
                f"cursor={h4['cursor']} wheels={h4['wheels']}")
     finally:
         for n, fn in orig.items():
@@ -3103,14 +3102,14 @@ def test_v20_long_capture_quality() -> None:
             hide_overlays=False, bottom_guard=24,
         )
         guarded = [r for r in seen["rects"] if r.h == 216]
-        # v49：拼接全程不再 SetCursorPos，光标留在用户点选窗口的位置
+        # v51：恢复 v48——滚轮前把光标锁到右侧滚动条，结束写回起点
         ok_t5 = (
             len(guarded) == len(seen["rects"]) >= 1
             and st5["bottom_guard"] == 24
-            and not seen["cursor"]
-            and st5["cursor_parked"] == 0
+            and len(seen["cursor"]) >= 1
+            and st5["cursor_restored"]
         )
-        record("T5 捕获区底部预留安全行、不再抢光标",
+        record("T5 捕获区底部预留安全行、光标锁右侧滚动条",
                ok_t5, f"rects={[r.h for r in seen['rects']]} "
                       f"set_cursor_calls={len(seen['cursor'])}")
 
@@ -7317,116 +7316,94 @@ def test_v48_about_cleanup() -> None:
            f"datas={'THIRD-PARTY-LICENSES.txt' in spec}")
 
 
-def test_v49_long_capture_cursor_and_annotate() -> None:
-    """Stage AU  确定键跟鼠标 + 不抢光标 + 长截图后可直接标注。"""
+def test_v51_long_capture_restore_scroll() -> None:
+    """Stage AU  恢复 v48 滚动 + 去掉确定按钮 + 提示结束方式 + 保留标注。"""
     from pathlib import Path
 
     import numpy as np
     import snapback as sb
     from PIL import Image
-    from PySide6.QtCore import QPoint, QRect
 
     import snap as snapmod
 
     app = QApplication.instance() or QApplication(sys.argv)
 
-    # AU1 确定按钮中心对准鼠标正下方
-    screen = QRect(0, 0, 1920, 1080)
-    bw, bh, btn_cx = 510, 72, 463
-    p1 = snapmod.place_bar_near_cursor(QPoint(1000, 400), screen, bw, bh, btn_cx)
-    ok_au1 = (p1.x() + btn_cx == 1000 and p1.y() == 418
-              and p1.width() == bw and p1.height() == bh)
-    # 贴右/贴底时被夹在屏幕内，不溢出
-    p2 = snapmod.place_bar_near_cursor(QPoint(1915, 1075), screen, bw, bh, btn_cx)
-    clamped = (screen.contains(p2) and p2.right() <= screen.right()
-               and p2.bottom() <= screen.bottom())
-    record("AU1 确定键落在鼠标正下方且贴边不溢出", ok_au1 and clamped,
-           f"p1={p1.getRect()} p2={p2.getRect()}")
+    # AU1 控制条无确定按钮，提示写明三种结束方式
+    bar = snapmod.BusyBar()
+    no_btn = (not hasattr(bar, "finish_btn")
+              and not hasattr(bar, "finish_clicked"))
+    hint = bar.hint.text()
+    hint_ok = ("右键" in hint and "Esc" in hint and "滚到底" in hint)
+    record("AU1 控制条无确定键且提示三种结束方式", no_btn and hint_ok,
+           f"no_btn={no_btn} hint={hint}")
 
-    # AU2 / AU3 光标离开抓取区 / 停在控制条上 → 停发滚轮，不抢鼠标
+    # AU2 恢复 v48：拼接时每帧锁定光标、结束写回起点
     names = ("grab_region", "find_vertical_overlap", "_send_mouse_wheel",
              "get_cursor_pos", "set_cursor_pos")
     orig = {n: getattr(sb, n) for n in names}
-    calls: dict = {"wheels": 0, "cursor": 0}
-
-    def setup(cursor_xy, exclude=None):
-        calls.update(wheels=0, cursor=0)
+    calls: dict = {"wheels": 0, "cursor": 0, "pos": []}
+    try:
         frame = np.full((60, 60, 3), 120, dtype=np.uint8)
         sb.grab_region = lambda _r: Image.fromarray(frame)
         sb.find_vertical_overlap = lambda a, b, **kw: (0, 0.99)
         sb._send_mouse_wheel = lambda n: calls.__setitem__(
             "wheels", calls["wheels"] + 1)
-        sb.get_cursor_pos = lambda: cursor_xy
-        sb.set_cursor_pos = lambda x, y: calls.__setitem__(
-            "cursor", calls["cursor"] + 1)
-        return sb.ScrollControl(exclude_rect=exclude)
-
-    try:
-        ctrl_out = setup((9999, 9999))
-        _, st_out = sb.stitch_scroll(
-            sb.ScreenRect(0, 0, 60, 60), settle_seconds=0, max_frames=2,
-            hide_overlays=False, bottom_guard=0, control=ctrl_out,
+        sb.get_cursor_pos = lambda: (9999, 9999)
+        def fake_set(x, y):
+            calls["cursor"] += 1
+            calls["pos"].append((x, y))
+        sb.set_cursor_pos = fake_set
+        _, st = sb.stitch_scroll(
+            sb.ScreenRect(100, 200, 600, 400), settle_seconds=0,
+            max_frames=3, hide_overlays=False, bottom_guard=0,
         )
-        ok_au2 = (calls["wheels"] == 0 and calls["cursor"] == 0
-                  and st_out["cursor_parked"] >= 1)
-
-        ctrl_bar = setup((5, 5), sb.ScreenRect(0, 0, 20, 20))
-        _, st_bar = sb.stitch_scroll(
-            sb.ScreenRect(0, 0, 60, 60), settle_seconds=0, max_frames=2,
-            hide_overlays=False, bottom_guard=0, control=ctrl_bar,
-        )
-        ok_au3 = (calls["wheels"] == 0 and calls["cursor"] == 0
-                  and st_bar["cursor_parked"] >= 1)
-
-        # AU5 v50 回归：初始鼠标不能落进控制条忽略区。v49 把控制条放在鼠标
-        # 下方仅 4px、忽略区又向上放宽 10px，鼠标一开始就被判「在控制条上」，
-        # 每帧停发滚轮 → 页面完全不滚动。这里用真实几何 + 端到端滚轮验证。
-        from PySide6.QtWidgets import QWidget
-
-        mouse_phys = (960, 540)
-        pos = snapmod.place_bar_near_cursor(
-            QPoint(mouse_phys[0], mouse_phys[1]), screen, bw, bh, btn_cx)
-        probe = QWidget()
-        probe.setGeometry(pos)
-        excl = snapmod.bar_exclude_rect(probe, 1.0)
-        in_excl = (excl.x <= mouse_phys[0] < excl.x + excl.w
-                   and excl.y <= mouse_phys[1] < excl.y + excl.h)
-        ctrl_real = setup(mouse_phys, excl)
-        _, st_real = sb.stitch_scroll(
-            sb.ScreenRect(0, 0, 1920, 1080), settle_seconds=0, max_frames=2,
-            hide_overlays=False, bottom_guard=0, control=ctrl_real,
-        )
-        probe.deleteLater()
+        # 每帧滚轮前锁到选区右侧滚动条 (x≈690)；结束写回起点 (9999,9999)
+        locked = [p for p in calls["pos"] if p != (9999, 9999)]
+        ok_au2 = (calls["wheels"] >= 1 and len(locked) >= calls["wheels"]
+                  and st["cursor_restored"]
+                  and calls["pos"][-1] == (9999, 9999)
+                  and all(680 <= p[0] <= 695 for p in locked))
     finally:
         for n, v in orig.items():
             setattr(sb, n, v)
-    record("AU2 鼠标移出窗口即停发滚轮、光标不被搬走", ok_au2,
-           f"wheels={calls['wheels']} parked={st_out['cursor_parked']}")
-    record("AU3 鼠标停在控制条上同样停发滚轮", ok_au3,
-           f"wheels={calls['wheels']} parked={st_bar['cursor_parked']}")
+    record("AU2 恢复每帧锁定光标到滚动条、结束写回起点", ok_au2,
+           f"wheels={calls['wheels']} locked={len(locked)} "
+           f"first={calls['pos'][:2]} last={calls['pos'][-1:]}")
 
-    ok_au5 = (not in_excl and calls["wheels"] >= 1
-              and st_real["cursor_parked"] == 0)
-    record("AU5 初始鼠标不落忽略区、滚轮照常发出", ok_au5,
-           f"mouse={mouse_phys} excl=({excl.x},{excl.y},{excl.w},{excl.h}) "
-           f"wheels={calls['wheels']} parked={st_real['cursor_parked']}")
-
-    # AU4 长截图完成进编辑器；拼接核心里不再有抢光标的调用
+    # AU3 源码接线：v49/v50 的"不抢光标 + 跟鼠标走"痕迹全部清除
     src_snap = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
     src_back = Path(__file__).with_name("snapback.py").read_text(encoding="utf-8")
-    ok_au4 = (
-        "self._open_editor(qimg, [])" in src_snap
+    ok_au3 = (
+        "self._open_editor(qimg, [])" in src_snap        # 保留标注
         and "PreviewWindow(qimg" not in src_snap
-        and "place_bar_near_cursor(" in src_snap
-        and "def bar_exclude_rect(" in src_snap
-        and "control.set_exclude_rect(bar_exclude_rect(" in src_snap
-        and "r.y - m" not in src_snap          # 上边界绝不再外扩
-        and "set_cursor_pos(cx, cy)" not in src_back
-        and "set_cursor_pos(*saved_cursor)" not in src_back
-        and "def cursor_in_exclude(" in src_back
+        and "place_bar_outside(" in src_snap
+        and "place_bar_near_cursor" not in src_snap
+        and "bar_exclude_rect" not in src_snap
+        and "finish_clicked" not in src_snap
+        and "finish_btn" not in src_snap
+        and "set_cursor_pos(cx, cy)" in src_back          # 恢复滚动核心
+        and "set_cursor_pos(*saved_cursor)" in src_back
+        and "cursor_parked" not in src_back
+        and "def cursor_in_exclude(" not in src_back
     )
-    record("AU4 长截图直接进编辑器且拼接不再抢光标", ok_au4,
+    record("AU3 恢复 v48 滚动核心、清除跟鼠标走痕迹、保留标注", ok_au3,
+           f"scroll_core={'set_cursor_pos(cx, cy)' in src_back} "
            f"editor={'self._open_editor(qimg, [])' in src_snap}")
+
+    # AU4 右键 / Esc 结束仍有效（ScrollControl 语义不变）
+    st = {"r": False, "pos": (9999, 9999)}
+    sb.get_cursor_pos = lambda: st["pos"]
+    orig_left = sb.is_key_pressed
+    sb.is_key_pressed = lambda vk: bool(st["r"]) and vk == sb.VK_RBUTTON
+    try:
+        c = sb.ScrollControl()
+        c.poll()
+        st["r"] = True
+        c.poll()
+        ok_au4 = c.should_stop() and c.stop_reason == "user-right-click"
+    finally:
+        sb.is_key_pressed = orig_left
+    record("AU4 右键结束仍有效", ok_au4, f"reason={c.stop_reason}")
 
 
 if __name__ == "__main__":
@@ -7485,7 +7462,7 @@ if __name__ == "__main__":
     test_v46_scroll_stitch_robustness()
     test_v47_default_split_rows()
     test_v48_about_cleanup()
-    test_v49_long_capture_cursor_and_annotate()
+    test_v51_long_capture_restore_scroll()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
