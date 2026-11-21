@@ -272,9 +272,12 @@ def about_html(lang: str | None = None, email: str = "283096251@qq.com",
         return ABOUT_HTML
     desc, features, contact = _ABOUT.get(code) or _ABOUT["en"]
     title = name or ""
+    from snapui import APP_VERSION
+    ver_line = LANG.translate("版本：{version}", lang=code, version=APP_VERSION)
     return f"""
 <div style="font-family:'Microsoft YaHei',sans-serif; font-size:13px; color:#1f2937; line-height:1.6;">
-<p style="font-size:19px; font-weight:bold; margin:0 0 8px 0;">{title}</p>
+<p style="font-size:19px; font-weight:bold; margin:0 0 4px 0;">{title}</p>
+<p style="font-size:12px; color:#6b7280; margin:0 0 10px 0;">{ver_line}</p>
 <p>{desc}</p>
 <p>{features}</p>
 <p style="font-size:13px;">{contact}<a href="mailto:{email}" style="color:#0a6ed1;">{email}</a></p>

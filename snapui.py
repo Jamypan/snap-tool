@@ -61,6 +61,7 @@ from ui_theme import (
 # 常量保留简体中文：配置目录名、exe 名、自检与旧版脚本都依赖它，
 # 界面上显示的程序名统一用随语言变化的 app_name()。
 APP_NAME = "截屏助手"
+APP_VERSION = "V51.1"          # 「关于」窗口显示的版本号；改版本只改这一处
 CONTACT_EMAIL = "283096251@qq.com"
 
 # 画笔平滑度档位显示文案（key 用中文原文，走 i18n 翻译）
@@ -254,7 +255,8 @@ CLI_HELP = f"""{APP_NAME} —— 命令行参数
 
 ABOUT_HTML = f"""
 <div style="font-family:'Microsoft YaHei',sans-serif; font-size:13px; color:#1f2937; line-height:1.6;">
-<p style="font-size:19px; font-weight:bold; margin:0 0 8px 0;">{APP_NAME}</p>
+<p style="font-size:19px; font-weight:bold; margin:0 0 4px 0;">{APP_NAME}</p>
+<p style="font-size:12px; color:#6b7280; margin:0 0 10px 0;">版本：{APP_VERSION}</p>
 <p>一个自制功能强大的Windows桌面截图软件。</p>
 <p>功能：三种截图模式、对象化标注编辑、整图旋转 / 镜像、画笔端点箭头、独立「滚动长截图」命令、中文 OCR 逐行盖回取字、全局热键自定义、8 种界面语言。</p>
 <p style="font-size:13px;">联系邮箱：<a href="mailto:{CONTACT_EMAIL}" style="color:#0a6ed1;">{CONTACT_EMAIL}</a></p>

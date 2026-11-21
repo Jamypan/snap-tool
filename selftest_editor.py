@@ -7406,6 +7406,24 @@ def test_v51_long_capture_restore_scroll() -> None:
     record("AU4 右键结束仍有效", ok_au4, f"reason={c.stop_reason}")
 
 
+def test_v511_version_in_about() -> None:
+    """Stage AV  「关于」窗口显示软件版本号（8 语言）。"""
+    from i18n import LANGS, placeholders
+    from i18n_docs import about_html
+    from snapui import ABOUT_HTML, APP_VERSION
+
+    record("AV1 版本号常量为 V51.1", APP_VERSION == "V51.1", APP_VERSION)
+    record("AV2 简中关于正文含版本号",
+           f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
+
+    bad = [code for code in LANGS if APP_VERSION not in about_html(code)]
+    record("AV3 八语言关于正文均含版本号", not bad, f"缺失={bad}")
+
+    row = __import__("i18n_data")._ROWS.get("版本：{version}", ())
+    same = len(row) == len(LANGS) and len({frozenset(placeholders(x)) for x in row}) == 1
+    record("AV4 版本号标签 8 语言占位符一致", same, f"占位符行数={len(row)}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7463,6 +7481,7 @@ if __name__ == "__main__":
     test_v47_default_split_rows()
     test_v48_about_cleanup()
     test_v51_long_capture_restore_scroll()
+    test_v511_version_in_about()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

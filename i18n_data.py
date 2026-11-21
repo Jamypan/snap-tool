@@ -39,6 +39,12 @@ _ROWS: dict[str, tuple[str, ...]] = {
     "返回": ("返回", "返回", "Back", "戻る", "돌아가기", "Retour", "Zurück", "Volver"),
     "更改…": ("更改…", "變更…", "Change…", "変更…", "변경…", "Modifier…", "Ändern…", "Cambiar…"),
     "关于…": ("关于…", "關於…", "About…", "情報…", "정보…", "À propos…", "Über…", "Acerca de…"),
+    # 「关于」窗口版本号标签（占位符 8 语言必须同名，Stage O 会校验）
+    "版本：{version}": (
+        "版本：{version}", "版本：{version}", "Version: {version}",
+        "バージョン: {version}", "버전: {version}", "Version : {version}",
+        "Version: {version}", "Versión: {version}",
+    ),
     "使用说明…": ("使用说明…", "使用說明…", "User Guide…", "使い方…", "사용 설명서…", "Guide…", "Handbuch…", "Guía…"),
     "命令行参数…": ("命令行参数…", "命令列參數…", "Command Line…", "コマンドライン…", "명령줄 옵션…", "Ligne de commande…", "Befehlszeile…", "Línea de comandos…"),
     "设置热键…": ("设置热键…", "設定熱鍵…", "Set Hotkey…", "ショートカット設定…", "단축키 설정…", "Raccourci…", "Tastenkürzel…", "Atajo de teclado…"),
