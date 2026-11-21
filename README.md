@@ -107,7 +107,7 @@ git switch -c line-ocr v3-line-ocr      # 回到只改取字的那一版
 git switch -c panel-ocr v2-panel-ocr    # 回到整块面板那一版
 ```
 
-> 绿色版发行包 `dist/SnapTool-win-x64.zip` 每次发版都会重新打包，当前对应 **v49**；历次可执行文件按版本保留在 `dist/v16` ~ `dist/v41`、`dist/v42`、`dist/v43`、`dist/v44`、`dist/v45`、`dist/v46`、`dist/v47`、`dist/v48`、`dist/v49`，方便对比回滚。若要自己重建，运行 `build-exe.bat`。
+> 绿色版发行包 `dist/SnapTool-win-x64.zip` 每次发版都会重新打包，当前对应 **v49**；最近的 `dist/v45` ~ `dist/v49` 仍在项目内，更早的 v14~v44 以及历次构建临时副本已移到 `D://SnapTool-Archive//dist//` 与 `D://SnapTool-Archive//temp//` 备份（C 盘空间不足时所作迁移，文件未删除，可按路径取回），方便对比回滚。若要自己重建，运行 `build-exe.bat`。
 
 ## 快速开始
 
