@@ -7334,7 +7334,7 @@ def test_v49_long_capture_cursor_and_annotate() -> None:
     screen = QRect(0, 0, 1920, 1080)
     bw, bh, btn_cx = 510, 72, 463
     p1 = snapmod.place_bar_near_cursor(QPoint(1000, 400), screen, bw, bh, btn_cx)
-    ok_au1 = (p1.x() + btn_cx == 1000 and p1.y() == 404
+    ok_au1 = (p1.x() + btn_cx == 1000 and p1.y() == 418
               and p1.width() == bw and p1.height() == bh)
     # 贴右/贴底时被夹在屏幕内，不溢出
     p2 = snapmod.place_bar_near_cursor(QPoint(1915, 1075), screen, bw, bh, btn_cx)
@@ -7377,6 +7377,26 @@ def test_v49_long_capture_cursor_and_annotate() -> None:
         )
         ok_au3 = (calls["wheels"] == 0 and calls["cursor"] == 0
                   and st_bar["cursor_parked"] >= 1)
+
+        # AU5 v50 回归：初始鼠标不能落进控制条忽略区。v49 把控制条放在鼠标
+        # 下方仅 4px、忽略区又向上放宽 10px，鼠标一开始就被判「在控制条上」，
+        # 每帧停发滚轮 → 页面完全不滚动。这里用真实几何 + 端到端滚轮验证。
+        from PySide6.QtWidgets import QWidget
+
+        mouse_phys = (960, 540)
+        pos = snapmod.place_bar_near_cursor(
+            QPoint(mouse_phys[0], mouse_phys[1]), screen, bw, bh, btn_cx)
+        probe = QWidget()
+        probe.setGeometry(pos)
+        excl = snapmod.bar_exclude_rect(probe, 1.0)
+        in_excl = (excl.x <= mouse_phys[0] < excl.x + excl.w
+                   and excl.y <= mouse_phys[1] < excl.y + excl.h)
+        ctrl_real = setup(mouse_phys, excl)
+        _, st_real = sb.stitch_scroll(
+            sb.ScreenRect(0, 0, 1920, 1080), settle_seconds=0, max_frames=2,
+            hide_overlays=False, bottom_guard=0, control=ctrl_real,
+        )
+        probe.deleteLater()
     finally:
         for n, v in orig.items():
             setattr(sb, n, v)
@@ -7385,6 +7405,12 @@ def test_v49_long_capture_cursor_and_annotate() -> None:
     record("AU3 鼠标停在控制条上同样停发滚轮", ok_au3,
            f"wheels={calls['wheels']} parked={st_bar['cursor_parked']}")
 
+    ok_au5 = (not in_excl and calls["wheels"] >= 1
+              and st_real["cursor_parked"] == 0)
+    record("AU5 初始鼠标不落忽略区、滚轮照常发出", ok_au5,
+           f"mouse={mouse_phys} excl=({excl.x},{excl.y},{excl.w},{excl.h}) "
+           f"wheels={calls['wheels']} parked={st_real['cursor_parked']}")
+
     # AU4 长截图完成进编辑器；拼接核心里不再有抢光标的调用
     src_snap = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
     src_back = Path(__file__).with_name("snapback.py").read_text(encoding="utf-8")
@@ -7392,6 +7418,9 @@ def test_v49_long_capture_cursor_and_annotate() -> None:
         "self._open_editor(qimg, [])" in src_snap
         and "PreviewWindow(qimg" not in src_snap
         and "place_bar_near_cursor(" in src_snap
+        and "def bar_exclude_rect(" in src_snap
+        and "control.set_exclude_rect(bar_exclude_rect(" in src_snap
+        and "r.y - m" not in src_snap          # 上边界绝不再外扩
         and "set_cursor_pos(cx, cy)" not in src_back
         and "set_cursor_pos(*saved_cursor)" not in src_back
         and "def cursor_in_exclude(" in src_back

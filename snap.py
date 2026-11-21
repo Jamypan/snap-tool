@@ -242,13 +242,19 @@ def place_bar_outside(
 
 def place_bar_near_cursor(
     cursor: QPoint, screen: QRect, bw: int, bh: int,
-    btn_center_x: float, gap: int = 4,
+    btn_center_x: float, gap: int = 18,
 ) -> QRect:
-    """v49：把控制条的「确定」按钮中心放到鼠标正下方约 20 像素。
+    """v50：把控制条的「确定」按钮中心放到鼠标正下方一小段距离。
 
     旧版优先把整条放到选区外（窗口上方/下方），选区占满屏幕时还会跑到
     屏幕角落；用户得先满屏找按钮，而且拼接线程每次翻页都把光标抢回窗口
     右缘，根本移不过去。现在按钮跟着鼠标走，位置不够时再向屏幕内夹取。
+
+    v50 修正：gap 必须大于忽略区向上的放宽量（10 物理像素 / dpr）。
+    v49 用 gap=4 且忽略区向上放宽 10px，结果鼠标初始位置就被算进
+    「控制条内」，拼接线程第一帧起就停发滚轮 —— 页面完全不滚动。
+    这里留 18px 间距，配合 bar_exclude_rect 只向左右下放宽，鼠标初始
+    位置始终在忽略区之外。
     """
     x = int(round(cursor.x() - btn_center_x))
     y = int(round(cursor.y() + gap))
@@ -266,6 +272,18 @@ def bar_screen_rect(bar: QWidget, dpr: float) -> "snapback.ScreenRect":
         int(round(g.width() * dpr)),
         int(round(g.height() * dpr)),
     )
+
+
+def bar_exclude_rect(bar: QWidget, dpr: float) -> "snapback.ScreenRect":
+    """控制条的点击忽略区（物理像素）。
+
+    只向左右下放宽 10px，**上边界绝不外扩**：控制条贴在鼠标正下方，
+    一旦把上边界也往外扩，鼠标初始位置就会被算进「点在控制条上」，
+    拼接线程随后每帧停发滚轮，页面完全不动（v49 的实际 bug）。
+    """
+    r = bar_screen_rect(bar, dpr)
+    m = int(round(10 * dpr))
+    return snapback.ScreenRect(r.x - m, r.y, r.w + 2 * m, r.h + m)
 
 
 def make_bar_hook(bar: QWidget, method: str):
@@ -1312,7 +1330,8 @@ class App:
             int(round(vs.w / dpr)),
             int(round(vs.h / dpr)),
         )
-        # v49：控制条跟着鼠标走——「确定」按钮中心对准鼠标正下方约 20px。
+        # v49：控制条跟着鼠标走；v50 把间距加大到 18px，配合忽略区不上扩，
+        # 保证鼠标初始位置不在「控制条内」，滚轮能正常发出。
         # 光标是物理像素，这里统一换算到逻辑坐标再和 screen / sel 比。
         phys_x, phys_y = snapback.get_cursor_pos()
         cursor = QPoint(int(round(phys_x / dpr)), int(round(phys_y / dpr)))
@@ -1326,11 +1345,8 @@ class App:
         self.busy.show()
 
         control = snapback.ScrollControl()
-        r = bar_screen_rect(self.busy, dpr)
-        m = int(round(10 * dpr))   # 放宽一圈，点边框附近也不算「页面内点击」
-        control.set_exclude_rect(
-            snapback.ScreenRect(r.x - m, r.y - m, r.w + 2 * m, r.h + 2 * m)
-        )
+        # v50：上边界一律不外扩，否则鼠标初始位置被圈进忽略区 → 从头停滚
+        control.set_exclude_rect(bar_exclude_rect(self.busy, dpr))
 
         worker = StitchWorker(rect, control)
         if not outside:
