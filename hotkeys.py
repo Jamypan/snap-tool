@@ -382,6 +382,9 @@ def qt_event_to_hotkey(ev) -> Hotkey | None:
         return None
     mods = mods_from_qt(qmods)
     if not mods:
+        # V52.1：无修饰键时只有 F1~F12 可作为录屏热键（如 F9），其余仍需修饰键
+        if _qi(Qt.Key_F1) <= k <= _qi(Qt.Key_F12):
+            return Hotkey(0, 0x6F + (k - _qi(Qt.Key_F1) + 1))
         return None
 
     vk = _QT_VK_MAP.get(k)
@@ -445,10 +448,12 @@ class HotkeyDialog(QDialog):
 
     def __init__(self, current: Hotkey, parent=None, app_title: str | None = None,
                  error: str = "", *, title_key: str = "设置截图热键 - {app}",
-                 default: Hotkey | None = None) -> None:
+                 default: Hotkey | None = None, allow_bare: bool = False) -> None:
         super().__init__(parent)
+        # V52.1：allow_bare=True 时允许 F1~F12 等单键（录屏热键默认 F9 无修饰键）
+        self._allow_bare = bool(allow_bare)
         self._default = default if default is not None else Hotkey()
-        self.hotkey = current if current.is_valid() else self._default
+        self.hotkey = current if self._valid(current) else self._default
         self._capturing = False
         self._grabbed = False
         self._app_title = app_title or app_name()
@@ -547,6 +552,14 @@ class HotkeyDialog(QDialog):
         self._b_save.setText(t("保存"))
 
     # ------------------------------------------------------------ 状态同步
+    def _valid(self, hk: Hotkey) -> bool:
+        """V52.1：allow_bare 时允许 F1~F12 单键（录屏热键 F9 就是这类）。"""
+        if hk.is_valid():
+            return True
+        if self._allow_bare and hk.mods == 0 and 0x6F <= hk.vk <= 0x7A:
+            return True
+        return False
+
     def _show_status(self, text: str, error: bool = False) -> None:
         self.status.setText(text)
         self.status.setStyleSheet("color:#d93025; font-weight:bold;" if error else "color:#6b7280;")
@@ -567,7 +580,7 @@ class HotkeyDialog(QDialog):
             cb.setChecked(bool(hk.mods & bit))
             cb.blockSignals(False)
         self._select_combo_vk(hk.vk)
-        self.capture_btn.setText(hk.label() if hk.is_valid() else t("未选择修饰键"))
+        self.capture_btn.setText(hk.label() if self._valid(hk) else t("未选择修饰键"))
 
     def _on_manual(self) -> None:
         self._stop_capture()
@@ -577,7 +590,7 @@ class HotkeyDialog(QDialog):
                 mods |= bit
         vk = self.key_combo.currentData()
         self.hotkey = Hotkey(mods, int(vk) if vk is not None else DEFAULT_VK)
-        self.capture_btn.setText(self.hotkey.label() if self.hotkey.is_valid() else t("未选择修饰键"))
+        self.capture_btn.setText(self.hotkey.label() if self._valid(self.hotkey) else t("未选择修饰键"))
         self._show_status("")
 
     def _restore_default(self) -> None:
@@ -627,7 +640,7 @@ class HotkeyDialog(QDialog):
         self._show_status(t("已录制：{label}。点「保存」生效。", label=hk.label()))
 
     def accept(self) -> None:  # noqa: D102
-        if not self.hotkey.is_valid():
+        if not self._valid(self.hotkey):
             self._stop_capture()
             self._show_status(t("请至少选择一个修饰键（Ctrl / Alt / Shift / Win），并指定主键。"), error=True)
             return

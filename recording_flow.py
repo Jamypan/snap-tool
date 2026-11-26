@@ -28,6 +28,7 @@ from recorder.video import (
     PIP_POSITIONS,
     ScreenRecorder,
     compute_boost_db,
+    convert_mp4_to_gif,
     merge_audio_video,
 )
 from recording_ui import MIX_LABEL, TRACKS_LABEL
@@ -64,6 +65,7 @@ class RecordingController(QObject):
         self._audio_in_video = True
         self._audio_mode = MIX_LABEL
         self._separate = False
+        self._export_format = "MP4"
         self._finalizing = False
 
         self._timer = QTimer(self)
@@ -76,9 +78,15 @@ class RecordingController(QObject):
         if self.recording:
             return False
         self._settings = dict(settings)
-        self._audio_in_video = bool(settings.get("audio_in_video", True))
+        # V52.1：不再弹窗询问，音频保存方式在录屏面板里预设好。
+        # audio_save: embed=整合进视频 / split=分开 WAV / both=两者都要
+        audio_save = settings.get("audio_save", "embed")
+        self._audio_in_video = audio_save in ("embed", "both")
+        self._separate = audio_save in ("split", "both")
+        self._export_format = settings.get("export_format", "MP4")
         self._audio_mode = settings.get("audio_mode", MIX_LABEL)
-        self._separate = bool(settings.get("audio_separate", False))
+        log(f"音频设置：保存={audio_save} 进视频={self._audio_in_video} "
+            f"单独WAV={self._separate} 导出={self._export_format}")
 
         out_dir = Path(settings.get("save_dir") or Path.home() / "Screenshots")
         try:
@@ -88,7 +96,8 @@ class RecordingController(QObject):
             return False
         self._out_dir = out_dir
         self._base_name = "录屏_" + datetime.now().strftime("%Y%m%d_%H%M%S")
-        final = out_dir / (self._base_name + ".mp4")
+        ext = ".gif" if self._export_format == "GIF" else ".mp4"
+        final = out_dir / (self._base_name + ext)
         if final.exists():
             self.error.emit("同名视频已存在，请稍后再试")
             return False
@@ -188,6 +197,13 @@ class RecordingController(QObject):
 
     # ------------------------------------------------------------ 合成
     def _finalize(self) -> None:
+        # V52.1：等采集线程真正收尾（画面线程要 close stdin + ffmpeg.wait 写出 moov），
+        # 否则拿到的 MP4 可能还没写完，转 GIF / 合成都会失败。
+        for _label, worker in self._workers:
+            try:
+                worker.join(timeout=15)
+            except Exception:  # noqa: BLE001
+                pass
         audio_paths: list[str] = []
         labels: list[str] = []
         for path, label in ((self._system_wav, "系统声音"), (self._mic_wav, "麦克风")):
@@ -195,25 +211,33 @@ class RecordingController(QObject):
                 audio_paths.append(path)
                 labels.append(label)
 
-        final = Path(self._out_dir) / (self._base_name + ".mp4")  # type: ignore[operator]
+        out_dir = Path(self._out_dir)  # type: ignore[arg-type]
+        is_gif = self._export_format == "GIF"
+        final = out_dir / (self._base_name + (".gif" if is_gif else ".mp4"))
         try:
             video_source = str(Path(self._temp_dir) / "video.mp4")
             gain_db = 0.0
             if audio_paths:
                 gain_db = compute_boost_db(audio_paths)
+            # 先合成到带声音的 MP4；GIF 无音轨，用它作为转换源
+            merged = str(Path(self._temp_dir) / "merged.mp4")
             if self._audio_in_video:
                 mode = "tracks" if self._audio_mode == TRACKS_LABEL else "mix"
-                merge_audio_video(video_source, audio_paths, str(final),
+                merge_audio_video(video_source, audio_paths, merged,
                                   mode=mode, labels=labels, gain_db=gain_db)
             else:
-                shutil.copy2(video_source, str(final))
+                shutil.copy2(video_source, merged)
+            if is_gif:
+                convert_mp4_to_gif(merged, str(final))
+            else:
+                shutil.copy2(merged, str(final))
             if self._separate:
                 for path, label in zip(audio_paths, labels):
-                    target = Path(self._out_dir) / f"{self._base_name}_{label}.wav"  # type: ignore[operator]
+                    target = out_dir / f"{self._base_name}_{label}.wav"
                     shutil.copy2(path, str(target))
                     if gain_db > 0:
                         boost_wav_file(str(target), gain_db)
-            log(f"合成完成：{final} 音轨={audio_paths}")
+            log(f"合成完成：{final} 音轨={audio_paths} 格式={self._export_format}")
             self.stopped.emit(str(final))
         except Exception as exc:  # noqa: BLE001
             log(f"合成失败：{type(exc).__name__}: {exc}")

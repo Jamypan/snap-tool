@@ -63,7 +63,7 @@ from ui_theme import (
 # 常量保留简体中文：配置目录名、exe 名、自检与旧版脚本都依赖它，
 # 界面上显示的程序名统一用随语言变化的 app_name()。
 APP_NAME = "截屏助手"
-APP_VERSION = "V52"            # 「关于」窗口显示的版本号；改版本只改这一处
+APP_VERSION = "V52.1"          # 「关于」窗口显示的版本号；改版本只改这一处
 CONTACT_EMAIL = "283096251@qq.com"
 
 # 画笔平滑度档位显示文案（key 用中文原文，走 i18n 翻译）
@@ -154,7 +154,7 @@ code { background:#f3f4f6; padding:1px 4px; }
 <h2>3. 全局热键</h2>
 <p>默认 <b>Alt + Z</b> 唤起截图（v52 起，旧版为 Ctrl + Shift + A），使用的模式由命令面板左列那三行<b>右侧「默认方式」栏点选</b>决定（会记住，重启后仍有效，被选中的那一行整行浅橙底并显示「默认」）。
 点主窗口「截图热键」一行或托盘右键「设置热键…」可改成任意组合：打开后直接按键录制，也可以勾选修饰键 + 选主键。
-<b>录屏热键固定为 F9</b>（开始 / 停止都用它），面板切到「录屏」页即可用。面板里的「贴图热键」同理，保存时立即生效，无需重启。</p>
+<b>录屏热键默认为 F9</b>（开始 / 停止都用它），在「录屏」页的「录屏热键」一行可改成别的组合或 F1~F12 单键。面板里的「贴图热键」同理，保存时立即生效，无需重启。</p>
 <p class="hint">若提示「无法注册」，说明该组合已被其它程序占用或属于系统保留组合，换一个即可，原设置不受影响。
 至少需要 Ctrl / Alt / Shift / Win 中的一个修饰键。热键配置保存在 <code>%APPDATA%\\SnapTool\\settings.json</code>。</p>
 
@@ -239,8 +239,8 @@ code { background:#f3f4f6; padding:1px 4px; }
 <li><b>窗口录屏</b>：悬停高亮目标窗口，单击录制该窗口；</li>
 <li><b>全屏录屏</b>：整块桌面，多屏合为一块。</li>
 </ul>
-<p>左列可开 <b>系统声音</b>（电脑播放的声音）、<b>麦克风</b>（你说话）、<b>录制鼠标指针</b>，以及 <b>摄像头画中画</b>（位置和大小可调）。右列设 <b>画面帧率</b>（15/20/24/30 fps）、<b>音频保存方式</b>、<b>保存位置</b>（默认在「图片\\Screenshots」，文件名 <code>录屏_日期_时间.mp4</code>）。每次开始录制前会再确认一次音频怎么存（整合到视频 / 分开存 WAV / 两者都要）。</p>
-<p>开始录制后<b>本程序所有窗口自动隐藏</b>，屏幕边缘一圈红框表示正在录，底部悬浮控制条显示<b>计时、声音电平、暂停、停止</b>；按 <b>F9</b> 或点控制条的停止键结束，暂停后再按 F9 继续。停止后自动合成视频并保存到设定目录，托盘会提示结果。</p>
+<p>左列可开 <b>系统声音</b>（电脑播放的声音）、<b>麦克风</b>（你说话）、<b>录制鼠标指针</b>，以及 <b>摄像头画中画</b>（位置和大小可调）。右列设 <b>画面帧率</b>（15/20/24/30 fps）、<b>音频保存方式</b>、<b>保存位置</b>（默认在「图片\\Screenshots」，文件名 <code>录屏_日期_时间.mp4</code>）。音频保存方式（整合到视频 / 分开存 WAV / 两者都要）和导出格式（MP4 / GIF，GIF 无声）都在这里设好，点「保存位置」可换文件夹；录制时不再弹确认窗。</p>
+<p>开始录制后<b>本程序所有窗口自动隐藏</b>，屏幕边缘一圈红框表示正在录，底部悬浮控制条显示<b>计时、声音电平、暂停、停止</b>；按录屏热键（默认 <b>F9</b>）或点控制条的停止键结束，暂停后再按一次该键继续。停止后自动合成视频并保存到设定目录，托盘会提示结果。</p>
 <p class="hint">系统声音录制依赖系统的回录设备（立体声混音 / Stereo Mix）；若未检测到，对应开关会不可用。只开一路声音时，视频里的两种音轨方式效果相同。</p>
 </body></html>
 """
@@ -471,6 +471,17 @@ class CommandPanel(QWidget):
         )
         head.addWidget(self._btn_quit, 0, Qt.AlignVCenter)
         root.addLayout(head)
+        # V52.1：按用户要求去掉截图页头部区块（logo / 名称 / 已启动 / 退出）。
+        # 控件保留以兼容自测与托盘逻辑，仅从界面上隐藏。
+        for _w in (self._logo, self._title, self._sub, self._badge, self._btn_quit):
+            _w.hide()
+        for _i in range(head.count()):
+            _li = head.itemAt(_i)
+            if _li is not None and _li.layout() is not None:
+                for _j in range(_li.layout().count()):
+                    _cw = _li.layout().itemAt(_j).widget()
+                    if _cw is not None:
+                        _cw.hide()
 
         sep = QWidget(self.card)
         sep.setFixedHeight(1)
@@ -737,6 +748,7 @@ class MainWindow(QMainWindow):
     record_start_requested = Signal(str)     # rect / window / fullscreen
     record_default_changed = Signal(str)
     record_dir_requested = Signal()
+    record_hotkey_requested = Signal()   # V52.1
 
     def __init__(self, icon: QIcon, hotkey: Hotkey, mode: str, save_dir: Path,
                  pen_smooth: str = "medium") -> None:
@@ -799,6 +811,8 @@ class MainWindow(QMainWindow):
             lambda mode: self.record_default_changed.emit(mode))
         self._record_panel.dir_requested.connect(
             lambda: self.record_dir_requested.emit())
+        self._record_panel.hotkey_requested.connect(
+            lambda: self.record_hotkey_requested.emit())
         self._record_panel.help_requested.connect(
             lambda: self.help_requested.emit("help"))
         self._record_panel.about_requested.connect(
@@ -806,7 +820,7 @@ class MainWindow(QMainWindow):
         self._record_panel.quit_requested.connect(
             lambda: self.quit_requested.emit())
         self._tab_shot.setText(t("截图") + "   " + hotkey.label())
-        self._tab_rec.setText(t("录屏") + "   F9")
+        self._tab_rec.setText(t("录屏") + "   " + getattr(self, "_rec_hotkey_label", "F9"))
         self._apply_tab_style()
 
         # 兼容旧属性名：自测与内部逻辑仍按主窗口读这些控件
@@ -831,6 +845,10 @@ class MainWindow(QMainWindow):
         self.set_mode(mode)
         self.set_pen_smooth(pen_smooth)
         self.set_save_dir(save_dir)
+        # V52.1：录屏热键（可自定义）初始化到面板与 Tab
+        from recording_settings import load_rec_hotkey
+        self.set_rec_hotkey_label(load_rec_hotkey().label())
+        self._record_panel.set_hotkey_label(load_rec_hotkey().label())
         self.adjustSize()
         self.setMinimumSize(600, 430)
         LANG.changed.connect(self.retranslate_ui)
@@ -994,6 +1012,11 @@ class MainWindow(QMainWindow):
     def set_pin_hotkey(self, hk: Hotkey) -> None:
         self._pin_hotkey = hk
 
+    def set_rec_hotkey_label(self, label: str) -> None:
+        """V52.1：录屏热键改后刷新「录屏」Tab 上的提示。"""
+        self._rec_hotkey_label = label
+        self._tab_rec.setText(t("录屏") + "   " + label)
+
     def set_mode(self, mode: str) -> None:
         if mode not in CAPTURE_MODES:
             mode = "rect"
@@ -1066,7 +1089,7 @@ class MainWindow(QMainWindow):
         self._panel.retranslate_ui()
         if hasattr(self, "_record_panel"):
             self._tab_shot.setText(t("截图") + "   " + self._hotkey.label())
-            self._tab_rec.setText(t("录屏") + "   F9")
+            self._tab_rec.setText(t("录屏") + "   " + getattr(self, "_rec_hotkey_label", "F9"))
             self._record_panel.retranslate_ui()
         self.adjustSize()
 

@@ -4,9 +4,9 @@
 包含四块：
   * RecordPanel       顶部「截图 / 录屏」Tab 里的录屏页：左列三种方式 + 声音
                       与画面开关，右列录制设置 + 帮助，底部「开始录屏」；
-  * RecordControlBar  录制中悬浮控制条：计时 / 电平 / 暂停 / 停止 / F9；
+  * RecordControlBar  录制中悬浮控制条：计时 / 电平 / 暂停 / 停止 / 可改热键；
   * RecordBorder      录制中屏幕边缘红框（框选 / 全屏共用）；
-  * AudioChoiceDialog 每次录制前的音频保存方式确认（整合 / 分开 / 两者都要）。
+  * AudioChoiceDialog 兼容保留（V52.1 起录制前不再弹窗，音频在面板预设）。
 
 只依赖 PySide6 / i18n / ui_theme / recording_settings，不反向 import snap.py，
 便于离屏自测。
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from i18n import LANG, t
 from recording_settings import (
     AUDIO_SAVE_KEYS,
+    EXPORT_FORMATS,
     FPS_CHOICES,
     PIP_POSITIONS,
     PIP_SIZES,
@@ -42,13 +43,16 @@ from recording_settings import (
     load_audio_mode,
     load_audio_save,
     load_camera_flags,
+    load_export_format,
     load_fps,
+    load_rec_hotkey,
     load_rec_mode,
     load_save_dir,
     save_audio_flags,
     save_audio_mode,
     save_audio_save,
     save_camera_flags,
+    save_export_format,
     save_fps,
     save_rec_mode,
     save_save_dir,
@@ -216,6 +220,7 @@ class RecordPanel(QWidget):
     about_requested = Signal()
     quit_requested = Signal()
     dir_requested = Signal()
+    hotkey_requested = Signal()      # V52.1：点击「录屏热键」行改键
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -255,6 +260,10 @@ class RecordPanel(QWidget):
         self._btn_quit.clicked.connect(lambda _=False: self.quit_requested.emit())
         head.addWidget(self._btn_quit, 0, Qt.AlignVCenter)
         root.addLayout(head)
+        # V52.1：按用户要求去掉录屏页头部区块（标题 / 副标题 / 退出）。
+        # 控件保留以兼容自测与托盘逻辑，仅从界面上隐藏。
+        for _w in (self._title, self._sub, self._btn_quit):
+            _w.hide()
 
         sep = QWidget(self.card)
         sep.setFixedHeight(1)
@@ -334,16 +343,22 @@ class RecordPanel(QWidget):
         audio_save_labels = {
             "embed": "整合到视频", "split": "分开保存 WAV", "both": "两者都要",
         }
-        self._row_audio_save = ValueRow("音频保存", "每次录制前再确认一次",
+        self._row_audio_save = ValueRow("音频保存", "录制完成的音频怎么存",
                                         list(audio_save_labels.values()),
                                         audio_save_labels.get(load_audio_save(), "整合到视频"),
                                         self.card)
         right.addWidget(self._row_audio_save)
+        self._row_format = ValueRow("导出格式", "GIF 无声 · 体积更小",
+                                    list(EXPORT_FORMATS), load_export_format(), self.card)
+        right.addWidget(self._row_format)
         self._row_dir = PanelRow("folder", "保存位置", "录屏_日期_时间.mp4", "", self.card)
         self._row_dir.clicked.connect(lambda _=False: self.dir_requested.emit())
         self._rows["dir"] = self._row_dir
         right.addWidget(self._row_dir)
-        self._row_hotkey = PanelRow("key", "录屏热键", "开始 / 停止都用它", "F9", self.card)
+        self._row_hotkey = PanelRow("key", "录屏热键", "点击修改，立即生效", "", self.card)
+        self._row_hotkey.setCursor(Qt.PointingHandCursor)
+        self._row_hotkey.clicked.connect(lambda _=False: self.hotkey_requested.emit())
+        self._rows["hotkey"] = self._row_hotkey
         right.addWidget(self._row_hotkey)
 
         self._lbl_help = group_title("", self.card)
@@ -403,6 +418,8 @@ class RecordPanel(QWidget):
         }.items()}
         audio_save = inv_labels.get(self._row_audio_save.current_text(), "embed")
         save_audio_save(audio_save)
+        export_format = self._row_format.current_text()
+        save_export_format(export_format)
         system, mic, cursor = (self._sw_system.is_on(), self._sw_mic.is_on(),
                                self._sw_cursor.is_on())
         save_audio_flags(system, mic, cursor)
@@ -425,11 +442,21 @@ class RecordPanel(QWidget):
             "pip_size": pip_size,
             "audio_save": audio_save,
             "audio_mode": load_audio_mode(),
+            "export_format": export_format,
             "save_dir": load_save_dir(),
         }
 
     def set_dir_text(self, path: str) -> None:
         self._row_dir.set_texts(t("保存位置"), str(path), "")
+
+    def set_hotkey_label(self, label: str) -> None:
+        """V52.1：录屏热键改键后刷新行尾与开始按钮提示。"""
+        self._hotkey_label = label
+        self._rows["hotkey"].set_texts(t("录屏热键"), t("点击修改，立即生效"), label)
+        self._btn_start.setText(t("开始录屏") + "   " + label)
+
+    def hotkey_label(self) -> str:
+        return getattr(self, "_hotkey_label", "F9")
 
     def retranslate_ui(self) -> None:
         self._title.setText(t("录屏"))
@@ -450,13 +477,13 @@ class RecordPanel(QWidget):
         self._pip_size.set_texts(t("画中画大小"), t("占画面宽度比例"))
         self._lbl_set.setText(t("录制设置"))
         self._row_fps.set_texts(t("画面帧率"), t("越高越流畅 · 文件也越大"))
-        self._row_audio_save.set_texts(t("音频保存"), t("每次录制前再确认一次"))
+        self._row_audio_save.set_texts(t("音频保存"), t("录制完成的音频怎么存"))
+        self._row_format.set_texts(t("导出格式"), t("GIF 无声 · 体积更小"))
         self._row_dir.set_texts(t("保存位置"), str(load_save_dir()), "")
-        self._row_hotkey.set_texts(t("录屏热键"), t("开始 / 停止都用它"), "F9")
+        self.set_hotkey_label(getattr(self, "_hotkey_label", load_rec_hotkey().label()))
         self._lbl_help.setText(t("帮助"))
         self._rows["help"].set_texts(t("使用说明"), t("含录屏操作文档"), "")
         self._rows["about"].set_texts(t("关于"), t("版本信息 · 联系邮箱"), "")
-        self._btn_start.setText(t("开始录屏") + "   F9")
         self.adjustSize()
 
 
@@ -464,7 +491,7 @@ class RecordPanel(QWidget):
 # 录制中悬浮控制条
 # ---------------------------------------------------------------------------
 class RecordControlBar(QWidget):
-    """录制中悬浮条：红点 + 计时 + 电平 + 暂停 + 停止 + F9 提示。"""
+    """录制中悬浮条：红点 + 计时 + 电平 + 暂停 + 停止 + 热键提示。"""
 
     pause_clicked = Signal()
     stop_clicked = Signal()
@@ -512,13 +539,22 @@ class RecordControlBar(QWidget):
         self._btn_stop = _MiniBtn("stop", self)
         self._btn_stop.clicked.connect(lambda _=False: self.stop_clicked.emit())
         root.addWidget(self._btn_stop)
-        self._hint = QLabel("F9 " + t("停止"), self)
+        self._hotkey_label = "F9"
+        self._hint = QLabel(self._hotkey_label + " " + t("停止"), self)
         self._hint.setStyleSheet(f"color:#cfd2d6;font-size:11px;{FONT_QSS}")
         root.addWidget(self._hint)
         self.setStyleSheet(
             "QWidget#recBar{background:#23272e;border-radius:16px;}"
         )
         self.setObjectName("recBar")
+
+    def set_hotkey_label(self, label: str) -> None:
+        """V52.1：悬浮条停止提示跟随可改的录屏热键。"""
+        self._hotkey_label = label
+        if self._paused:
+            self._hint.setText(t("已暂停 · {hk} 继续", hk=label))
+        else:
+            self._hint.setText(label + " " + t("停止"))
 
     def set_audio_labels(self, labels: list[str]) -> None:
         self._audio_lbl.setText(" · ".join(labels))
@@ -535,11 +571,11 @@ class RecordControlBar(QWidget):
         if paused:
             self._paused_at = time.monotonic()
             self._dot.setStyleSheet("color:#f5a524;font-size:16px;")
-            self._hint.setText(t("已暂停 · F9 继续"))
+            self._hint.setText(t("已暂停 · {hk} 继续", hk=self._hotkey_label))
         else:
             self._start += time.monotonic() - self._paused_at
             self._dot.setStyleSheet("color:#e5484d;font-size:16px;")
-            self._hint.setText("F9 " + t("停止"))
+            self._hint.setText(self._hotkey_label + " " + t("停止"))
 
     def _tick(self) -> None:
         now = self._paused_at if self._paused else time.monotonic()

@@ -7417,7 +7417,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V52", APP_VERSION == "V52", APP_VERSION)
+    record("AV1 版本号常量为 V52.1", APP_VERSION == "V52.1", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 
@@ -7427,6 +7427,85 @@ def test_v511_version_in_about() -> None:
     row = __import__("i18n_data")._ROWS.get("版本：{version}", ())
     same = len(row) == len(LANGS) and len({frozenset(placeholders(x)) for x in row}) == 1
     record("AV4 版本号标签 8 语言占位符一致", same, f"占位符行数={len(row)}")
+
+
+def test_v521_recording_settings() -> None:
+    """Stage AW：V52.1 录屏热键可改 / GIF 导出 / 取消弹窗 / 头部隐藏。"""
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+
+    import recording_settings as rs
+    from hotkeys import Hotkey, HotkeyDialog
+    from recording_ui import RecordPanel
+    from snapui import MainWindow, make_icon
+
+    print("\n--- Stage AW: V52.1 录屏设置升级 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    tmp = tempfile.TemporaryDirectory(prefix="snaptool-aw-")
+    old_home = os.environ.get("SNAPTOOL_HOME")
+    os.environ["SNAPTOOL_HOME"] = tmp.name
+    try:
+        # AW1 录屏热键默认 F9、可持久化、非法值回退
+        hk = rs.load_rec_hotkey()
+        ok_aw1 = (hk.mods == 0 and hk.vk == 0x78 and hk.label() == "F9")
+        custom = Hotkey(0x0002, 0x52)  # Ctrl+R
+        rs.save_rec_hotkey(custom)
+        ok_aw1 = ok_aw1 and rs.load_rec_hotkey() == custom
+        record("AW1 录屏热键默认 F9 且可持久化", ok_aw1,
+               f"default={hk.label()} saved={rs.load_rec_hotkey().label()}")
+
+        # AW2 Export format 默认 MP4、GIF 可持久化、非法值回退
+        fmt = rs.load_export_format()
+        rs.save_export_format("GIF")
+        ok_aw2 = (fmt == "MP4" and rs.load_export_format() == "GIF")
+        record("AW2 导出格式默认 MP4 且 GIF 可持久化", ok_aw2,
+               f"default={fmt} saved={rs.load_export_format()}")
+
+        # AW3 改键对话框允许 F1~F12 单键（录屏热键 F9 场景）
+        dlg = HotkeyDialog(Hotkey(0, 0x78), None, allow_bare=True)
+        ok_aw3 = dlg._valid(Hotkey(0, 0x78)) and dlg._valid(Hotkey(0, 0x70))
+        dlg2 = HotkeyDialog(Hotkey(0, 0x78), None)
+        ok_aw3 = ok_aw3 and not dlg2._valid(Hotkey(0, 0x78))
+        record("AW3 改键框 allow_bare 才允许 F 单键", ok_aw3,
+               f"bare={dlg._valid(Hotkey(0,0x78))} strict={dlg2._valid(Hotkey(0,0x78))}")
+
+        # AW4 GIF 转换函数存在且可被导入（真实转码另做端到端验证）
+        from recorder.video import convert_mp4_to_gif
+        ok_aw4 = callable(convert_mp4_to_gif)
+        record("AW4 GIF 转换函数可用", ok_aw4, f"callable={ok_aw4}")
+
+        # AW5 录屏面板有导出格式行、热键行可点发信号、头部隐藏
+        rp = RecordPanel()
+        hits: list = []
+        rp.hotkey_requested.connect(lambda: hits.append("hk"))
+        rp._rows["hotkey"].click()
+        ok_aw5 = (
+            hasattr(rp, "_row_format")
+            and rp._row_format.current_text() in ("MP4", "GIF")
+            and bool(hits)
+            and rp._title.isHidden()
+        )
+        record("AW5 录屏面板新行与头部隐藏", ok_aw5,
+               f"fmt={rp._row_format.current_text() if hasattr(rp,'_row_format') else None} hits={hits}")
+
+        # AW6 主窗口截图页头部隐藏但控件保留（兼容自测/托盘）
+        mw = MainWindow(make_icon(), Hotkey(), "rect", Path(tmp.name))
+        ok_aw6 = (
+            mw._panel._logo.isHidden()
+            and mw._panel._title.isHidden()
+            and mw._panel._btn_quit.isHidden()
+            and hasattr(mw, "record_hotkey_requested")
+        )
+        record("AW6 两页头部隐藏且控件保留", ok_aw6,
+               f"logo_hidden={mw._panel._logo.isHidden()} has_sig={hasattr(mw,'record_hotkey_requested')}")
+    finally:
+        if old_home is None:
+            os.environ.pop("SNAPTOOL_HOME", None)
+        else:
+            os.environ["SNAPTOOL_HOME"] = old_home
 
 
 if __name__ == "__main__":
@@ -7487,6 +7566,7 @@ if __name__ == "__main__":
     test_v48_about_cleanup()
     test_v51_long_capture_restore_scroll()
     test_v511_version_in_about()
+    test_v521_recording_settings()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

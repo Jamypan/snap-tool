@@ -301,3 +301,27 @@ def merge_audio_video(
     )
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg 合成失败：{result.stderr.strip()[-500:]}")
+
+
+def convert_mp4_to_gif(mp4_path: str, gif_path: str, fps: int = 12,
+                       width: int = 640) -> None:
+    """V52.1：把 MP4 转成 GIF（无音轨）。
+
+    用 palettegen + paletteuse 两遍法生成调色板，避免直接转时颜色失真。
+    默认 12fps、宽 640，兼顾体积与清晰度；GIF 不含声音。
+    """
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    scale_filter = f"fps={fps},scale={width}:-1:flags=lanczos"
+    graph = f"[0:v]{scale_filter},split[a][b];[a]palettegen[p];[b][p]paletteuse"
+    command = [
+        ffmpeg, "-y", "-loglevel", "error", "-i", mp4_path,
+        "-filter_complex", graph, "-loop", "0", gif_path,
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg 转 GIF 失败：{result.stderr.strip()[-500:]}")

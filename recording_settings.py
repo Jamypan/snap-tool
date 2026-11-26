@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from hotkeys import _load_raw, _save_raw
+from hotkeys import DEFAULT_REC_MODS, DEFAULT_REC_VK, Hotkey, _load_raw, _save_raw
 
 
 def default_save_dir() -> Path:
@@ -38,11 +38,43 @@ DEFAULT_PIP_SIZE = 25            # 画中画占画面宽度百分比
 DEFAULT_AUDIO_SAVE = "embed"
 # 视频里的音轨方式：mix=混合一条 / tracks=保留独立音轨
 DEFAULT_AUDIO_MODE = "混合成一条音轨（推荐）"
+# V52.1：导出格式 mp4 / gif
+DEFAULT_EXPORT_FORMAT = "MP4"
+EXPORT_FORMATS = ("MP4", "GIF")
 
 FPS_CHOICES = (15, 20, 24, 30)
 PIP_POSITIONS = ("左上角", "右上角", "左下角", "右下角")
 PIP_SIZES = (15, 20, 25, 33)
 AUDIO_SAVE_KEYS = ("embed", "split", "both")
+
+
+def _default_rec_hotkey() -> Hotkey:
+    return Hotkey(DEFAULT_REC_MODS, DEFAULT_REC_VK)
+
+
+def load_rec_hotkey() -> Hotkey:
+    """V52.1：读取录屏热键；缺失/损坏时回退到默认 F9。"""
+    raw = _raw().get("rec_hotkey")
+    if not isinstance(raw, dict):
+        return _default_rec_hotkey()
+    try:
+        hk = Hotkey(int(raw.get("mods", 0)), int(raw.get("vk", 0)))
+    except (TypeError, ValueError):
+        return _default_rec_hotkey()
+    return hk if hk.is_valid() else _default_rec_hotkey()
+
+
+def save_rec_hotkey(hk: Hotkey) -> bool:
+    return _write(rec_hotkey={"mods": int(hk.mods & 0x0F), "vk": int(hk.vk)})
+
+
+def load_export_format() -> str:
+    value = _raw().get("rec_export_format", DEFAULT_EXPORT_FORMAT)
+    return value if value in EXPORT_FORMATS else DEFAULT_EXPORT_FORMAT
+
+
+def save_export_format(value: str) -> bool:
+    return _write(rec_export_format=value if value in EXPORT_FORMATS else DEFAULT_EXPORT_FORMAT)
 
 
 def _raw() -> dict:
@@ -155,8 +187,10 @@ def save_save_dir(path: str | Path) -> bool:
 __all__ = [
     "DEFAULT_FPS", "DEFAULT_REC_MODE", "FPS_CHOICES", "PIP_POSITIONS", "PIP_SIZES",
     "AUDIO_SAVE_KEYS", "DEFAULT_AUDIO_SAVE", "DEFAULT_AUDIO_MODE",
+    "DEFAULT_EXPORT_FORMAT", "EXPORT_FORMATS",
     "load_fps", "save_fps", "load_rec_mode", "save_rec_mode",
     "load_audio_flags", "save_audio_flags", "load_camera_flags", "save_camera_flags",
     "load_audio_save", "save_audio_save", "load_audio_mode", "save_audio_mode",
     "load_save_dir", "save_save_dir",
+    "load_rec_hotkey", "save_rec_hotkey", "load_export_format", "save_export_format",
 ]

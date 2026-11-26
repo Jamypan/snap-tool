@@ -5,7 +5,7 @@ snap.py —— 截图工具主程序。
 功能：
   · 启动即显示程序主窗口（帮助菜单 / 三种截图模式 / 默认模式设置）+ 托盘常驻
   · 全局热键唤起截图（默认 Alt+Z，可在菜单里自定义）
-  · v52 录屏：F9 开始 / 停止，框选 / 窗口 / 全屏三种方式 + 系统声 / 麦克风 / 摄像头画中画
+  · v52.1 录屏：可改热键（默认 F9）开始 / 停止，框选 / 窗口 / 全屏三种方式 + 系统声 / 麦克风 / 摄像头画中画 + MP4/GIF 导出
   · 三种截图模式：框选、窗口（悬停高亮单击）、全屏
   · 矩形/椭圆/箭头/画笔/马赛克/文字标注（画笔首尾可加箭头）
   · 程序窗口里整图旋转 90° / 左右上下镜像（可撤销）
@@ -80,9 +80,12 @@ from hotkeys import (  # noqa: E402
 from i18n import LANG, app_name, t  # noqa: E402
 from i18n_docs import cli_help  # noqa: E402
 from recording_flow import RecordingController  # noqa: E402
+from recording_settings import (  # noqa: E402
+    load_rec_hotkey,
+    save_rec_hotkey,
+)
 from recording_ui import (  # noqa: E402
     MIX_LABEL as REC_MIX_LABEL,
-    AudioChoiceDialog,
     RecordBorder,
     RecordControlBar,
 )
@@ -543,6 +546,9 @@ class App:
         self._rec_border: RecordBorder | None = None
         self._rec_paused = False
         self._rec_audio_choice = (True, REC_MIX_LABEL, False)
+        # V52.1：录屏热键可改（默认 F9）
+        self.rec_hotkey: Hotkey = load_rec_hotkey()
+        self._rec_hotkey_registered = False
 
         self.hotkey: Hotkey = load_hotkey()
         self.pin_hotkey: Hotkey = load_pin_hotkey()   # v34 贴图热键
@@ -575,7 +581,8 @@ class App:
         # v52 录屏
         self.main_window.record_start_requested.connect(self.start_record)
         self.main_window.record_default_changed.connect(self._on_record_default_changed)
-        self.main_window.record_dir_requested.connect(self._open_record_dir)
+        self.main_window.record_dir_requested.connect(self._choose_record_dir)
+        self.main_window.record_hotkey_requested.connect(self.open_rec_hotkey_settings)
         self.recorder.started.connect(self._on_rec_started)
         self.recorder.stopped.connect(self._on_rec_stopped)
         self.recorder.error.connect(self._on_rec_error)
@@ -727,13 +734,13 @@ class App:
                 pass
         self._pin_hotkey_registered = False
 
-    def _try_register_rec(self) -> bool:
-        """v52：注册 F9 录屏热键（无需修饰键，与截图热键独立）。"""
+    def _try_register_rec(self, hk: Hotkey | None = None) -> bool:
+        """V52.1：注册录屏热键（可自定义，默认 F9；与截图热键独立）。"""
         self._unregister_rec_hotkey()
-        vk_f9 = 0x78
-        mods = 0x4000  # MOD_NOREPEAT
+        hk = hk if hk is not None else self.rec_hotkey
         try:
-            ok = bool(user32.RegisterHotKey(None, REC_HOTKEY_ID, mods, vk_f9))
+            ok = bool(user32.RegisterHotKey(
+                None, REC_HOTKEY_ID, hk.win_mods, hk.vk))
         except Exception:  # noqa: BLE001
             ok = False
         self._rec_hotkey_registered = ok
@@ -758,6 +765,7 @@ class App:
         )
         self.main_window.set_hotkey(self.hotkey)
         self.main_window.set_pin_hotkey(self.pin_hotkey)
+        self._update_rec_hotkey_texts()
 
     def _retranslate_tray(self, _code: str = "") -> None:
         """语言切换后重建托盘菜单文案（截图项由 _update_hotkey_texts 带快捷键）。"""
@@ -979,6 +987,53 @@ class App:
             if not self._pin_hotkey_registered:
                 self._pin_hotkey_ok = self._try_register_pin(self.pin_hotkey)
 
+    def open_rec_hotkey_settings(self) -> None:
+        """V52.1：设置录屏热键（默认 F9，允许 F1~F12 单键）。"""
+        if self.overlay is not None or self.recorder.recording:
+            return
+        from hotkeys import DEFAULT_REC_MODS, DEFAULT_REC_VK
+        default_rec = Hotkey(DEFAULT_REC_MODS, DEFAULT_REC_VK)
+        self._unregister_rec_hotkey()
+        try:
+            for _ in range(10):
+                dlg = HotkeyDialog(
+                    self.rec_hotkey, None, app_name(), self._hk_error,
+                    title_key="设置录屏热键 - {app}", default=default_rec,
+                    allow_bare=True,
+                )
+                if dlg.exec() != QDialog.Accepted:
+                    break
+                hk = dlg.hotkey
+                if self._try_register_rec(hk):
+                    self.rec_hotkey = hk
+                    saved = save_rec_hotkey(hk)
+                    self._update_rec_hotkey_texts()
+                    msg = t("录屏热键已改为 {label}", label=hk.label())
+                    if not saved:
+                        msg += t("（配置未能写入磁盘，重启后会恢复旧设置）")
+                    self._tray_message(app_name(), msg, QSystemTrayIcon.Information, 3000)
+                    break
+                self._hk_error = t(
+                    "{label} 无法注册：可能已被其他程序占用，或属于系统保留组合。请换一个。",
+                    label=hk.label(),
+                )
+        finally:
+            self._hk_error = ""
+            if not self._rec_hotkey_registered:
+                self._rec_hotkey_ok = self._try_register_rec(self.rec_hotkey)
+
+    def _update_rec_hotkey_texts(self) -> None:
+        """V52.1：录屏热键改后同步面板 / 托盘 / 悬浮条。"""
+        label = self.rec_hotkey.label()
+        if hasattr(self, "act_record"):
+            self.act_record.setText(t("开始 / 停止录屏 ({label})", label=label))
+        panel = self.main_window.record_panel()
+        if panel is not None:
+            panel.set_hotkey_label(label)
+        if self._rec_bar is not None:
+            self._rec_bar.set_hotkey_label(label)
+        self.main_window.set_rec_hotkey_label(label)
+
     def _on_hotkey(self, hk_id: int) -> None:
         if hk_id == HOTKEY_ID:
             # 录制中屏蔽截图热键，避免遮罩覆盖录制画面
@@ -1042,26 +1097,16 @@ class App:
         self._start_recording(region, restore_windows=False)
 
     def _start_recording(self, region: dict | None, restore_windows: bool = True) -> None:
-        """弹出音频确认 → 收集设置 → 启动录制线程 → 隐藏窗口并显示红框/控制条。"""
-        # 每次录制前确认音频保存方式
-        try:
-            dlg = AudioChoiceDialog(None, self._rec_audio_choice)
-            if dlg.exec() != QDialog.Accepted:
-                if restore_windows:
-                    self._restore_own_windows()
-                return
-            self._rec_audio_choice = dlg.choice()
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(None, app_name(), f"音频设置失败：{exc}")
-            if restore_windows:
-                self._restore_own_windows()
-            return
+        """V52.1：收集面板里已设定好的设置 → 启动录制 → 隐藏窗口并显示红框/控制条。
 
+        不再录制前弹音频确认窗；音频保存方式由录屏面板的「音频保存」决定。
+        """
         panel = self.main_window.record_panel()
         settings = panel.collect_settings() if panel is not None else {}
-        settings["audio_in_video"] = self._rec_audio_choice[0]
-        settings["audio_mode"] = self._rec_audio_choice[1]
-        settings["audio_separate"] = self._rec_audio_choice[2]
+        # 兼容旧默认值：面板没给时用上次或默认（embed）
+        settings.setdefault("audio_save", "embed")
+        settings.setdefault("audio_mode", self._rec_audio_choice[1] if self._rec_audio_choice else REC_MIX_LABEL)
+        settings.setdefault("export_format", "MP4")
 
         # 隐藏自有窗口（整屏路径此时还没隐藏；框选路径已隐藏）
         if restore_windows:
@@ -1151,14 +1196,22 @@ class App:
         self._restore_own_windows()
         self._rec_paused = False
 
-    def _open_record_dir(self) -> None:
-        from recording_settings import load_save_dir
-        path = load_save_dir()
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            os.startfile(str(path))
-        except OSError as exc:
-            QMessageBox.warning(None, app_name(), str(exc))
+    def _choose_record_dir(self) -> None:
+        """V52.1：点「保存位置」选文件夹，保存并刷新面板。"""
+        from recording_settings import load_save_dir, save_save_dir
+        current = str(load_save_dir())
+        chosen = QFileDialog.getExistingDirectory(
+            self.main_window, t("选择录屏保存位置"), current)
+        if not chosen:
+            return
+        if not save_save_dir(chosen):
+            QMessageBox.warning(None, app_name(), t("保存位置未能写入配置"))
+            return
+        panel = self.main_window.record_panel()
+        if panel is not None:
+            panel.set_dir_text(chosen)
+        self._tray_message(app_name(), t("录屏保存位置已设为 {path}", path=chosen),
+                           QSystemTrayIcon.Information, 2500)
 
     # ------------------------------------------------------------ 截图
     def start_capture(self, mode=None) -> None:
