@@ -1197,11 +1197,24 @@ class App:
         self._rec_paused = False
 
     def _choose_record_dir(self) -> None:
-        """V52.1：点「保存位置」选文件夹，保存并刷新面板。"""
+        """V52.2：点「保存位置」选文件夹，保存并刷新面板。
+
+        V52.1 用 getExistingDirectory 的原生 Windows 文件夹对话框，托盘常驻
+        / 主窗口隐藏时偶发整个界面卡死。改用 Qt 自带的非原生对话框
+        （DontUseNativeDialog），parent 传 None 避免与隐藏主窗口形成模态死等，
+        并对失效目录和异常做兜底。
+        """
         from recording_settings import load_save_dir, save_save_dir
         current = str(load_save_dir())
-        chosen = QFileDialog.getExistingDirectory(
-            self.main_window, t("选择录屏保存位置"), current)
+        if not os.path.isdir(current):
+            current = str(Path.home())
+        try:
+            chosen = QFileDialog.getExistingDirectory(
+                None, t("选择录屏保存位置"), current,
+                QFileDialog.DontUseNativeDialog | QFileDialog.ShowDirsOnly,
+            )
+        except Exception:  # noqa: BLE001 —— 对话框异常不能拖死主界面
+            chosen = ""
         if not chosen:
             return
         if not save_save_dir(chosen):

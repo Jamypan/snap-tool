@@ -63,7 +63,7 @@ from ui_theme import (
 # 常量保留简体中文：配置目录名、exe 名、自检与旧版脚本都依赖它，
 # 界面上显示的程序名统一用随语言变化的 app_name()。
 APP_NAME = "截屏助手"
-APP_VERSION = "V52.1"          # 「关于」窗口显示的版本号；改版本只改这一处
+APP_VERSION = "V52.2"          # 「关于」窗口显示的版本号；改版本只改这一处
 CONTACT_EMAIL = "283096251@qq.com"
 
 # 画笔平滑度档位显示文案（key 用中文原文，走 i18n 翻译）
@@ -506,6 +506,21 @@ class CommandPanel(QWidget):
         body.addLayout(right, 1)
         root.addLayout(body)
 
+        # V52.2：底部「开始截图」大按钮，样式与录屏页「开始录屏」一致。
+        # 点击后按当前默认方式截图（与顶部 Tab / 托盘「截图」同一入口）。
+        self._btn_start_shot = QPushButton("", self.card)
+        self._btn_start_shot.setObjectName("shotStart")
+        self._btn_start_shot.setFixedHeight(40)
+        self._btn_start_shot.setCursor(Qt.PointingHandCursor)
+        self._btn_start_shot.setStyleSheet(
+            f"QPushButton{{background:{ORANGE};border:none;border-radius:20px;"
+            f"color:#ffffff;font-size:14px;font-weight:700;{FONT_QSS}}}"
+            "QPushButton:hover{background:#e9680c;}"
+        )
+        self._btn_start_shot.clicked.connect(
+            lambda _=False: owner.capture_requested.emit(owner._mode))
+        root.addWidget(self._btn_start_shot)
+
         self._rows: dict[str, PanelRow] = {}
 
         def add(lay, key: str, icon_name: str, title: str, desc: str,
@@ -678,8 +693,17 @@ class CommandPanel(QWidget):
         self._rows["about"].set_texts(t("关于"), t("版本信息 · 联系邮箱"), "")
         self._btn_quit.setText(t("退出"))
         self._btn_quit._restyle()
+        self.set_shot_hotkey_label(
+            getattr(self, "_shot_hotkey_label", "") or
+            (self._owner._hotkey.label() if getattr(self._owner, "_hotkey", None) else "Alt+Z")
+        )
         self._auto_min_width()
         self.adjustSize()
+
+    def set_shot_hotkey_label(self, label: str) -> None:
+        """V52.2：截图热键改动后同步底部「开始截图」按钮上的提示。"""
+        self._shot_hotkey_label = label
+        self._btn_start_shot.setText(t("开始截图") + "   " + label)
 
     def _auto_min_width(self) -> None:
         """按两列内容算卡片最小宽度：说明文字优先完整，长文案用省略号兜底。
@@ -1008,6 +1032,8 @@ class MainWindow(QMainWindow):
             self._panel._hk_row.set_texts(
                 t("截图热键"), t("点击修改，立即生效"), hk.label()
             )
+            if hasattr(self._panel, "_btn_start_shot"):  # V52.2
+                self._panel.set_shot_hotkey_label(hk.label())
 
     def set_pin_hotkey(self, hk: Hotkey) -> None:
         self._pin_hotkey = hk

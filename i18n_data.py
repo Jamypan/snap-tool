@@ -1367,6 +1367,11 @@ _ROWS.update({
         "开始录屏", "開始錄影", "Start recording", "録画を開始",
         "녹화 시작", "Démarrer l'enregistrement", "Aufnahme starten", "Iniciar grabación",
     ),
+    # V52.2：截图页底部大按钮（与「开始录屏」同款）
+    "开始截图": (
+        "开始截图", "開始截圖", "Start capture", "キャプチャを開始",
+        "캡처 시작", "Démarrer la capture", "Aufnahme starten", "Iniciar captura",
+    ),
     "停止": (
         "停止", "停止", "Stop", "停止",
         "중지", "Arrêter", "Stopp", "Detener",

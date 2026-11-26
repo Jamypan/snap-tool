@@ -7417,7 +7417,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V52.1", APP_VERSION == "V52.1", APP_VERSION)
+    record("AV1 版本号常量为 V52.2", APP_VERSION == "V52.2", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 
@@ -7508,6 +7508,70 @@ def test_v521_recording_settings() -> None:
             os.environ["SNAPTOOL_HOME"] = old_home
 
 
+def test_v522_shot_start_and_dir_dialog() -> None:
+    """Stage AX：V52.2 截图页「开始截图」按钮 + 保存位置对话框防卡死。"""
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+    from hotkeys import Hotkey
+    from snapui import MainWindow, make_icon
+
+    print("\n--- Stage AX: V52.2 开始截图按钮 / 保存位置防卡死 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    tmp = tempfile.TemporaryDirectory(prefix="snaptool-ax-")
+    old_home = os.environ.get("SNAPTOOL_HOME")
+    os.environ["SNAPTOOL_HOME"] = tmp.name
+    try:
+        mw = MainWindow(make_icon(), Hotkey(), "window", Path(tmp.name))
+        btn = getattr(mw._panel, "_btn_start_shot", None)
+
+        # AX1 截图页底部按钮存在、文案带热键、高度与录屏按钮一致
+        ok_ax1 = (
+            btn is not None
+            and not btn.isHidden()
+            and "开始截图" in btn.text()
+            and Hotkey().label() in btn.text()
+            and btn.height() == mw._record_panel._btn_start.height()
+        )
+        record("AX1 截图页底部「开始截图」按钮就绪", ok_ax1,
+               f"text={btn.text() if btn else None}")
+
+        # AX2 点击按当前默认方式发截图信号
+        hits: list[str] = []
+        mw.capture_requested.connect(lambda m: hits.append(m))
+        btn.click()
+        ok_ax2 = hits == ["window"]
+        record("AX2 开始截图按默认方式触发", ok_ax2, f"hits={hits}")
+
+        # AX3 截图热键变化后按钮文案同步
+        hk = Hotkey(0x0002, 0x52)  # Ctrl + R
+        mw.set_hotkey(hk)
+        ok_ax3 = hk.label() in btn.text()
+        record("AX3 截图热键改动同步按钮文案", ok_ax3, f"text={btn.text()}")
+
+        # AX4 保存位置对话框改为非原生 + 目录容错 + 异常兜底
+        src = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
+        start = src.find("def _choose_record_dir")
+        end = src.find("\n    def ", start + 10)
+        body = src[start:end] if start >= 0 else ""
+        ok_ax4 = (
+            "DontUseNativeDialog" in body
+            and "ShowDirsOnly" in body
+            and "os.path.isdir" in body
+            and "except Exception" in body
+            and 'None, t("选择录屏保存位置")' in body
+        )
+        record("AX4 保存位置改用非原生对话框且防卡死", ok_ax4,
+               f"body_len={len(body)}")
+    finally:
+        if old_home is None:
+            os.environ.pop("SNAPTOOL_HOME", None)
+        else:
+            os.environ["SNAPTOOL_HOME"] = old_home
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7567,6 +7631,7 @@ if __name__ == "__main__":
     test_v51_long_capture_restore_scroll()
     test_v511_version_in_about()
     test_v521_recording_settings()
+    test_v522_shot_start_and_dir_dialog()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
