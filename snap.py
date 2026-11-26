@@ -4,7 +4,8 @@ snap.py —— 截图工具主程序。
 
 功能：
   · 启动即显示程序主窗口（帮助菜单 / 三种截图模式 / 默认模式设置）+ 托盘常驻
-  · 全局热键唤起截图（默认 Ctrl+Shift+A，可在菜单里自定义）
+  · 全局热键唤起截图（默认 Alt+Z，可在菜单里自定义）
+  · v52 录屏：F9 开始 / 停止，框选 / 窗口 / 全屏三种方式 + 系统声 / 麦克风 / 摄像头画中画
   · 三种截图模式：框选、窗口（悬停高亮单击）、全屏
   · 矩形/椭圆/箭头/画笔/马赛克/文字标注（画笔首尾可加箭头）
   · 程序窗口里整图旋转 90° / 左右上下镜像（可撤销）
@@ -63,6 +64,7 @@ from hotkeys import (  # noqa: E402
     CAPTURE_MODES,
     HOTKEY_ID,
     PIN_HOTKEY_ID,
+    REC_HOTKEY_ID,
     Hotkey,
     HotkeyDialog,
     load_hotkey,
@@ -77,6 +79,13 @@ from hotkeys import (  # noqa: E402
 )
 from i18n import LANG, app_name, t  # noqa: E402
 from i18n_docs import cli_help  # noqa: E402
+from recording_flow import RecordingController  # noqa: E402
+from recording_ui import (  # noqa: E402
+    MIX_LABEL as REC_MIX_LABEL,
+    AudioChoiceDialog,
+    RecordBorder,
+    RecordControlBar,
+)
 from snapeditor import Overlay, set_pen_smooth  # noqa: E402
 from snap_editor import EditorWindow  # noqa: E402
 from pinwindow import PinWindow  # noqa: E402
@@ -528,6 +537,12 @@ class App:
         self._hidden_windows: list[QWidget] = []
         self._minimize_hint_shown = False
         self._quitting = False          # 正在退出：屏蔽一切托盘提示 / 窗口提示
+        # v52 录屏
+        self.recorder = RecordingController()
+        self._rec_bar: RecordControlBar | None = None
+        self._rec_border: RecordBorder | None = None
+        self._rec_paused = False
+        self._rec_audio_choice = (True, REC_MIX_LABEL, False)
 
         self.hotkey: Hotkey = load_hotkey()
         self.pin_hotkey: Hotkey = load_pin_hotkey()   # v34 贴图热键
@@ -557,6 +572,16 @@ class App:
         self.main_window.quit_requested.connect(self.quit)
         self.main_window.language_requested.connect(self.open_language_settings)
         self.main_window.pen_smooth_changed.connect(self._on_pen_smooth_changed)
+        # v52 录屏
+        self.main_window.record_start_requested.connect(self.start_record)
+        self.main_window.record_default_changed.connect(self._on_record_default_changed)
+        self.main_window.record_dir_requested.connect(self._open_record_dir)
+        self.recorder.started.connect(self._on_rec_started)
+        self.recorder.stopped.connect(self._on_rec_stopped)
+        self.recorder.error.connect(self._on_rec_error)
+        self.recorder.levels.connect(self._on_rec_levels)
+        self.recorder.tick.connect(lambda _s: None)
+        self.recorder.finalized.connect(self._on_rec_finalized)
 
         self.tray = QSystemTrayIcon(icon)
         self.menu = QMenu()
@@ -573,6 +598,11 @@ class App:
         self.act_pin_clipboard.triggered.connect(lambda _checked=False: self.pin_clipboard())
         self.menu.addAction(self.act_pin_clipboard)
         self._tray_actions["pin_clipboard"] = self.act_pin_clipboard
+        # v52：托盘录屏入口（F9 注册失败时的兜底）
+        self.act_record = QAction(t("开始 / 停止录屏 (F9)"), self.menu)
+        self.act_record.triggered.connect(lambda _checked=False: self.toggle_record())
+        self.menu.addAction(self.act_record)
+        self._tray_actions["record"] = self.act_record
         self.menu.addSeparator()
         for mode in CAPTURE_MODES:
             act = QAction(mode_label(mode), self.menu)
@@ -626,6 +656,7 @@ class App:
         app.installNativeEventFilter(self.filter)
         self._hotkey_ok = self._try_register(self.hotkey)
         self._pin_hotkey_ok = self._try_register_pin(self.pin_hotkey)
+        self._rec_hotkey_ok = self._try_register_rec()
         self._update_hotkey_texts()
         self.main_window.show()
 
@@ -696,6 +727,26 @@ class App:
                 pass
         self._pin_hotkey_registered = False
 
+    def _try_register_rec(self) -> bool:
+        """v52：注册 F9 录屏热键（无需修饰键，与截图热键独立）。"""
+        self._unregister_rec_hotkey()
+        vk_f9 = 0x78
+        mods = 0x4000  # MOD_NOREPEAT
+        try:
+            ok = bool(user32.RegisterHotKey(None, REC_HOTKEY_ID, mods, vk_f9))
+        except Exception:  # noqa: BLE001
+            ok = False
+        self._rec_hotkey_registered = ok
+        return ok
+
+    def _unregister_rec_hotkey(self) -> None:
+        if getattr(self, "_rec_hotkey_registered", False):
+            try:
+                user32.UnregisterHotKey(None, REC_HOTKEY_ID)
+            except Exception:  # noqa: BLE001
+                pass
+        self._rec_hotkey_registered = False
+
     def _update_hotkey_texts(self) -> None:
         label = self.hotkey.label()
         self.act_capture.setText(t("截图  {label}", label=label))
@@ -714,7 +765,7 @@ class App:
             ("show", "显示主窗口"), ("hotkey", "设置热键…"),
             ("language", "语言…"), ("dir", "打开保存目录"),
             ("help", "使用说明…"), ("about", "关于…"), ("quit", "退出"),
-            ("long_capture", "滚动长截图…"),
+            ("long_capture", "滚动长截图…"), ("record", "开始 / 停止录屏 (F9)"),
         ):
             self._tray_actions[key].setText(t(text_key))
         for mode in CAPTURE_MODES:
@@ -930,13 +981,184 @@ class App:
 
     def _on_hotkey(self, hk_id: int) -> None:
         if hk_id == HOTKEY_ID:
+            # 录制中屏蔽截图热键，避免遮罩覆盖录制画面
+            if self.recorder.recording:
+                return
             self.start_capture()
         elif hk_id == PIN_HOTKEY_ID:
+            if self.recorder.recording:
+                return
             self.pin_clipboard()
+        elif hk_id == REC_HOTKEY_ID:
+            self.toggle_record()
 
     def _on_tray(self, reason) -> None:
         if reason == QSystemTrayIcon.Trigger:
+            if self.recorder.recording:
+                return
             self.start_capture()
+
+    # ------------------------------------------------------------ v52 录屏
+    def toggle_record(self) -> None:
+        """F9：未在录→用默认方式开始；录制中→暂停/继续；已在暂停→继续。"""
+        if self.recorder.recording:
+            if self.recorder.paused:
+                self._resume_record()
+            else:
+                self._pause_record()
+            return
+        self.start_record(None)
+
+    def start_record(self, mode=None) -> None:
+        """启动录屏。mode 为 None 时用录屏页的默认方式。"""
+        if self.recorder.recording or self.overlay is not None or self.busy is not None:
+            return
+        if not isinstance(mode, str) or mode not in CAPTURE_MODES:
+            panel = self.main_window.record_panel()
+            mode = panel.rec_mode() if panel is not None else "rect"
+        if mode == "fullscreen":
+            # 整屏录制：无需选区，直接开始
+            self._start_recording(None)
+            return
+        # 框选 / 窗口：用 Overlay 选区（复用截图那套遮罩交互）
+        self._begin_capture(mode, long_mode=False, record=True)
+
+    def _on_record_default_changed(self, mode: str) -> None:
+        # 默认录屏方式由 recording_settings 自行持久化，这里只留信号兼容
+        pass
+
+    def _on_record_selected(self, logical_rect: QRect) -> None:
+        """Overlay 选区回调：把局部逻辑矩形换成屏幕物理区域后开始录制。"""
+        ov = self.overlay
+        dpr = ov.dpr if ov else 1.0
+        origin = getattr(self, "_capture_origin", QPoint(0, 0))
+        if (logical_rect.isNull() or logical_rect.width() < 8
+                or logical_rect.height() < 8):
+            self._close_overlay()
+            return
+        rect = overlay_rect_to_screen(logical_rect, origin, dpr)
+        self._close_overlay(restore=False)   # 录制期间自有窗口保持隐藏
+        region = {"x": rect.x, "y": rect.y, "width": rect.w, "height": rect.h}
+        self._start_recording(region, restore_windows=False)
+
+    def _start_recording(self, region: dict | None, restore_windows: bool = True) -> None:
+        """弹出音频确认 → 收集设置 → 启动录制线程 → 隐藏窗口并显示红框/控制条。"""
+        # 每次录制前确认音频保存方式
+        try:
+            dlg = AudioChoiceDialog(None, self._rec_audio_choice)
+            if dlg.exec() != QDialog.Accepted:
+                if restore_windows:
+                    self._restore_own_windows()
+                return
+            self._rec_audio_choice = dlg.choice()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(None, app_name(), f"音频设置失败：{exc}")
+            if restore_windows:
+                self._restore_own_windows()
+            return
+
+        panel = self.main_window.record_panel()
+        settings = panel.collect_settings() if panel is not None else {}
+        settings["audio_in_video"] = self._rec_audio_choice[0]
+        settings["audio_mode"] = self._rec_audio_choice[1]
+        settings["audio_separate"] = self._rec_audio_choice[2]
+
+        # 隐藏自有窗口（整屏路径此时还没隐藏；框选路径已隐藏）
+        if restore_windows:
+            self._hide_own_windows()
+            self.tray.setVisible(False)
+            for _ in range(4):
+                self.app.processEvents()
+                time.sleep(0.05)
+                self._hide_visible_own_windows()
+            self.app.processEvents()
+
+        if not self.recorder.start(region, settings):
+            self.tray.setVisible(True)
+            self._restore_own_windows()
+            return
+
+    def _on_rec_started(self) -> None:
+        """录制真正开始：显示红框 + 悬浮控制条。"""
+        self.tray.setVisible(True)
+        # 红框：整屏用虚拟屏范围，区域用 region
+        vs = snapback.virtual_screen()
+        dpr = self.app.primaryScreen().devicePixelRatio() or 1.0
+        screen = QRect(int(round(vs.x / dpr)), int(round(vs.y / dpr)),
+                       max(1, int(round(vs.w / dpr))), max(1, int(round(vs.h / dpr))))
+        self._rec_border = RecordBorder(screen)
+        self._rec_border.show()
+        labels = []
+        settings = self._rec_audio_choice
+        if settings[0] or settings[2]:
+            labels.append(t("系统声"))
+        if self.recorder._settings.get("mic"):
+            labels.append(t("麦克风"))
+        self._rec_bar = RecordControlBar()
+        self._rec_bar.set_audio_labels(labels)
+        self._rec_bar.pause_clicked.connect(self._pause_record)
+        self._rec_bar.stop_clicked.connect(self.stop_record)
+        self._rec_bar.show()
+        self._place_rec_bar()
+
+    def _place_rec_bar(self) -> None:
+        if self._rec_bar is None:
+            return
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
+        self._rec_bar.adjustSize()
+        w, h = self._rec_bar.width(), self._rec_bar.height()
+        self._rec_bar.move(avail.left() + (avail.width() - w) // 2,
+                           avail.bottom() - h - 40)
+
+    def _pause_record(self) -> None:
+        if self.recorder.toggle_pause():
+            if self._rec_bar:
+                self._rec_bar.set_paused(True)
+
+    def _resume_record(self) -> None:
+        if self.recorder.toggle_pause():
+            return
+        if self._rec_bar:
+            self._rec_bar.set_paused(False)
+
+    def stop_record(self) -> None:
+        self.recorder.stop()
+        if self._rec_bar:
+            self._rec_bar.setEnabled(False)
+
+    def _on_rec_levels(self, levels: dict) -> None:
+        if self._rec_bar:
+            self._rec_bar.update_levels(levels)
+
+    def _on_rec_stopped(self, path: str) -> None:
+        self._tray_message(app_name(), t("录屏已保存：{path}", path=path),
+                           QSystemTrayIcon.Information, 3000)
+
+    def _on_rec_error(self, msg: str) -> None:
+        self._tray_message(app_name(), msg, QSystemTrayIcon.Warning, 4000)
+
+    def _on_rec_finalized(self) -> None:
+        """合成结束：收起控制条和红框，恢复主窗口。"""
+        if self._rec_bar:
+            self._rec_bar.hide()
+            self._rec_bar.deleteLater()
+            self._rec_bar = None
+        if self._rec_border:
+            self._rec_border.hide()
+            self._rec_border.deleteLater()
+            self._rec_border = None
+        self._restore_own_windows()
+        self._rec_paused = False
+
+    def _open_record_dir(self) -> None:
+        from recording_settings import load_save_dir
+        path = load_save_dir()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            os.startfile(str(path))
+        except OSError as exc:
+            QMessageBox.warning(None, app_name(), str(exc))
 
     # ------------------------------------------------------------ 截图
     def start_capture(self, mode=None) -> None:
@@ -968,8 +1190,8 @@ class App:
             return
         self._begin_capture("window", long_mode=True)
 
-    def _begin_capture(self, mode: str, long_mode: bool) -> None:
-        """隐藏自有窗口 → 抓一帧底图 → 显示遮罩（普通截图 / 长截图共用）。"""
+    def _begin_capture(self, mode: str, long_mode: bool, record: bool = False) -> None:
+        """隐藏自有窗口 → 抓一帧底图 → 显示遮罩（普通截图 / 长截图 / 录屏共用）。"""
         # 先把自己的窗口全部藏起来，避免拍进截图里
         self._hide_own_windows()
         self.tray.setVisible(False)
@@ -995,7 +1217,8 @@ class App:
         qimg = pil_to_qimage(pil)
 
         # 全屏：截完直接进窗口化编辑器，不需选择 / 确定这一步
-        if mode == "fullscreen" and not long_mode:
+        # v52：录屏全屏不走这里（已在 start_record 直接启动录制）
+        if mode == "fullscreen" and not long_mode and not record:
             self._on_to_editor(qimg, [])
             return
 
@@ -1019,7 +1242,11 @@ class App:
         )
         # 普通截图：框选 / 窗口（悬停高亮单击）/ 全屏（自动选中整个虚拟屏幕）
         # 滚动长截图：固定走窗口探测，用客户区作为滚动区域（不含标题栏/边框）
-        if long_mode:
+        if record:
+            self.overlay.set_record_mode(
+                True, lambda p: self._pick_window(p, client=False)
+            )
+        elif long_mode:
             self.overlay.set_long_mode(
                 True, lambda p: self._pick_window(p, client=True)
             )
@@ -1028,6 +1255,7 @@ class App:
             if mode == "window":
                 # v35：普通窗口截图选中窗口时，前置目标并重抓一帧最新底图
                 self.overlay.set_window_regrab(self._regrab_window_base)
+        self.overlay.record_selected.connect(self._on_record_selected)
         self.overlay.done.connect(self._on_done)
         self.overlay.cancelled.connect(self._on_cancel)
         self.overlay.long_shot.connect(self._on_long_shot)
@@ -1555,6 +1783,14 @@ class App:
         self.pins = []
         self._unregister_hotkey()
         self._unregister_pin_hotkey()
+        self._unregister_rec_hotkey()
+        # v52：录制中退出则停止并等待合成线程收尾（最多 10 秒）
+        if getattr(self, "recorder", None) and self.recorder.recording:
+            self.recorder.stop()
+            deadline = time.monotonic() + 10
+            while self.recorder._finalizing and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.05)
         self.app.quit()
 
 

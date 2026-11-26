@@ -138,7 +138,7 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     P9  _close_overlay(restore=False) 拼接期间不恢复自有窗口
     P10 托盘有独立动作，语言刷新覆盖它；App 已连接主窗口信号
     P11 关于 8 语言简介为用户指定文案，邮箱仍在，无旧「模仿微信」字样
-    P12 帮助 8 语言均为 9 节且不再描述旧的工具条入口
+    P12 帮助 8 语言均为 11 节且不再描述旧的工具条入口
     P13 _begin_capture(long_mode=True) 真的给 Overlay 开了长截图模式
 
   Stage Q  选窗口式滚动长截图（v17 新交互）
@@ -156,7 +156,7 @@ selftest_editor.py —— 截屏助手离屏自测（不需要真实屏幕 / 显
     Q12 Overlay 长截图 Enter 直接启动、右键取消
     Q13 _pick_window(client=True) 用客户区而非完整边框
     Q14 BusyBar 有「确定 ✓」、暂停状态、8 语言即时刷新
-    Q15 8 语言帮助第 9 节描述新流程且无旧「框选 → 确定」
+    Q15 8 语言帮助共 11 节、含录屏章节，描述新流程且无旧「框选 → 确定」
     Q16 StitchWorker 默认带 ScrollControl，控制条信号 / 钩子已接线
     Q17 主窗口按钮副标题改为「点击窗口后自动滚动」
 
@@ -2241,15 +2241,15 @@ def test_long_capture() -> None:
     record("P11 关于 8 语言简介已替换且邮箱保留", ok_p11,
            f"异常语言={bad_about}")
 
-    # P12 帮助 8 语言均为 9 节，且不再描述旧的工具条入口
+    # P12 帮助 8 语言均为 11 节，且不再描述旧的工具条入口
     bad_help = []
     for code in i18n.LANGS:
         html = help_html(code)
-        if (html.count("<h2>") != 10       # v34 新增第 10 节「贴图钉在桌面」
+        if (html.count("<h2>") != 11       # v34 第 10 节贴图 + v52 第 11 节录屏
                 or "9." not in html
                 or "工具条「长截图」" in html):
             bad_help.append(code)
-    ok_p12 = HELP_HTML.count("<h2>") == 10 and not bad_help
+    ok_p12 = HELP_HTML.count("<h2>") == 11 and not bad_help
     record("P12 帮助 8 语言均含独立长截图章节且无旧入口", ok_p12,
            f"异常语言={bad_help} zh_h2={HELP_HTML.count('<h2>')}")
 
@@ -2613,7 +2613,7 @@ def test_long_capture_v17() -> None:
     bad_help_q = []
     for code in i18n.LANGS:
         h = help_html(code) if code != "zh_CN" else HELP_HTML
-        if (h.count("<h2>") != 10          # v34 新增第 10 节贴图
+        if (h.count("<h2>") != 11          # v34 第 10 节贴图 + v52 第 11 节录屏
                 or not any(k in h for k in keywords)
                 or any(s in h for s in stale)):
             bad_help_q.append(code)
@@ -5925,13 +5925,16 @@ def test_v38_layout_redesign() -> None:
     mw.show()
     app.processEvents()
 
-    # AJ1 v39：命令面板就是主窗口本体，普通窗口、不再贴底悬浮
+    # AJ1 v39：普通窗口、不再贴底悬浮
     # v47：移除「打开保存目录 / 默认截图模式 / 命令行参数」三行后共 12 行
+    # v52：主窗口改为顶部 Tab + QStackedWidget，第 0 页截图、第 1 页录屏
     ok_aj1 = (
         not bool(mw.windowFlags() & Qt.FramelessWindowHint)
         and not bool(mw.windowFlags() & Qt.WindowStaysOnTopHint)
-        and isinstance(mw.centralWidget(), CommandPanel)
-        and mw.centralWidget() is mw._panel
+        and mw.centralWidget() is mw._tab_widget
+        and mw._stack.widget(0) is mw._panel
+        and mw._stack.widget(1) is mw._record_panel
+        and mw.current_tab() == "shot"
         and mw._panel.isVisible()
         and len(mw._panel._rows) == 12
     )
@@ -6217,9 +6220,11 @@ def test_v39_menu_buttons_and_panel_window() -> None:
     mw.show()
     app.processEvents()
 
-    # AK1 命令面板就是主窗口本体；悬浮条代码彻底移除
+    # AK1 v52：主窗口是 Tab 容器，两页分别是截图面板与录屏面板；悬浮条代码彻底移除
     ok_ak1 = (
-        mw.centralWidget() is mw._panel
+        mw.centralWidget() is mw._tab_widget
+        and mw._stack.widget(0) is mw._panel
+        and mw._stack.widget(1) is mw._record_panel
         and mw._panel.isVisible()
         and not bool(mw.windowFlags() & Qt.FramelessWindowHint)
         and not bool(mw.windowFlags() & Qt.WindowStaysOnTopHint)
@@ -7412,7 +7417,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V51.1", APP_VERSION == "V51.1", APP_VERSION)
+    record("AV1 版本号常量为 V52", APP_VERSION == "V52", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 

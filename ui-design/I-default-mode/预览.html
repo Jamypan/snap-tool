@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>截屏助手 · 默认截图模式改为单选 · 三套界面</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f4f2ed; color: #1c1c1e;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    padding: 40px 32px 64px;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 25px; font-weight: 700; letter-spacing: .3px; }
+  .lede { margin-top: 10px; font-size: 14px; line-height: 1.85; color: #6b6660; max-width: 860px; }
+  .lede b { color: #1c1c1e; }
+  .rule { height: 1px; background: #e0dad0; margin: 26px 0 0; }
+
+  h2 { font-size: 17px; font-weight: 700; margin: 52px 0 6px; display: flex; align-items: baseline; gap: 10px; }
+  h2 .num {
+    font-size: 12px; font-weight: 700; color: #fff; background: #f97316;
+    border-radius: 6px; padding: 3px 8px; letter-spacing: .5px;
+  }
+  h2 .sub { font-size: 12.5px; color: #a39a90; font-weight: 500; }
+  .desc { font-size: 13.5px; line-height: 1.8; color: #57524c; margin: 10px 0 16px; max-width: 900px; }
+
+  .shot { border-radius: 10px; overflow: hidden; border: 1px solid #ddd6ca; box-shadow: 0 10px 30px rgba(60,52,40,.12); }
+  .shot img { display: block; width: 100%; }
+
+  .pros { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+  .box { flex: 1; min-width: 300px; border-radius: 10px; padding: 13px 16px; font-size: 12.5px; line-height: 1.8; }
+  .box.good { background: #eef7f1; border: 1px solid #cfe9da; color: #235f43; }
+  .box.bad { background: #fdf1e9; border: 1px solid #f5d9c4; color: #8a4a22; }
+  .box b { display: block; font-size: 12px; letter-spacing: .3px; margin-bottom: 4px; }
+
+  h3 { font-size: 16px; margin: 46px 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: 10px; overflow: hidden; border: 1px solid #e5dfd3; }
+  th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid #f0ebe2; vertical-align: top; line-height: 1.7; }
+  th { background: #faf7f1; font-weight: 600; color: #57524c; font-size: 12px; letter-spacing: .3px; }
+  td:first-child { font-weight: 600; width: 132px; color: #3a3630; }
+  tr:last-child td { border-bottom: none; }
+
+  .note {
+    margin-top: 30px; background: #fff; border: 1px solid #e5dfd3; border-left: 3px solid #f97316;
+    border-radius: 8px; padding: 15px 18px; font-size: 13px; line-height: 1.85; color: #57524c;
+  }
+  .note b { color: #1c1c1e; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>默认截图模式：从设置项改为列表单选</h1>
+  <p class="lede">
+    改动两处：<b>右列「设置」里删掉「默认截图模式」那一行</b>（原来点一下循环切换），
+    <b>把选择权挪到左列四个截图模式的右侧</b>，用单选圆点表示。
+    三套图的差别不在配色，而在<b>圆点的表达方式和点击语义</b>。
+  </p>
+  <div class="rule"></div>
+
+  <!-- 方案 1 -->
+  <h2><span class="num">方案 1</span>行尾纯圆点<span class="sub">改动最小，视觉最轻</span></h2>
+  <p class="desc">
+    圆点只表示状态。点圆点 = 设默认（面板不关、不截图）；点行其余位置 = 照原样直接截图。
+    选中的行保留浅橙底，圆点实心橙。没有多余文字，含义靠鼠标悬停时的提示气泡解释。
+  </p>
+  <div class="shot"><img src="png/01.png" alt="方案 1 行尾圆点"></div>
+  <div class="pros">
+    <div class="box good"><b>好在哪</b>行高、行宽、右列一行都不动，只给四个模式行补一个圆点。PySide6 里就是给 <code>PanelRow</code> 加一个 <code>QRadioButton</code>，接管它的点击，不让事件冒泡到整行。改一天能上。</div>
+    <div class="box bad"><b>问题</b>圆点本身没有文字说明，新用户不知道能点。悬停提示是唯一解释手段，触屏或快速操作时等于没有。</div>
+  </div>
+
+  <!-- 方案 2 -->
+  <h2><span class="num">方案 2</span>圆点 + 「默认」列<span class="sub">含义写在明面上</span></h2>
+  <p class="desc">
+    在「截图」分组标题右侧加一个 10px 的灰色列头「默认」，四个圆点正对着它排成一列；
+    选中的行在圆点左边恢复原来的「默认」二字。这样不用悬停也知道这一列是干什么的。
+  </p>
+  <div class="shot"><img src="png/02.png" alt="方案 2 圆点加默认列"></div>
+  <div class="pros">
+    <div class="box good"><b>好在哪</b>信息零损失——原来的「默认」标签没删，只是从纯文字变成「圆点 + 文字」。行尾用固定 74px 宽右对齐，圆点位置不随文字出现而左右跳。</div>
+    <div class="box bad"><b>问题</b>行尾占用变宽，模式标题的可用宽度少了约 74px；「滚动长截图…」这种长标题在窄语言（如德语）下会先被挤。</div>
+  </div>
+
+  <!-- 方案 3 -->
+  <h2><span class="num">方案 3</span>整行即选择<span class="sub">交互最清楚，代价最大</span></h2>
+  <p class="desc">
+    语义反过来：点整行 = 设为默认（不再立刻截图）。要截图按底部的「开始截图」按钮，或者鼠标移到某行时，行尾滑出一个「立即截图」小按钮。
+    「滚动长截图」不是模式而是动作，从选择组里摘出来，右侧改成箭头。
+  </p>
+  <div class="shot"><img src="png/03.png" alt="方案 3 行即选择"></div>
+  <div class="pros">
+    <div class="box good"><b>好在哪</b>「选模式」和「开始截图」彻底分开，不会误触。四个圆点的语义和系统单选按钮一致，零学习成本；「滚动长截图」归位成动作行，逻辑也更顺。</div>
+    <div class="box bad"><b>问题</b>多一步操作。熟练用户原来「点一下就截」变成「先选中再按热键」。必须保留 Alt+Z 和行内悬停按钮这两个捷径，否则是退步。</div>
+  </div>
+
+  <h3>三套横向对比</h3>
+  <table>
+    <tr><th></th><th>方案 1 · 行尾圆点</th><th>方案 2 · 圆点 + 默认列</th><th>方案 3 · 行即选择</th></tr>
+    <tr><td>点行=</td><td>直接截图</td><td>直接截图</td><td>设为默认</td></tr>
+    <tr><td>点圆点=</td><td>设为默认</td><td>设为默认</td><td>设为默认</td></tr>
+    <tr><td>含义提示</td><td>悬停气泡</td><td>列头文字</td><td>列头 + 底部按钮</td></tr>
+    <tr><td>窗口高度</td><td>不变</td><td>不变</td><td>加约 70px</td></tr>
+    <tr><td>右列影响</td><td>少一行，底部留白</td><td>少一行，底部留白</td><td>少一行，留白更明显</td></tr>
+    <tr><td>代码改动</td><td>小</td><td>小</td><td>中（要重排点击逻辑）</td></tr>
+  </table>
+
+  <div class="note">
+    <b>顺带说一下真实后果：</b>删掉右列那一行后，右列从 8 行变成 7 行，和左列正好齐平，
+    窗口高度会比现在矮约 46px（<code>adjustSize()</code> 会自己收）。
+    如果不想让窗口变矮，可以在右列补一行别的设置，或者把「帮助」组往下推。
+    另外 <code>snapui.py</code> 里 <code>_cycle_mode()</code>、<code>_mode_row</code>、<code>set_values()</code> 里对 <code>default_mode</code> 的赋值都要一起拆掉，
+    i18n 里的「默认截图模式」词条可以留着给托盘菜单用。
+  </div>
+</div>
+</body>
+</html>

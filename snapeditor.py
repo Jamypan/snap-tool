@@ -3057,6 +3057,8 @@ class Overlay(QWidget):
     done = Signal(QImage)
     cancelled = Signal()
     long_shot = Signal(QRect)
+    # v52 录屏：确认选区后发局部逻辑矩形，宿主换算物理区域后开始录制
+    record_selected = Signal(QRect)
     ocr = Signal(QImage)
     save_requested = Signal(QImage)
     # 确认阶段点「复制」：只把原图交给宿主放进剪贴板并关闭遮罩，不打开编辑器
@@ -3115,6 +3117,7 @@ class Overlay(QWidget):
         self._mode = "idle"               # idle | picking | selecting | editing
         self.capture_mode = "rect"        # rect | window | fullscreen
         self.long_mode = False            # 独立「滚动长截图」命令：框选→确定→直接拼接
+        self.record_mode = False          # v52 录屏：选区确定后交给宿主开始录制
         self.auto_ocr = False             # v38：选区一确定就自动取字（快捷入口）
         # 遮罩上的提示文字在 paintEvent 里现取 t()，语言切换后需触发重绘
         LANG.changed.connect(self.update)
@@ -3305,6 +3308,34 @@ class Overlay(QWidget):
         self.dim_logical = self._make_dim(self.base_logical)
         self.update()
         return True
+
+    def set_record_mode(self, on: bool = True, window_picker=None) -> None:
+        """v52：切换为录屏选区流程。框选松开 / 窗口单击即发 record_selected。
+
+        与长截图一样复用 Overlay 的框选 / 窗口高亮交互，但确认后不进编辑器，
+        而是把局部逻辑矩形交给宿主换算物理区域并开始录制。
+        """
+        self.record_mode = on
+        self.long_mode = False
+        self.auto_ocr = False
+        self.sel = None
+        self.shapes.clear()
+        self._selected = None
+        self._window_regrab = None
+        self._hover_hwnd = 0
+        self._hover_rect = None
+        self._hover_title = ""
+        self._last_pick_time = 0.0
+        self._last_pick_pos = QPoint(-9999, -9999)
+        self.toolbar.set_confirm_tip(
+            "开始录屏 (Enter)" if on else "确认选区，进入程序窗口继续编辑 (Enter)"
+        )
+        if on:
+            self.mode_strip.hide()
+        else:
+            self._place_strip()
+            self.mode_strip.show()
+            self.mode_strip.raise_()
 
     def set_capture_mode(self, mode: str, window_picker=None) -> None:
         """在 setGeometry 之后、show 之前调用。
@@ -3884,6 +3915,12 @@ class Overlay(QWidget):
             self._teardown()
             self.long_shot.emit(QRect(r))
             return
+        if self.record_mode:
+            if r.width() < 8 or r.height() < 8:
+                return
+            self._teardown()
+            self.record_selected.emit(QRect(r))
+            return
         phys = self.to_phys(r).intersected(
             QRect(0, 0, self.base.width(), self.base.height())
         )
@@ -4008,6 +4045,11 @@ class Overlay(QWidget):
                         r = QRect(self._hover_rect)
                         self._teardown()
                         self.long_shot.emit(r)
+                    elif self.record_mode and self._hover_rect:
+                        # v52：窗口录屏——单击即录该窗口
+                        r = QRect(self._hover_rect)
+                        self._teardown()
+                        self.record_selected.emit(r)
                     else:
                         # v35：先重抓最新画面（宿主会前置目标窗口），再进入确认，
                         # 保证「所见即所得」——高亮框里看到的正是将要截到的内容。
@@ -4314,6 +4356,16 @@ class Overlay(QWidget):
 
         if self._mode == "selecting":
             r = self._normalized()
+            if self.record_mode:
+                # v52 框选录屏：松开即开始录，不进确认阶段
+                if r and r.width() >= 8 and r.height() >= 8:
+                    self._teardown()
+                    self.record_selected.emit(QRect(r))
+                else:
+                    self._mode = "idle"
+                    self.sel = None
+                    self.update()
+                return
             if r and r.width() > MIN_SELECT and r.height() > MIN_SELECT:
                 self._apply_selection(r, near=pos)
             else:
@@ -4540,6 +4592,10 @@ class Overlay(QWidget):
                     r = QRect(self._hover_rect)
                     self._teardown()
                     self.long_shot.emit(r)
+                elif self.record_mode:
+                    r = QRect(self._hover_rect)
+                    self._teardown()
+                    self.record_selected.emit(r)
                 else:
                     # v35：与鼠标点击路径一致，回车确认也重抓最新底图
                     self._regrab_for_window(self._hover_hwnd)

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>录屏功能 · 交互说明</title>
+<link rel="stylesheet" href="_style.css">
+</head>
+<body class="doc">
+<div class="wrap">
+  <h1>录屏功能：怎么接进现有界面</h1>
+  <p class="lede">录屏是截图之外的一件平行的事，用顶部 Tab 分开，不往截图那两列里再塞东西。三种录屏方式照抄截图那套左右分栏：左边点立即录、右边点设为默认。真正录的时候主界面藏起来，只留一条悬浮控制条。</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="demo">
+        <div class="tabs" style="padding:4px 6px 0">
+          <div class="tab">截图 <span class="kbd">Alt+Z</span></div>
+          <div class="tab on">录屏 <span class="kbd">F9</span></div>
+        </div>
+      </div>
+      <h3><i>1</i>顶部加「截图 / 录屏」切换</h3>
+      <p>只多一行 Tab，右列设置跟着 Tab 换内容。老用户打开还是「截图」页，习惯不变；想录屏点一下「录屏」。两个功能各有各的热键：<b>Alt+Z 截图、F9 录屏</b>。</p>
+    </div>
+
+    <div class="card">
+      <div class="demo">
+        <div class="row split on">
+          <div class="launch"><div class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7"><path d="M4 8.5V6a2 2 0 0 1 2-2h2.5"/><path d="M15.5 4H18a2 2 0 0 1 2 2v2.5"/><path d="M20 15.5V18a2 2 0 0 1-2 2h-2.5"/><path d="M8.5 20H6a2 2 0 0 1-2-2v-2.5"/></svg></div><div class="tx"><b>框选录屏</b><span>拖动选取任意区域</span></div></div>
+          <div class="pick"><span class="deflabel">默认</span><div class="radio checked"></div></div>
+        </div>
+        <div class="row split">
+          <div class="launch"><div class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7"><rect x="3" y="5" width="18" height="14" rx="2.2"/><path d="M3 9.5h18"/></svg></div><div class="tx"><b>窗口录屏</b><span>悬停高亮 · 单击确认</span></div></div>
+          <div class="pick"><div class="radio"></div></div>
+        </div>
+        <div class="row split">
+          <div class="launch"><div class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7"><rect x="2.5" y="4.5" width="19" height="13" rx="2.2"/><path d="M9 20.5h6"/></svg></div><div class="tx"><b>全屏录屏</b><span>整块桌面 · 多屏合屏</span></div></div>
+          <div class="pick"><div class="radio"></div></div>
+        </div>
+      </div>
+      <h3><i>2</i>三种录屏方式，照抄截图那套</h3>
+      <p>左边整块点 = <b>立刻用这种方式开录</b>；右边窄条点 = <b>只设为默认</b>，不开录。和截图行一模一样，不用重新学。默认方式同一时刻只有一行选中。</p>
+    </div>
+
+    <div class="card">
+      <div class="demo" style="height:120px;position:relative;background:linear-gradient(135deg,#cfd8e2,#b9c5d3);border-radius:9px">
+        <div class="sel" style="left:60px;top:22px;width:220px;height:70px">
+          <span class="cp tl"></span><span class="cp tr"></span><span class="cp bl"></span><span class="cp br"></span>
+          <span class="size">1280 × 720</span>
+        </div>
+      </div>
+      <h3><i class="g">3</i>框选：拖完就录</h3>
+      <p>屏幕上盖一层半透明遮罩，拖动出虚线框，<b>框的上方实时显示宽×高</b>。松开鼠标立刻开始录，不用再点确定。</p>
+    </div>
+
+    <div class="card">
+      <div class="demo" style="height:120px;position:relative;background:linear-gradient(135deg,#cfd8e2,#b9c5d3);border-radius:9px">
+        <div class="fwin" style="left:110px;top:20px;width:200px;height:80px"><div class="fbar"><i class="r"></i><i class="y"></i><i class="g"></i><span>文档</span></div></div>
+        <div class="win-hl" style="left:108px;top:18px;width:204px;height:84px"><span class="wtag">单击录制</span></div>
+      </div>
+      <h3><i class="g">4</i>窗口 / 全屏</h3>
+      <p>窗口：光标悬停哪个窗口，<b>整窗高亮</b>，单击就录这一个。<br>全屏：<b>整块桌面加红框</b>，多屏时合为一块。都不用拖框。</p>
+    </div>
+
+    <div class="card" style="width:1004px">
+      <div class="demo" style="height:96px;position:relative;background:linear-gradient(135deg,#cfd8e2,#b9c5d3);border-radius:9px">
+        <div class="minibar" style="position:absolute;bottom:16px">
+          <div class="rdot"></div><div class="timer">00:12</div><div class="sep"></div>
+          <div class="lvl"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="lbl">系统声 · 麦克风</div>
+          <div class="sep"></div>
+          <div class="mbbtn"><svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></div>
+          <div class="mbbtn stop"><svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></div>
+          <div class="esc">F9 停止</div>
+        </div>
+      </div>
+      <h3><i class="d">5</i>录制中：只留一条控制条</h3>
+      <p>一点开始录，<b>主界面自动隐藏</b>（免得把自己录进去），屏幕边缘一圈红框表示在录，底部悬浮条显示<b>计时、声音电平、暂停、停止</b>。再按一次 F9 也能停。</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>复用现成东西：</b>三种方式的左右分栏、默认圆点、Tab、开关、行样式，界面组件截图页都已有，录屏页是同一套。录屏新加的只有：顶部 Tab、悬浮控制条、选区尺寸标注、红框。<br>
+    <b>声音怎么存沿用老逻辑：</b>系统声音 / 麦克风两个开关，整合到视频还是分开存成 WAV 仍旧每次录制前弹一次确认。帧率、保存目录、F9 热键都接到 screen-recorder 已有实现。<br>
+    <b>需要你定的两点：</b>① 摄像头画中画要不要并进来（目前独立录屏软件里有，本稿先按「不加」处理）；② 框选录屏时是否允许录屏途中移动/缩放选区（本稿按「不允许，松开即固定」处理）。
+  </div>
+</div>
+</body>
+</html>

@@ -13,6 +13,8 @@ SnapTool.spec —— 截屏助手 Windows 绿色版构建配置
     PaddleOCR 降级分支是函数内懒加载，静态分析仍会把它拖进产物。
     排除后发行版实际链路是 RapidOCR → Windows 内置 OCR → Tesseract。
   * upx=False：onnxruntime / OpenCV 的 DLL 被 UPX 压缩后容易加载失败。
+  * v52 录屏：mss / soundcard / imageio_ffmpeg 整包收集，ffmpeg.exe 随包分发
+    （用户要求依赖打进 exe，发行目录因此增加约 85MB）。
   * v25 体积优化：collect_all 之后按路径过滤 Qt 冗余插件 / 示例模型 /
     包元数据 / 未使用的扩展。3 个 OCR 模型、cv2.pyd、Qt6Core/Gui/Widgets、
     OpenSSL 运行库一律保留，功能不变。optimize 保持 0（numpy 需要 docstring）。
@@ -30,7 +32,9 @@ datas = [
 binaries = []
 hiddenimports = []
 
-for _pkg in ('rapidocr', 'onnxruntime'):
+# v52 录屏：mss / soundcard / imageio_ffmpeg 带平台后端与 ffmpeg.exe，
+# 必须整包收集，否则冻结版抓屏或编码会找不到二进制。
+for _pkg in ('rapidocr', 'onnxruntime', 'mss', 'soundcard', 'imageio_ffmpeg'):
     _d, _b, _h = collect_all(_pkg)
     datas += _d
     binaries += _b
@@ -42,6 +46,13 @@ hiddenimports += [
     'singleinstance',
     # 多语言模块（i18n_docs 里有函数内延迟导入，显式列出防漏收）
     'i18n', 'i18n_data', 'i18n_docs',
+    # v52 录屏：本地模块 + 录制核心（部分模块在函数内导入，静态分析可能漏收）
+    'ui_theme', 'hotkeys',
+    'recording_settings', 'recording_ui', 'recording_flow',
+    'recorder', 'recorder.video', 'recorder.audio',
+    'recorder.devices', 'recorder.runlog',
+    'mss', 'mss.windows',
+    'soundcard', 'imageio_ffmpeg',
     'rapidocr',
     'onnxruntime',
     'cv2',

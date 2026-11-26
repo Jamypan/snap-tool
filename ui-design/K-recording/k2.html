@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>框选录屏 · 拖动选区</title>
+<link rel="stylesheet" href="_style.css">
+</head>
+<body class="scene">
+<div class="desk"></div>
+
+<div class="frame">
+  <div class="stage">
+    <!-- 背景：几个示意窗口 -->
+    <div class="fwin" style="left:38px;top:34px;width:330px;height:230px;">
+      <div class="fbar"><i class="r"></i><i class="y"></i><i class="g"></i><span>浏览器</span></div>
+      <div class="fbody"><div class="block"></div><div class="ln w2"></div><div class="ln w1"></div><div class="ln w3"></div></div>
+    </div>
+    <div class="fwin" style="left:560px;top:70px;width:320px;height:250px;">
+      <div class="fbar"><i class="r"></i><i class="y"></i><i class="g"></i><span>文档</span></div>
+      <div class="fbody"><div class="ln w2"></div><div class="ln w1"></div><div class="ln w2"></div><div class="ln w3"></div><div class="ln w1"></div></div>
+    </div>
+    <div class="fwin" style="left:120px;top:330px;width:360px;height:150px;">
+      <div class="fbar"><i class="r"></i><i class="y"></i><i class="g"></i><span>文件夹</span></div>
+      <div class="fbody"><div class="ln w1"></div><div class="ln w2"></div><div class="ln w3"></div></div>
+    </div>
+
+    <!-- 框选区 -->
+    <div class="sel" style="left:250px;top:120px;width:420px;height:270px;">
+      <span class="cp tl"></span><span class="cp tr"></span><span class="cp bl"></span><span class="cp br"></span>
+      <span class="size">1280 × 720</span>
+      <span class="hint">松开鼠标，开始录制这块区域</span>
+    </div>
+
+    <div class="taskbar">
+      <div class="tbstart"></div><div class="tbico"></div><div class="tbico a"></div><div class="tbico"></div>
+      <div class="tbclock">21:07</div>
+    </div>
+  </div>
+  <div class="tag">框选录屏 · 拖动出选区后松开即开始 · 尺寸实时显示</div>
+</div>
+</body>
+</html>

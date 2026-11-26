@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>窗口录屏 · 悬停高亮</title>
+<link rel="stylesheet" href="_style.css">
+</head>
+<body class="scene">
+<div class="desk"></div>
+
+<div class="frame">
+  <div class="stage">
+    <div class="fwin" style="left:38px;top:34px;width:330px;height:230px;">
+      <div class="fbar"><i class="r"></i><i class="y"></i><i class="g"></i><span>浏览器</span></div>
+      <div class="fbody"><div class="block"></div><div class="ln w2"></div><div class="ln w1"></div><div class="ln w3"></div></div>
+    </div>
+
+    <!-- 被高亮的窗口 -->
+    <div class="fwin" style="left:560px;top:70px;width:320px;height:250px;">
+      <div class="fbar"><i class="r"></i><i class="y"></i><i class="g"></i><span>文档 · 正在录制</span></div>
+      <div class="fbody"><div class="ln w2"></div><div class="ln w1"></div><div class="ln w2"></div><div class="ln w3"></div><div class="ln w1"></div></div>
+    </div>
+    <div class="win-hl" style="left:558px;top:68px;width:324px;height:254px;">
+      <span class="wtag">单击 → 录制这个窗口</span>
+    </div>
+
+    <div class="fwin" style="left:120px;top:330px;width:360px;height:150px;">
+      <div class="fbar"><i class="r"></i><i class="y"></i><i class="g"></i><span>文件夹</span></div>
+      <div class="fbody"><div class="ln w1"></div><div class="ln w2"></div><div class="ln w3"></div></div>
+    </div>
+
+    <div class="taskbar">
+      <div class="tbstart"></div><div class="tbico"></div><div class="tbico a"></div><div class="tbico"></div>
+      <div class="tbclock">21:07</div>
+    </div>
+
+    <div class="hintline">鼠标悬停哪个窗口，哪个窗口高亮 · <b>单击</b>开始录制 · <b>Esc</b> 取消</div>
+  </div>
+  <div class="tag">窗口录屏 · 光标移到窗口上整窗高亮 · 只录这一个窗口，切到别的窗口也不跟随</div>
+</div>
+</body>
+</html>

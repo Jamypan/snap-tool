@@ -32,14 +32,22 @@ from i18n import LANG, app_name, t
 # ---------------------------------------------------------------------------
 HOTKEY_ID = 0xA001
 PIN_HOTKEY_ID = 0xA002          # v34 贴图热键：把剪贴板图片贴到桌面
+REC_HOTKEY_ID = 0xA003          # v52 录屏热键：F9 开始 / 停止
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
 MOD_NOREPEAT = 0x4000  # 长按不重复触发
 
-DEFAULT_MODS = MOD_CONTROL | MOD_SHIFT
-DEFAULT_VK = 0x41  # A
+# v52：截图默认热键由 Ctrl+Shift+A 改为 Alt+Z（K 稿要求）
+DEFAULT_MODS = MOD_ALT
+DEFAULT_VK = 0x5A  # Z
+OLD_DEFAULT_MODS = MOD_CONTROL | MOD_SHIFT   # v51 及以前的旧默认值，用于一次性迁移
+OLD_DEFAULT_VK = 0x41  # A
+
+# v52：录屏热键固定 F9（0x78），不提供自定义界面
+DEFAULT_REC_MODS = 0
+DEFAULT_REC_VK = 0x78  # F9
 
 # v34 贴图热键默认 Ctrl+Shift+P（P = Pin），与截图热键可各自独立修改
 DEFAULT_PIN_MODS = MOD_CONTROL | MOD_SHIFT
@@ -190,9 +198,21 @@ def _save_raw(raw: dict) -> bool:
 
 
 def load_hotkey() -> Hotkey:
-    """读取已保存的热键；文件缺失/损坏/非法时回退到默认值。"""
-    hk = Hotkey.from_dict(_load_raw().get("capture", {}))
-    return hk if hk.is_valid() else Hotkey()
+    """读取已保存的热键；文件缺失/损坏/非法时回退到默认值。
+
+    v52：若配置里仍是 v51 及以前的旧默认值 Ctrl+Shift+A，视为「没改过热键」，
+    一次性迁移到新默认 Alt+Z 并写回；用户自定义的其它组合一律保留。
+    """
+    raw = _load_raw()
+    hk = Hotkey.from_dict(raw.get("capture", {}))
+    if not hk.is_valid():
+        return Hotkey()
+    if hk.mods == OLD_DEFAULT_MODS and hk.vk == OLD_DEFAULT_VK:
+        new = Hotkey()
+        raw["capture"] = new.to_dict()
+        _save_raw(raw)
+        return new
+    return hk
 
 
 def save_hotkey(hk: Hotkey) -> bool:

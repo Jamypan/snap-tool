@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>截屏助手 · 高级功能按钮配色静态稿</title>
+<style>
+  :root{
+    --cream:#FBFAF7; --ink:#1C1C1E; --ink2:#6B6660; --ink3:#A39A90;
+    --line:#E9E4DC; --orange:#F97316; --osoft:#FFEFE2;
+    --pro:#E8A33D; --pro-soft:#FFF4E2; --pro-line:#F0D7A8;
+    --off:#F1EFE8; --off-line:#DCD7CF;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px;background:#F5F2EC;color:var(--ink);
+    font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .page{max-width:1160px;margin:0 auto}
+  h1{font-size:20px;font-weight:700;margin:0 0 6px}
+  .lede{font-size:12.5px;color:var(--ink2);line-height:1.8;margin:0 0 16px}
+  .legend{display:flex;flex-wrap:wrap;gap:18px;align-items:center;background:#fff;border:1px solid var(--line);
+    border-radius:14px;padding:12px 16px;margin-bottom:18px}
+  .lg{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--ink2)}
+  .sw{width:22px;height:22px;border-radius:7px;border:1px solid var(--line);display:grid;place-items:center;
+    font-size:10px;color:var(--ink2)}
+  .sw.pro{background:var(--pro);border-color:var(--pro);color:#1C1C1E;font-weight:700}
+  .sw.off{background:var(--off);border-color:var(--off-line);color:var(--ink3)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px}
+  .card h2{font-size:14px;font-weight:700;margin:0 0 3px}
+  .card .sub{font-size:11px;color:var(--ink3);margin:0 0 14px}
+  .panel{background:var(--cream);border:1px solid var(--line);border-radius:16px;padding:10px}
+  .head{display:flex;align-items:center;gap:9px;padding:6px 8px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .logo{width:26px;height:26px;border-radius:9px;background:var(--orange);display:grid;place-items:center;color:#fff}
+  .logo svg{width:15px;height:15px}
+  .tt{font-size:12.5px;font-weight:700}
+  .st{font-size:10px;color:var(--ink3);margin-top:2px}
+  .badge{margin-left:auto;font-size:10px;border-radius:99px;padding:4px 8px;background:var(--pro);color:#1C1C1E;font-weight:700}
+  .badge.off{background:#E2DED7;color:#837B70;font-weight:400}
+  .grp{font-size:10px;color:var(--ink3);font-weight:700;letter-spacing:.08em;padding:9px 10px 5px}
+  .row{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:11px;margin-bottom:3px;
+    background:#fff;border:1px solid transparent}
+  .row.pro{background:var(--pro-soft);border-color:var(--pro-line)}
+  .row.off{background:var(--off);border-color:var(--off-line)}
+  .ico{width:28px;height:28px;border-radius:9px;background:#fff;border:1px solid var(--line);
+    display:grid;place-items:center;flex:0 0 auto;color:var(--ink2)}
+  .ico svg{width:15px;height:15px}
+  .row.pro .ico{background:var(--pro);border-color:var(--pro);color:#1C1C1E}
+  .row.off .ico{background:#E8E5DF;border-color:#D9D4CC;color:#9E968C}
+  .nm{font-size:12px;font-weight:600}
+  .ds{font-size:10px;color:var(--ink3);margin-top:2px}
+  .row.off .nm,.row.off .ds{color:#9E968C}
+  .tag{margin-left:auto;font-size:9.5px;padding:3px 7px;border-radius:99px;white-space:nowrap;
+    background:#F3F0EA;color:var(--ink3)}
+  .tag.pro{background:var(--pro);color:#1C1C1E;font-weight:700}
+  .tag.off{background:#E2DED7;color:#837B70}
+  .dockwrap{background:var(--cream);border:1px solid var(--line);border-radius:16px;padding:26px 10px;
+    display:flex;align-items:center;justify-content:center;min-height:236px}
+  .dock{display:flex;align-items:center;gap:5px;background:#fff;border:1px solid var(--line);
+    border-radius:20px;padding:9px 11px;box-shadow:0 12px 26px rgba(50,40,30,.12)}
+  .dk{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;color:var(--ink2);
+    border:1px solid transparent;position:relative}
+  .dk svg{width:18px;height:18px}
+  .dk.pro{background:var(--pro);border-color:var(--pro);color:#1C1C1E}
+  .dk.off{background:#EDEAE4;color:#A9A198;border-color:var(--off-line)}
+  .dk .pt{position:absolute;right:-3px;top:-4px;font-size:8px;font-weight:700;background:var(--ink);
+    color:#fff;border-radius:99px;padding:1px 3px}
+  .dk.off .pt{background:#9E968C}
+  .dv{width:1px;height:24px;background:var(--line);margin:0 4px}
+  .wide{margin-top:18px}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .mini{background:var(--cream);border:1px solid var(--line);border-radius:14px;padding:12px}
+  .upgrade{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 14px;border-radius:11px;
+    background:var(--ink);color:#fff;font-size:11.5px;font-weight:600;margin-top:10px}
+  .note{font-size:11px;color:var(--ink2);line-height:1.8;margin:12px 0 0}
+  .note b{color:var(--ink);font-weight:700}
+  svg{border:0}
+  .ic{stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>截屏助手 · 高级功能按钮配色（静态稿）</h1>
+  <p class="lede">只出界面示意，未改代码。约定：所有高级功能统一用「会员金」底色 + PRO 角标；基础功能保持白底深墨；到期未购买时高级按钮整体置灰并加锁，基础功能不变。</p>
+
+  <div class="legend">
+    <div class="lg"><span class="sw">截</span>基础功能：白底 / 深墨图标，永久可用</div>
+    <div class="lg"><span class="sw pro">P</span>高级功能：金色底 / 深墨图标 + PRO 角标</div>
+    <div class="lg"><span class="sw off">锁</span>到期未购买：浅灰底 / 灰图标 + 锁</div>
+  </div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-cam" viewBox="0 0 24 24"><path class="ic" d="M4 8V6a2 2 0 0 1 2-2h3l2-2h2l2 2h3a2 2 0 0 1 2 2v2"/><circle class="ic" cx="12" cy="13" r="4"/><path class="ic" d="M6 18h12"/></symbol>
+    <symbol id="i-rect" viewBox="0 0 24 24"><rect class="ic" x="3" y="4" width="18" height="16" rx="2"/><path class="ic" d="M3 9h18"/></symbol>
+    <symbol id="i-full" viewBox="0 0 24 24"><rect class="ic" x="2" y="3" width="20" height="14" rx="2"/><path class="ic" d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-long" viewBox="0 0 24 24"><rect class="ic" x="6" y="2" width="12" height="13" rx="2"/><path class="ic" d="M12 18v3M9 19.5l3 2.5 3-2.5"/></symbol>
+    <symbol id="i-ocr" viewBox="0 0 24 24"><path class="ic" d="M5 6V4h14v2M12 4v16M9 20h6"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path class="ic" d="M4 20l3.5-1L19 7.5 16.5 5 5 16.5z"/><path class="ic" d="M14 7.5l2.5 2.5"/></symbol>
+    <symbol id="i-rot" viewBox="0 0 24 24"><path class="ic" d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/><path class="ic" d="M23 4v6h-6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path class="ic" d="M4 20L20 4"/><path class="ic" d="M15 4h5v5"/></symbol>
+    <symbol id="i-drop" viewBox="0 0 24 24"><path class="ic" d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></symbol>
+    <symbol id="i-zoom" viewBox="0 0 24 24"><circle class="ic" cx="10.5" cy="10.5" r="6.5"/><path class="ic" d="M15.5 15.5L21 21M10.5 7v7M7 10.5h7"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path class="ic" d="M12 17v5M9 3h6l-1 6 4 3H6l4-3z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect class="ic" x="9" y="9" width="12" height="12" rx="2"/><path class="ic" d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-sel" viewBox="0 0 24 24"><path class="ic" d="M5 3l14 8-6 1.6L10 19z"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path class="ic" d="M5 6V4h14v2M12 4v16M9 20h6"/></symbol>
+    <symbol id="i-line" viewBox="0 0 24 24"><path class="ic" d="M4 20L20 4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect class="ic" x="5" y="10" width="14" height="10" rx="2"/><path class="ic" d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  </svg>
+
+  <div class="grid">
+    <div class="card">
+      <h2>① 命令面板 · 可用状态</h2>
+      <p class="sub">试用中或已购买：高级行整行浅金底，图标方块变金色，右侧显示 PRO</p>
+      <div class="panel">
+        <div class="head">
+          <div class="logo"><svg><use href="#i-cam"/></svg></div>
+          <div><div class="tt">截屏助手</div><div class="st">v42 · 托盘常驻 · 关闭面板不会退出</div></div>
+          <div class="badge">试用中 · 剩 93 天</div>
+        </div>
+        <div class="grp">截图</div>
+        <div class="row"><span class="ico"><svg><use href="#i-rect"/></svg></span><div><div class="nm">框选截图</div><div class="ds">拖拽选取任意区域 · 默认模式</div></div><span class="tag">Ctrl+Shift+A</span></div>
+        <div class="row"><span class="ico"><svg><use href="#i-full"/></svg></span><div><div class="nm">全屏截图</div><div class="ds">整块桌面 · 多屏合屏</div></div><span class="tag">基础</span></div>
+        <div class="row pro"><span class="ico"><svg><use href="#i-long"/></svg></span><div><div class="nm">滚动长截图</div><div class="ds">点窗口自动滚拼成长图</div></div><span class="tag pro">PRO</span></div>
+        <div class="grp">编辑与输出</div>
+        <div class="row pro"><span class="ico"><svg><use href="#i-ocr"/></svg></span><div><div class="nm">OCR 取字</div><div class="ds">离线 RapidOCR · 表格导出 TSV</div></div><span class="tag pro">PRO</span></div>
+        <div class="row"><span class="ico"><svg><use href="#i-pin"/></svg></span><div><div class="nm">贴出剪贴板图片</div><div class="ds">钉成置顶浮窗，可拖动缩放</div></div><span class="tag">基础</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>② 编辑器底部 Dock · 可用状态</h2>
+      <p class="sub">基础工具保持白底；旋转/镜像、端点箭头、透明色、视图放缩四个按钮用金色</p>
+      <div class="dockwrap">
+        <div class="dock">
+          <div class="dk"><svg><use href="#i-sel"/></svg></div>
+          <div class="dk"><svg><use href="#i-rect"/></svg></div>
+          <div class="dk"><svg><use href="#i-line"/></svg></div>
+          <div class="dk"><svg><use href="#i-text"/></svg></div>
+          <div class="dk"><svg><use href="#i-pen"/></svg></div>
+          <div class="dv"></div>
+          <div class="dk pro"><svg><use href="#i-rot"/></svg></div>
+          <div class="dk pro"><svg><use href="#i-arrow"/></svg></div>
+          <div class="dk pro"><svg><use href="#i-drop"/></svg></div>
+          <div class="dk pro"><svg><use href="#i-zoom"/></svg></div>
+          <div class="dv"></div>
+          <div class="dk"><svg><use href="#i-copy"/></svg></div>
+        </div>
+      </div>
+      <p class="note"><b>角标：</b>金色按钮右上角的小 PRO 标记只是示意；为了避免 36px 图标太挤，实际可改成按钮下方一个金色小圆点。</p>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <h2>③ 到期未购买 · 置灰状态</h2>
+    <p class="sub">180 天到期后：高级按钮从金色变成浅灰 + 锁图标，文字置灰；点击弹升级窗口。基础按钮完全不变，仍可截图、标注、复制、保存。</p>
+    <div class="twocol">
+      <div class="mini">
+        <div class="grp">命令面板局部</div>
+        <div class="row off"><span class="ico"><svg><use href="#i-long"/></svg></span><div><div class="nm">滚动长截图</div><div class="ds">试用已结束 · 购买后解锁</div></div><span class="tag off"><svg style="width:11px;height:11px;vertical-align:-2px"><use href="#i-lock"/></svg> 解锁</span></div>
+        <div class="row off"><span class="ico"><svg><use href="#i-ocr"/></svg></span><div><div class="nm">OCR 取字</div><div class="ds">试用已结束 · 购买后解锁</div></div><span class="tag off"><svg style="width:11px;height:11px;vertical-align:-2px"><use href="#i-lock"/></svg> 解锁</span></div>
+        <div class="row"><span class="ico"><svg><use href="#i-rect"/></svg></span><div><div class="nm">框选截图</div><div class="ds">基础功能 · 一直免费</div></div><span class="tag">正常</span></div>
+      </div>
+      <div class="mini">
+        <div class="grp">编辑器 Dock 局部</div>
+        <div class="dock" style="box-shadow:none">
+          <div class="dk"><svg><use href="#i-sel"/></svg></div>
+          <div class="dk off"><svg><use href="#i-rot"/></svg></div>
+          <div class="dk off"><svg><use href="#i-arrow"/></svg></div>
+          <div class="dk off"><svg><use href="#i-drop"/></svg></div>
+          <div class="dk off"><svg><use href="#i-zoom"/></svg></div>
+          <div class="dv"></div>
+          <div class="dk"><svg><use href="#i-copy"/></svg></div>
+        </div>
+        <div class="upgrade"><svg style="width:13px;height:13px"><use href="#i-lock"/></svg>立即升级 · 永久授权</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">配色取值：基础白底 <b>#FFFFFF</b> / 深墨 <b>#1C1C1E</b>；高级金 <b>#E8A33D</b> + 浅金底 <b>#FFF4E2</b>；到期灰 <b>#F1EFE8</b>。与现有品牌橙 <b>#F97316</b> 刻意区分：橙用于「当前选中」，金用于「需要授权」，灰用于「不可用」。</p>
+</div>
+</body>
+</html>

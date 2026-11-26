@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>截屏助手 · 升级窗口静态稿</title>
+<style>
+  :root{
+    --cream:#FBFAF7; --ink:#1C1C1E; --ink2:#6B6660; --ink3:#A39A90;
+    --line:#E9E4DC; --orange:#F97316; --osoft:#FFEFE2;
+    --pro:#E8A33D; --pro-soft:#FFF4E2; --pro-line:#F0D7A8;
+    --ok:#1D9E75; --ok-soft:#E1F5EE; --off:#F1EFE8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px;background:#F5F2EC;color:var(--ink);
+    font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .page{max-width:1180px;margin:0 auto}
+  h1{font-size:20px;font-weight:700;margin:0 0 6px}
+  .lede{font-size:12.5px;color:var(--ink2);line-height:1.8;margin:0 0 20px;max-width:860px}
+  .wrap{display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap}
+  .stage{width:520px}
+  .stage-label{font-size:11px;color:var(--ink3);font-weight:700;letter-spacing:.08em;margin:0 0 10px 4px}
+  .modal{background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden;
+    box-shadow:0 18px 44px rgba(50,40,30,.13)}
+  .mhead{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line)}
+  .mico{width:30px;height:30px;border-radius:10px;background:var(--pro);display:grid;place-items:center;color:var(--ink)}
+  .mico svg{width:17px;height:17px}
+  .mtitle{font-size:14px;font-weight:700}
+  .msub{font-size:10.5px;color:var(--ink3);margin-top:2px}
+  .x{margin-left:auto;width:26px;height:26px;border-radius:9px;display:grid;place-items:center;
+    background:var(--off);color:var(--ink2);font-size:13px}
+  .status{display:flex;align-items:center;gap:8px;padding:10px 18px;background:var(--off);
+    border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink2)}
+  .status .lock{width:22px;height:22px;border-radius:7px;background:#E2DED7;display:grid;place-items:center;color:#837B70}
+  .status .lock svg{width:12px;height:12px}
+  .body{padding:16px 18px 6px}
+  .sec{margin-bottom:16px}
+  .lab{font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .num{width:18px;height:18px;border-radius:6px;background:var(--ink);color:#fff;font-size:10px;
+    display:grid;place-items:center;font-weight:700}
+  .codebox{display:flex;align-items:center;gap:8px;background:var(--cream);border:1px solid var(--line);
+    border-radius:11px;padding:9px 10px}
+  .codebox code{font-family:Consolas,"Courier New",monospace;font-size:13px;letter-spacing:.08em;color:var(--ink)}
+  .copy{margin-left:auto;font-size:10.5px;padding:5px 10px;border-radius:8px;background:var(--ink);color:#fff}
+  .hint{font-size:10.5px;color:var(--ink3);line-height:1.7;margin-top:6px}
+  .buy{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--orange);
+    border-radius:11px;background:var(--osoft);font-size:12px;color:var(--ink);font-weight:600}
+  .buy .arrow{margin-left:auto;color:var(--orange);font-size:14px}
+  .buy .ph{font-size:10px;color:var(--ink3);font-weight:400}
+  .field{height:38px;border:1px dashed #D9D4CC;border-radius:11px;background:#FCFBF9;
+    display:flex;align-items:center;padding:0 12px;font-size:11.5px;color:var(--ink3)}
+  .btns{display:flex;gap:8px;margin-top:9px}
+  .btn{height:34px;padding:0 14px;border-radius:10px;font-size:11.5px;display:flex;align-items:center;justify-content:center}
+  .btn.ghost{border:1px solid var(--line);background:#fff;color:var(--ink2)}
+  .btn.primary{background:var(--ink);color:#fff;font-weight:700;flex:1}
+  .foot{padding:12px 18px;background:var(--cream);border-top:1px solid var(--line);
+    font-size:10.5px;color:var(--ink3);line-height:1.7}
+  .foot b{color:var(--ink2);font-weight:600}
+  .success .mico{background:var(--ok-soft);color:var(--ok)}
+  .okbody{padding:24px 22px 12px;text-align:center}
+  .okcirc{width:56px;height:56px;border-radius:50%;background:var(--ok-soft);display:grid;place-items:center;
+    margin:0 auto 12px;color:var(--ok)}
+  .okcirc svg{width:28px;height:28px}
+  .oktitle{font-size:16px;font-weight:700}
+  .okdesc{font-size:11.5px;color:var(--ink2);line-height:1.8;margin-top:6px}
+  .pill{display:inline-block;background:var(--pro-soft);border:1px solid var(--pro-line);color:var(--ink);
+    border-radius:99px;padding:4px 10px;font-size:10.5px;font-weight:700;margin-top:10px}
+  .oklist{text-align:left;margin:16px 0 4px;background:var(--cream);border:1px solid var(--line);
+    border-radius:12px;padding:10px 14px}
+  .oklist div{font-size:11.5px;color:var(--ink2);line-height:2}
+  .oklist span{color:var(--ok);margin-right:6px}
+  .okfoot{padding:12px 22px 20px;text-align:center}
+  .okfoot .btn{width:100%;background:var(--pro);border-color:var(--pro);color:var(--ink);font-weight:700}
+  .note{font-size:11px;color:var(--ink2);line-height:1.9;margin:22px 0 0;max-width:900px}
+  .note b{color:var(--ink);font-weight:700}
+  svg{border:0}
+  .ic{stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>截屏助手 · 升级窗口（静态稿）</h1>
+  <p class="lede">点「立即升级」后弹出的窗口。流程是：复制机器码 → 去购买页面下单拿激活码 → 粘回窗口 → 本地验签解锁。下面是待激活与激活成功两个状态，界面示意，未接入代码。</p>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect class="ic" x="5" y="10" width="14" height="10" rx="2"/><path class="ic" d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-pro" viewBox="0 0 24 24"><path class="ic" d="M12 3l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.3 6.8 19.2l1-5.9L3.5 9.2l5.9-.8z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path class="ic" d="M4 12.5l5 5L20 6.5"/></symbol>
+  </svg>
+
+  <div class="wrap">
+    <div class="stage">
+      <div class="stage-label">状态一 · 待激活</div>
+      <div class="modal">
+        <div class="mhead">
+          <div class="mico"><svg><use href="#i-pro"/></svg></div>
+          <div><div class="mtitle">升级到专业版</div><div class="msub">一次购买 · 永久使用 · 一机一码</div></div>
+          <div class="x">✕</div>
+        </div>
+        <div class="status">
+          <span class="lock"><svg><use href="#i-lock"/></svg></span>
+          试用已结束（180 天）· 6 项高级功能已锁定，基础功能不受影响
+        </div>
+        <div class="body">
+          <div class="sec">
+            <div class="lab"><span class="num">1</span>复制机器码</div>
+            <div class="codebox"><code>A7F3-9C21-6B8E-4D05</code><span class="copy">复制</span></div>
+            <div class="hint">示例码，仅示意。实际由主板 UUID + 系统盘序列号生成；离线版不上传。</div>
+          </div>
+          <div class="sec">
+            <div class="lab"><span class="num">2</span>打开购买页面下单</div>
+            <div class="buy"><span>前往购买页面</span><span class="ph">https://example.com/buy（占位）</span><span class="arrow">→</span></div>
+            <div class="hint">页面上线后改配置项即可，不用改代码；下单后页面或邮件给出激活码。</div>
+          </div>
+          <div class="sec">
+            <div class="lab"><span class="num">3</span>输入激活码</div>
+            <div class="field">在这里粘贴激活码…</div>
+            <div class="btns">
+              <div class="btn ghost">导入 license.dat</div>
+              <div class="btn primary">立即解锁</div>
+            </div>
+          </div>
+        </div>
+        <div class="foot"><b>永久授权</b> · 不支持换机 · 本机重装不限次数，同一激活码可重复使用 · <b>基础功能一直免费</b></div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-label">状态二 · 激活成功</div>
+      <div class="modal success">
+        <div class="mhead">
+          <div class="mico"><svg><use href="#i-pro"/></svg></div>
+          <div><div class="mtitle">授权状态</div><div class="msub">本地验签通过 · 无需联网</div></div>
+          <div class="x">✕</div>
+        </div>
+        <div class="okbody">
+          <div class="okcirc"><svg><use href="#i-check"/></svg></div>
+          <div class="oktitle">已解锁专业版</div>
+          <div class="okdesc">激活码与本机硬件匹配，授权已写入本地。<br>重新打开程序后仍然有效。</div>
+          <div class="pill">永久授权 · 无到期日</div>
+          <div class="oklist">
+            <div><span>✓</span>滚动长截图</div>
+            <div><span>✓</span>OCR 取字</div>
+            <div><span>✓</span>旋转 / 镜像</div>
+            <div><span>✓</span>端点箭头</div>
+            <div><span>✓</span>透明色与填充透明度</div>
+            <div><span>✓</span>画布视图放缩</div>
+          </div>
+        </div>
+        <div class="okfoot"><div class="btn">完成</div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note"><b>按钮行为：</b>「复制」把机器码放进剪贴板；「导入 license.dat」是给不想手输长码的用户留的文件入口；「立即解锁」只在本地做公钥验签 + 机器码比对，失败时停留在窗口并提示原因，不会联网、也不会扣款。<b>购买链接</b>现在是可配置占位值，等页面做好再改配置。机器码只在首次用高级功能或点升级时才生成，基础功能阶段不采集硬件标识。</p>
+</div>
+</body>
+</html>

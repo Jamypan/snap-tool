@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>截屏助手 · 录屏模式主界面</title>
+<link rel="stylesheet" href="_style.css">
+</head>
+<body class="panel">
+<div class="desk"></div>
+
+<div class="frame">
+<div class="win">
+  <div class="tbar">
+    <div class="ticon">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.4" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="12" cy="12" r="3.2" fill="#f97316" stroke="none"/></svg>
+    </div>
+    <div class="tname">截屏助手</div>
+    <div class="tbtns"><i>—</i><i>▢</i><i class="x">✕</i></div>
+  </div>
+
+  <div class="head">
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8.5V6a2 2 0 0 1 2-2h2.5"/><path d="M15.5 4H18a2 2 0 0 1 2 2v2.5"/>
+        <path d="M20 15.5V18a2 2 0 0 1-2 2h-2.5"/><path d="M8.5 20H6a2 2 0 0 1-2 2v-2.5"/>
+        <circle cx="12" cy="12" r="2.4" fill="#fff" stroke="none"/>
+      </svg>
+    </div>
+    <div class="hname">
+      <b>截屏助手</b>
+      <span>托盘常驻 · 关闭窗口不会退出程序</span>
+    </div>
+    <div class="hright">
+      <div class="badge">已启动</div>
+      <div class="quit">⇥ 退出</div>
+    </div>
+  </div>
+  <div class="divider-h"></div>
+
+  <!-- 截图 / 录屏 切换 -->
+  <div class="tabs">
+    <div class="tab">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8.5V6a2 2 0 0 1 2-2h2.5"/><path d="M15.5 4H18a2 2 0 0 1 2 2v2.5"/><path d="M20 15.5V18a2 2 0 0 1-2 2h-2.5"/><path d="M8.5 20H6a2 2 0 0 1-2-2v-2.5"/></svg>
+      截图 <span class="kbd">Alt+Z</span>
+    </div>
+    <div class="tab on">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5" fill="currentColor" stroke="none"/></svg>
+      录屏 <span class="kbd">F9</span>
+    </div>
+  </div>
+  <div class="divider-h"></div>
+
+  <div class="cols">
+    <!-- ======== 左列 ======== -->
+    <div class="col">
+      <div class="gtitle colhead-mode">录屏方式<span class="colhead-c">默认方式</span></div>
+
+      <div class="row split on">
+        <div class="launch hot">
+          <div class="ic">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 8.5V6a2 2 0 0 1 2-2h2.5"/><path d="M15.5 4H18a2 2 0 0 1 2 2v2.5"/>
+              <path d="M20 15.5V18a2 2 0 0 1-2 2h-2.5"/><path d="M8.5 20H6a2 2 0 0 1-2-2v-2.5"/>
+              <circle cx="12" cy="12" r="1.7" fill="#f97316" stroke="none"/>
+            </svg>
+          </div>
+          <div class="tx"><b>框选录屏</b><span>拖动选取任意区域 · 松开开始</span></div>
+        </div>
+        <div class="pick"><span class="deflabel">默认</span><div class="radio checked"></div></div>
+      </div>
+
+      <div class="row split">
+        <div class="launch">
+          <div class="ic">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="5" width="18" height="14" rx="2.2"/><path d="M3 9.5h18"/>
+            </svg>
+          </div>
+          <div class="tx"><b>窗口录屏</b><span>悬停高亮 · 单击录制该窗口</span></div>
+        </div>
+        <div class="pick hot"><div class="radio hint"></div></div>
+      </div>
+
+      <div class="row split">
+        <div class="launch">
+          <div class="ic">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2.5" y="4.5" width="19" height="13" rx="2.2"/><path d="M9 20.5h6"/><path d="M12 17.5v3"/>
+            </svg>
+          </div>
+          <div class="tx"><b>全屏录屏</b><span>整块桌面 · 多屏合屏</span></div>
+        </div>
+        <div class="pick"><div class="radio"></div></div>
+      </div>
+
+      <div class="gap"></div>
+      <div class="gtitle">声音与画面</div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/>
+          </svg>
+        </div>
+        <div class="tx"><b>系统声音</b><span>录电脑播放的声音</span></div>
+        <div class="end"><div class="sw on"></div></div>
+      </div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/>
+          </svg>
+        </div>
+        <div class="tx"><b>麦克风</b><span>录你说话的声音</span></div>
+        <div class="end"><div class="sw on"></div></div>
+      </div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 3.5l13 8-5.6 1.2 3 5.4-2.6 1.4-3-5.4L5 17.5z"/>
+          </svg>
+        </div>
+        <div class="tx"><b>录制鼠标指针</b><span>视频里显示光标位置</span></div>
+        <div class="end"><div class="sw off"></div></div>
+      </div>
+    </div>
+
+    <div class="vline"></div>
+
+    <!-- ======== 右列 ======== -->
+    <div class="col">
+      <div class="gtitle">录制设置</div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.2 2"/>
+          </svg>
+        </div>
+        <div class="tx"><b>画面帧率</b><span>越高越流畅 · 文件也越大</span></div>
+        <div class="end"><span class="pill val">24 fps</span></div>
+      </div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5.5h16v13H4z"/><path d="M4 9.5h16"/><circle cx="8" cy="7.4" r=".9" fill="#4a453e" stroke="none"/>
+          </svg>
+        </div>
+        <div class="tx"><b>音频保存</b><span>每次录制前再确认一次</span></div>
+        <div class="end"><span class="pill val">整合到视频</span></div>
+      </div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7.5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>
+          </svg>
+        </div>
+        <div class="tx"><b>保存位置</b><span>录屏_日期_时间.mp4</span></div>
+        <div class="end"><span class="pill">视频</span></div>
+      </div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6.5 10.5l2 1.5-2 1.5"/><path d="M11 13.5h5"/>
+          </svg>
+        </div>
+        <div class="tx"><b>录屏热键</b><span>开始 / 停止都用它</span></div>
+        <div class="end"><span class="pill" style="background:none;border:none;font-size:11px">F9</span></div>
+      </div>
+
+      <div class="gap"></div>
+      <div class="gtitle">帮助</div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="8.5"/><path d="M9.5 9.6a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1 1-1.1 1.7v.3"/>
+            <circle cx="12" cy="17.2" r=".95" fill="#4a453e" stroke="none"/>
+          </svg>
+        </div>
+        <div class="tx"><b>使用说明</b><span>含录屏操作文档</span></div>
+      </div>
+
+      <div class="row">
+        <div class="ic">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4a453e" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="8.5"/><path d="M8.4 14.2c.9 1.1 2.2 1.7 3.6 1.7s2.7-.6 3.6-1.7"/>
+            <circle cx="9.3" cy="9.9" r=".95" fill="#4a453e" stroke="none"/><circle cx="14.7" cy="9.9" r=".95" fill="#4a453e" stroke="none"/>
+          </svg>
+        </div>
+        <div class="tx"><b>关于</b><span>版本信息 · 联系邮箱</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cta rec">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" fill="#fff"/></svg>
+    开始录屏 <span class="k">F9</span>
+  </div>
+</div>
+  <div class="tag">顶部切换「截图 / 录屏」 · 左侧三种录屏方式沿用截图那套左右分栏</div>
+</div>
+</body>
+</html>

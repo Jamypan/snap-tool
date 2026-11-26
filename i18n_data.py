@@ -1358,5 +1358,225 @@ _ROWS.update({
         "Permanece en la bandeja · cerrar la ventana no sale del programa",
     ),
 
+    # ------------------------------------------------------------ V52 录屏（K-recording UI）
+    "录屏": (
+        "录屏", "錄影", "Screen recording", "画面録画",
+        "화면 녹화", "Enregistrement d'écran", "Bildschirmaufnahme", "Grabación de pantalla",
+    ),
+    "开始录屏": (
+        "开始录屏", "開始錄影", "Start recording", "録画を開始",
+        "녹화 시작", "Démarrer l'enregistrement", "Aufnahme starten", "Iniciar grabación",
+    ),
+    "停止": (
+        "停止", "停止", "Stop", "停止",
+        "중지", "Arrêter", "Stopp", "Detener",
+    ),
+    "已暂停 · F9 继续": (
+        "已暂停 · F9 继续", "已暫停 · F9 繼續", "Paused · F9 to resume",
+        "一時停止中 · F9 で再開", "일시정지 · F9 로 계속",
+        "En pause · F9 pour reprendre", "Pausiert · F9 zum Fortsetzen", "En pausa · F9 para continuar",
+    ),
+    "⇥ 退出": (
+        "⇥ 退出", "⇥ 結束", "⇥ Exit", "⇥ 終了",
+        "⇥ 종료", "⇥ Quitter", "⇥ Beenden", "⇥ Salir",
+    ),
+    "录屏方式": (
+        "录屏方式", "錄影方式", "Recording mode", "録画方法",
+        "녹화 방식", "Mode d'enregistrement", "Aufnahme-Modus", "Modo de grabación",
+    ),
+    "声音与画面": (
+        "声音与画面", "聲音與畫面", "Sound and picture", "音声と映像",
+        "소리와 화면", "Son et image", "Ton und Bild", "Sonido e imagen",
+    ),
+    "录制设置": (
+        "录制设置", "錄影設定", "Recording settings", "録画設定",
+        "녹화 설정", "Paramètres d'enregistrement", "Aufnahme-Einstellungen", "Ajustes de grabación",
+    ),
+    "画面帧率": (
+        "画面帧率", "畫面幀率", "Frame rate", "フレームレート",
+        "프레임률", "Fréquence d'images", "Bildrate", "Velocidad de fotogramas",
+    ),
+    "越高越流畅 · 文件也越大": (
+        "越高越流畅 · 文件也越大", "越高越流暢 · 檔案也越大", "Higher is smoother · larger file",
+        "高いほど滑らか · ファイルも大きくなる", "높을수록 부드럽고 · 파일도 커집니다",
+        "Plus élevé = plus fluide · fichier plus gros", "Höher = flüssiger · größere Datei",
+        "Más alto = más fluido · archivo más grande",
+    ),
+    "保存位置": (
+        "保存位置", "儲存位置", "Save location", "保存先",
+        "저장 위치", "Emplacement d'enregistrement", "Speicherort", "Ubicación de guardado",
+    ),
+    "录屏热键": (
+        "录屏热键", "錄影熱鍵", "Recording hotkey", "録画ホットキー",
+        "녹화 단축키", "Raccourci d'enregistrement", "Aufnahme-Tastenkürzel", "Atajo de grabación",
+    ),
+    "开始 / 停止都用它": (
+        "开始 / 停止都用它", "開始 / 停止都用它", "Use it to start and stop",
+        "開始 / 停止どちらにも使用", "시작 / 중지 모두 사용",
+        "Utilisé pour démarrer et arrêter", "Für Start und Stopp verwenden", "Úselo para iniciar y detener",
+    ),
+    "含录屏操作文档": (
+        "含录屏操作文档", "含錄影操作文件", "Includes screen recording guide",
+        "画面録画の操作説明を含む", "화면 녹화 사용 설명 포함",
+        "Includes the screen recording guide", "Enthält Anleitung zur Bildschirmaufnahme",
+        "Incluye la guía de grabación de pantalla",
+    ),
+    "顶部切换「截图 / 录屏」 · 三种方式沿用同一套分栏": (
+        "顶部切换「截图 / 录屏」 · 三种方式沿用同一套分栏",
+        "頂部切換「截圖 / 錄影」 · 三種方式沿用同一套分欄",
+        "Switch between Screenshot / Recording at the top · all three modes share the same layout",
+        "上部で「スクリーンショット / 録画」を切り替え · 3 つの方式は同じレイアウト",
+        "상단에서 캡처 / 녹화 전환 · 세 방식 모두 같은 분할 레이아웃 사용",
+        "Basculez entre Capture / Enregistrement en haut · les trois modes partagent la même disposition",
+        "Oben zwischen Screenshot / Aufnahme wechseln · alle drei Modi nutzen dasselbe Layout",
+        "Cambia entre Captura / Grabación arriba · los tres modos usan el mismo diseño",
+    ),
+    "录制鼠标指针": (
+        "录制鼠标指针", "錄製滑鼠指標", "Record mouse cursor", "マウスカーソルを録画",
+        "마우스 커서 기록", "Enregistrer le curseur de la souris", "Mauszeiger aufnehmen",
+        "Grabar el cursor del ratón",
+    ),
+    "视频里显示光标位置": (
+        "视频里显示光标位置", "影片裡顯示游標位置", "Show cursor in the video",
+        "動画にカーソルを表示", "동영상에 커서 표시",
+        "Afficher le curseur dans la vidéo", "Cursor im Video anzeigen", "Mostrar el cursor en el vídeo",
+    ),
+    "系统声音": (
+        "系统声音", "系統聲音", "System audio", "システム音声",
+        "시스템 소리", "Son système", "Systemton", "Sonido del sistema",
+    ),
+    "系统声": (
+        "系统声", "系統聲", "System sound", "システム音",
+        "시스템 소리", "Son du système", "Systemton", "Sonido del sistema",
+    ),
+    "录电脑播放的声音": (
+        "录电脑播放的声音", "錄電腦播放的聲音", "Record system audio",
+        "コンピューターの音声を録音", "컴퓨터에서 나는 소리 녹음",
+        "Enregistrer le son du système", "Systemton aufnehmen", "Grabar el sonido del sistema",
+    ),
+    "麦克风": (
+        "麦克风", "麥克風", "Microphone", "マイク",
+        "마이크", "Microphone", "Mikrofon", "Micrófono",
+    ),
+    "录你说话的声音": (
+        "录你说话的声音", "錄你說話的聲音", "Record your voice", "自分の声を録音",
+        "내 목소리 녹음", "Enregistrer votre voix", "Ihre Stimme aufnehmen", "Grabar tu voz",
+    ),
+    "摄像头画中画": (
+        "摄像头画中画", "攝影機畫中畫", "Webcam picture-in-picture",
+        "ウェブカメラのピクチャーインピクチャー", "웹캠 화중화 (PIP)",
+        "Incrustation de la webcam", "Webcam-Bild-in-Bild", "Imagen en imagen de la webcam",
+    ),
+    "把摄像头画面贴到角落": (
+        "把摄像头画面贴到角落", "把攝影機畫面貼到角落", "Overlay the webcam in a corner",
+        "ウェブカメラ映像を隅に表示", "웹캠 화면을 모서리에 표시",
+        "Afficher la webcam dans un coin", "Webcam-Bild in einer Ecke einblenden",
+        "Mostrar la webcam en una esquina",
+    ),
+    "画中画位置": (
+        "画中画位置", "畫中畫位置", "Picture-in-picture position",
+        "ピクチャーインピクチャーの位置", "화중화 위치",
+        "Position de l'incrustation", "Bild-in-Bild-Position", "Posición de la imagen en imagen",
+    ),
+    "角落位置": (
+        "角落位置", "角落位置", "Corner position", "隅の位置",
+        "모서리 위치", "Position dans le coin", "Eckenposition", "Posición de la esquina",
+    ),
+    "画中画大小": (
+        "画中画大小", "畫中畫大小", "Picture-in-picture size",
+        "ピクチャーインピクチャーのサイズ", "화중화 크기",
+        "Taille de l'incrustation", "Bild-in-Bild-Größe", "Tamaño de la imagen en imagen",
+    ),
+    "占画面宽度比例": (
+        "占画面宽度比例", "佔畫面寬度比例", "Share of screen width", "画面幅に占める割合",
+        "화면 너비 비율", "Part de la largeur de l'écran", "Anteil der Bildschirmbreite",
+        "Porcentaje del ancho de pantalla",
+    ),
+    "音频保存": (
+        "音频保存", "音訊儲存", "Audio saving", "音声の保存",
+        "오디오 저장", "Enregistrement de l'audio", "Audio-Speicherung", "Guardado de audio",
+    ),
+    "每次录制前再确认一次": (
+        "每次录制前再确认一次", "每次錄影前再確認一次", "Ask again before every recording",
+        "録画のたびに確認する", "녹화할 때마다 다시 확인",
+        "Demander à nouveau avant chaque enregistrement", "Vor jeder Aufnahme erneut nachfragen",
+        "Preguntar de nuevo antes de cada grabación",
+    ),
+    "整合到视频里（推荐）：声音嵌进 MP4，只有一个文件": (
+        "整合到视频里（推荐）：声音嵌进 MP4，只有一个文件",
+        "整合到影片裡（推薦）：聲音嵌進 MP4，只有一個檔案",
+        "Embed in video (recommended): audio inside the MP4, a single file",
+        "動画に統合（推奨）：音声を MP4 に埋め込み、ファイルは 1 つ",
+        "동영상에 포함 (권장): 오디오를 MP4 에 넣어 파일 하나로 저장",
+        "Intégré à la vidéo (recommandé) : son dans le MP4, un seul fichier",
+        "Ins Video integriert (empfohlen): Ton in der MP4, nur eine Datei",
+        "Integrado en el vídeo (recomendado): audio dentro del MP4, un solo archivo",
+    ),
+    "分开保存：视频不带声音，声音单独存成 WAV 文件": (
+        "分开保存：视频不带声音，声音单独存成 WAV 文件",
+        "分開儲存：影片不含聲音，聲音單獨存成 WAV 檔案",
+        "Separate: video without sound, audio saved as a WAV file",
+        "別々に保存：動画は音声なし、音声は WAV ファイルとして保存",
+        "분리 저장: 동영상은 소리 없이, 소리는 WAV 파일로 저장",
+        "Séparer : vidéo sans son, audio enregistré dans un fichier WAV",
+        "Getrennt: Video ohne Ton, Audio als WAV-Datei speichern",
+        "Separado: vídeo sin sonido, audio guardado como archivo WAV",
+    ),
+    "两者都要：视频里有声音，同时单独导出 WAV 文件": (
+        "两者都要：视频里有声音，同时单独导出 WAV 文件",
+        "兩者都要：影片裡有聲音，同時單獨匯出 WAV 檔案",
+        "Both: sound in the video plus a separate WAV file",
+        "両方：動画に音声を含めつつ、WAV ファイルも別途書き出す",
+        "둘 다: 동영상에 소리를 넣고 WAV 파일도 따로 내보내기",
+        "Les deux : son dans la vidéo et fichier WAV séparé",
+        "Beides: Ton im Video und zusätzliche WAV-Datei",
+        "Ambos: sonido en el vídeo y archivo WAV por separado",
+    ),
+    "开始 / 停止录屏 (F9)": (
+        "开始 / 停止录屏 (F9)", "開始 / 停止錄影 (F9)", "Start / Stop recording (F9)",
+        "録画開始 / 停止 (F9)", "녹화 시작 / 중지 (F9)",
+        "Démarrer / Arrêter l'enregistrement (F9)", "Aufnahme starten / stoppen (F9)",
+        "Iniciar / Detener grabación (F9)",
+    ),
+    "录屏已保存：{path}": (
+        "录屏已保存：{path}", "錄影已儲存：{path}", "Recording saved: {path}",
+        "録画を保存しました: {path}", "녹화 저장됨: {path}",
+        "Enregistrement enregistré : {path}", "Aufnahme gespeichert: {path}",
+        "Grabación guardada: {path}",
+    ),
+    "请选择这一次录制里，声音要怎么保存：": (
+        "请选择这一次录制里，声音要怎么保存：", "請選擇這一次錄影裡，聲音要怎麼儲存：",
+        "Choose how to save audio for this recording:",
+        "今回の録画の音声の保存方法を選択してください：",
+        "이번 녹화에서 소리를 저장할 방식을 선택하세요:",
+        "Choisissez comment enregistrer l'audio pour cet enregistrement :",
+        "Wählen Sie, wie das Audio dieser Aufnahme gespeichert wird:",
+        "Elige cómo guardar el audio de esta grabación:",
+    ),
+    "本次录制的音频怎么保存？": (
+        "本次录制的音频怎么保存？", "這次的音訊要怎麼儲存？",
+        "How should this recording's audio be saved?",
+        "今回の録音の音声はどう保存しますか？", "이번 녹화의 오디오는 어떻게 저장할까요?",
+        "Comment enregistrer l'audio de cet enregistrement ?",
+        "Wie soll das Audio dieser Aufnahme gespeichert werden?",
+        "¿Cómo guardar el audio de esta grabación?",
+    ),
+    "视频里的音轨方式：": (
+        "视频里的音轨方式：", "影片裡的音軌方式：", "Audio track mode in the video:",
+        "動画の音声トラックの方法：", "동영상 오디오 트랙 방식:",
+        "Mode de piste audio dans la vidéo :", "Audio-Spur-Modus im Video:",
+        "Modo de pista de audio en el vídeo:",
+    ),
+    "提示：只勾选了系统声音或麦克风其中一路时，两种音轨方式效果相同。": (
+        "提示：只勾选了系统声音或麦克风其中一路时，两种音轨方式效果相同。",
+        "提示：只勾選系統聲音或麥克風其中一路時，兩種音軌方式效果相同。",
+        "Tip: when only system audio or the microphone is enabled, both audio modes have the same effect.",
+        "ヒント：システム音声またはマイクのどちらか一方のみを選択した場合、どちらの音声モードでも結果は同じです。",
+        "팁: 시스템 소리 또는 마이크 중 하나만 선택하면 두 오디오 방식의 결과가 같습니다.",
+        "Astuce : si seul le son système ou le micro est activé, les deux modes audio donnent le même résultat.",
+        "Tipp: Wenn nur Systemton oder nur das Mikrofon aktiviert ist, sind beide Audio-Modi gleich.",
+        "Consejo: si solo se activa el sonido del sistema o el micrófono, ambos modos de audio dan el mismo resultado.",
+    ),
+
 })
 
