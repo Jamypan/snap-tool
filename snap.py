@@ -106,22 +106,6 @@ WM_HOTKEY = 0x0312
 user32 = ctypes.windll.user32
 
 
-def _native_shell_dialog_safe() -> bool:
-    """V52.3：Windows 原生 Shell 文件夹对话框只在 STA 线程下安全。
-
-    原生 IFileDialog 依赖 COM 单线程公寓。若某个第三方库先把主线程初始化成
-    MTA（打包后退回多线程模型时偶发），再弹原生对话框会直接死锁。这里先
-    探测当前线程的公寓模型：S_OK / S_FALSE 表示 STA 可用；RPC_E_CHANGED_MODE
-    （0x80010106）表示已经是 MTA，调用方应退回 Qt 自绘对话框。
-    """
-    if os.name != "nt":
-        return False
-    try:
-        hr = ctypes.windll.ole32.OleInitialize(None) & 0xFFFFFFFF
-    except Exception:  # noqa: BLE001
-        return False
-    return hr in (0, 1)          # S_OK / S_FALSE
-
 # ---------------------------------------------------------------------------
 # Win32 消息结构（用于全局热键）
 # ---------------------------------------------------------------------------
@@ -1253,25 +1237,35 @@ class App:
         self._rec_paused = False
 
     def _choose_record_dir(self) -> None:
-        """V52.3：点「保存位置」选文件夹，保存并刷新面板。
+        """V52.4：点「保存位置」用 Windows 原生 IFileOpenDialog 选文件夹。
 
-        优先用 Windows 原生文件夹选择器（现代资源管理器风格：地址栏 / 导航
-        窗格 / 新建文件夹 / 搜索）。原生 Shell 对话框要求 STA 主线程，若第三方
-        库已把主线程变成 MTA 则自动退回 Qt 对话框，避免 V52.1 那种死机。
-        parent 传 None，并在失败目录 / 异常上做兜底。
+        Qt 的 QFileDialog 目录模式会退回自绘对话框（Look in: / Directory: /
+        Choose 那一套老样式），所以这里直接调 COM 的 IFileOpenDialog 并设置
+        FOS_PICKFOLDERS，稳定拿到资源管理器风格的现代「选择文件夹」窗口
+        （面包屑地址栏 / 导航窗格 / 新建文件夹 / 搜索框）。
+
+        COM 不可用时才退回 Qt 对话框；目录失效、异常都做兜底，不会拖死界面。
         """
+        from folder_picker import pick_folder
         from recording_settings import load_save_dir, save_save_dir
         current = str(load_save_dir())
         if not os.path.isdir(current):
             current = str(Path.home())
-        options = QFileDialog.ShowDirsOnly
-        if not _native_shell_dialog_safe():
-            options |= QFileDialog.DontUseNativeDialog
+        owner = 0
         try:
-            chosen = QFileDialog.getExistingDirectory(
-                None, t("选择录屏保存位置"), current, options)
-        except Exception:  # noqa: BLE001 —— 对话框异常不能拖死主界面
-            chosen = ""
+            if self.main_window.isVisible():
+                owner = int(self.main_window.winId())
+        except Exception:  # noqa: BLE001
+            owner = 0
+        try:
+            chosen = pick_folder(t("选择录屏保存位置"), current, owner)
+        except Exception:  # noqa: BLE001 —— 原生对话框不可用时退回 Qt
+            try:
+                chosen = QFileDialog.getExistingDirectory(
+                    None, t("选择录屏保存位置"), current,
+                    QFileDialog.ShowDirsOnly | QFileDialog.DontUseNativeDialog)
+            except Exception:  # noqa: BLE001
+                chosen = ""
         if not chosen:
             return
         if not save_save_dir(chosen):

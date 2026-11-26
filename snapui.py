@@ -63,7 +63,7 @@ from ui_theme import (
 # 常量保留简体中文：配置目录名、exe 名、自检与旧版脚本都依赖它，
 # 界面上显示的程序名统一用随语言变化的 app_name()。
 APP_NAME = "截屏助手"
-APP_VERSION = "V52.3"          # 「关于」窗口显示的版本号；改版本只改这一处
+APP_VERSION = "V52.4"          # 「关于」窗口显示的版本号；改版本只改这一处
 CONTACT_EMAIL = "283096251@qq.com"
 
 # 画笔平滑度档位显示文案（key 用中文原文，走 i18n 翻译）

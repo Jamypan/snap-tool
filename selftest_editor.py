@@ -7417,7 +7417,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V52.3", APP_VERSION == "V52.3", APP_VERSION)
+    record("AV1 版本号常量为 V52.4", APP_VERSION == "V52.4", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 
@@ -7624,24 +7624,75 @@ def test_v523_help_browser_and_native_dialog() -> None:
         )
         record("AY4 使用说明改用浏览器打开", ok_ay4, f"ok={ok_ay4}")
 
-        # AY5 保存位置：原生优先，非 STA 才回退 Qt 对话框
+        # AY5 保存位置改为 COM 原生 IFileOpenDialog（V52.4），Qt 只做兜底
         start = src.find("def _choose_record_dir")
         end = src.find("\n    def ", start + 10)
         body = src[start:end] if start >= 0 else ""
         ok_ay5 = (
-            "def _native_shell_dialog_safe" in src
-            and "_native_shell_dialog_safe()" in body
-            and "options |= QFileDialog.DontUseNativeDialog" in body
-            and "ShowDirsOnly" in body
-            and "OleInitialize" in src
+            "from folder_picker import pick_folder" in body
+            and 'pick_folder(t("选择录屏保存位置")' in body
+            and "DontUseNativeDialog" in body          # 仅兜底分支
+            and "os.path.isdir" in body
         )
-        record("AY5 保存位置原生优先且 MTA 回退", ok_ay5,
+        record("AY5 保存位置优先原生 COM 对话框", ok_ay5,
                f"body_len={len(body)}")
     finally:
         if old_home is None:
             os.environ.pop("SNAPTOOL_HOME", None)
         else:
             os.environ["SNAPTOOL_HOME"] = old_home
+
+
+def test_v524_native_folder_picker() -> None:
+    """Stage AZ：V52.4 保存位置改用 COM IFileOpenDialog 现代选择文件夹窗口。"""
+    from pathlib import Path
+
+    import folder_picker
+
+    print("\n--- Stage AZ: V52.4 原生选择文件夹（IFileOpenDialog） ---")
+
+    # AZ1 模块导出 pick_folder / available
+    ok_az1 = (
+        callable(getattr(folder_picker, "pick_folder", None))
+        and callable(getattr(folder_picker, "available", None))
+    )
+    record("AZ1 folder_picker 提供 pick_folder/available", ok_az1, "ok" if ok_az1 else "缺失")
+
+    # AZ2 关键常量与 CLSID 正确（FOS_PICKFOLDERS 才只选文件夹）
+    ok_az2 = (
+        folder_picker.FOS_PICKFOLDERS == 0x20
+        and folder_picker.FOS_FORCEFILESYSTEM == 0x40
+        and folder_picker.SIGDN_FILESYSPATH == 0x80058000
+        and folder_picker._CLSID_FILE_OPEN_DIALOG.upper()
+        == "{DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}"
+        and folder_picker._IID_FILE_OPEN_DIALOG.upper()
+        == "{D57C7288-D4AD-4768-BE02-9D969532D960}"
+    )
+    record("AZ2 FOS_PICKFOLDERS 与 CLSID/IID 正确", ok_az2, "ok" if ok_az2 else "常量不符")
+
+    # AZ3 原生对话框对象可创建（只创建不弹窗）
+    ok_az3 = folder_picker.available()
+    record("AZ3 原生 IFileOpenDialog 可创建", ok_az3, "available" if ok_az3 else "不可用")
+
+    # AZ4 纯 ctypes 实现，不引入 comtypes / pywin32 依赖
+    mod_src = Path(__file__).with_name("folder_picker.py").read_text(encoding="utf-8")
+    ok_az4 = (
+        "import comtypes" not in mod_src
+        and "import win32com" not in mod_src
+        and "ctypes" in mod_src
+        and "FOS_PICKFOLDERS" in mod_src
+        and "RPC_E_CHANGED_MODE" in mod_src
+    )
+    record("AZ4 纯 ctypes 实现且带 MTA 兜底", ok_az4, f"len={len(mod_src)}")
+
+    # AZ5 主程序接入原生选择器，旧探针移除
+    snap_src = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
+    ok_az5 = (
+        "_native_shell_dialog_safe" not in snap_src
+        and "from folder_picker import pick_folder" in snap_src
+        and "main_window.isVisible()" in snap_src
+    )
+    record("AZ5 主程序接入原生选择器并移除旧探针", ok_az5, "ok" if ok_az5 else "未接入")
 
 
 if __name__ == "__main__":
@@ -7705,6 +7756,7 @@ if __name__ == "__main__":
     test_v521_recording_settings()
     test_v522_shot_start_and_dir_dialog()
     test_v523_help_browser_and_native_dialog()
+    test_v524_native_folder_picker()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
