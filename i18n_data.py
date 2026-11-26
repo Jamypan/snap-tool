@@ -173,6 +173,14 @@ _ROWS: dict[str, tuple[str, ...]] = {
     ),
     "语言…": ("语言…", "語言…", "Language…", "言語…", "언어…", "Langue…", "Sprache…", "Idioma…"),
     "使用说明": ("使用说明", "使用說明", "User Guide", "使い方", "사용 설명서", "Guide d'utilisation", "Handbuch", "Guía de uso"),
+    # V52.3：帮助改为浏览器打开，写文件失败时的兜底提示
+    "使用说明无法打开": (
+        "使用说明无法打开", "使用說明無法開啟", "Could not open the user guide",
+        "使用説明を開けません", "사용 설명서를 열 수 없습니다",
+        "Impossible d'ouvrir le guide d'utilisation",
+        "Benutzerhandbuch konnte nicht geöffnet werden",
+        "No se pudo abrir la guía de uso",
+    ),
     "命令行参数": ("命令行参数", "命令列參數", "Command Line", "コマンドライン", "명령줄 옵션", "Ligne de commande", "Befehlszeile", "Línea de comandos"),
     "语言": ("语言", "語言", "Language", "言語", "언어", "Langue", "Sprache", "Idioma"),
     "未知": ("未知", "未知", "Unknown", "不明", "알 수 없음", "Inconnu", "Unbekannt", "Desconocido"),

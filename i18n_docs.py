@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from html import escape
 
-from i18n import LANG, t
+from i18n import LANG, app_name, t
 
 _CSS = """
 <style>
@@ -318,4 +318,53 @@ def cli_help_html(lang: str | None = None, name: str | None = None) -> str:
     )
 
 
-__all__ = ["help_html", "about_html", "cli_help", "cli_help_html"]
+# V52.3：浏览器版帮助。在原有正文上补 UTF-8 声明、视口和阅读版式，
+# 写成 .html 后用系统默认浏览器打开（不再用程序内 QTextBrowser 弹窗）。
+_BROWSER_HEAD = (
+    '<meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    "<style>"
+    "html{background:#f4f5f7;}"
+    "body{max-width:920px;margin:0 auto;padding:34px 44px 64px;"
+    "background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);"
+    "font-size:14px;line-height:1.8;}"
+    "h2{margin-top:30px;padding-top:12px;border-top:1px solid #eef0f3;}"
+    "h2:first-of-type{border-top:none;margin-top:6px;padding-top:0;}"
+    "pre{background:#f6f8fa;padding:12px 14px;border-radius:6px;overflow:auto;}"
+    "@media(max-width:760px){body{padding:18px 16px 40px;}}"
+    "@media(prefers-color-scheme:dark){html{background:#14161a;}"
+    "body{background:#1b1e24;color:#e5e7eb;}"
+    "h2{color:#6cb6ff;border-top-color:#2a2f37;}"
+    "td,th{border-color:#333a45!important;}th{background:#232830!important;}"
+    "code,pre{background:#232830!important;color:#e5e7eb;}}"
+    "</style>"
+)
+
+
+def help_page_html(topic: str = "help", lang: str | None = None,
+                   name: str | None = None) -> str:
+    """V52.3：返回可直接用浏览器打开的完整帮助 HTML。
+
+    topic="cli" 取命令行说明，其余取使用说明；统一补 charset / viewport /
+    阅读版式，并注入 `<title>`，浏览器标签页上显示为「程序名 - 使用说明」。
+    """
+    if topic == "cli":
+        html = cli_help_html(lang, name)
+        title = t("命令行参数")
+    else:
+        html = help_html(lang)
+        title = t("使用说明")
+    app = app_name()
+    head_extra = (
+        _BROWSER_HEAD
+        + "<title>" + escape(f"{app} - {title}") + "</title>"
+    )
+    if "</head>" in html:
+        return html.replace("</head>", head_extra + "</head>", 1)
+    if "<head>" in html:
+        return html.replace("<head>", "<head>" + head_extra, 1)
+    return html.replace("<html>", "<html><head>" + head_extra + "</head>", 1)
+
+
+__all__ = ["help_html", "about_html", "cli_help", "cli_help_html",
+           "help_page_html"]

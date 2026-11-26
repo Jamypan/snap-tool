@@ -105,6 +105,23 @@ WM_HOTKEY = 0x0312
 
 user32 = ctypes.windll.user32
 
+
+def _native_shell_dialog_safe() -> bool:
+    """V52.3：Windows 原生 Shell 文件夹对话框只在 STA 线程下安全。
+
+    原生 IFileDialog 依赖 COM 单线程公寓。若某个第三方库先把主线程初始化成
+    MTA（打包后退回多线程模型时偶发），再弹原生对话框会直接死锁。这里先
+    探测当前线程的公寓模型：S_OK / S_FALSE 表示 STA 可用；RPC_E_CHANGED_MODE
+    （0x80010106）表示已经是 MTA，调用方应退回 Qt 自绘对话框。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        hr = ctypes.windll.ole32.OleInitialize(None) & 0xFFFFFFFF
+    except Exception:  # noqa: BLE001
+        return False
+    return hr in (0, 1)          # S_OK / S_FALSE
+
 # ---------------------------------------------------------------------------
 # Win32 消息结构（用于全局热键）
 # ---------------------------------------------------------------------------
@@ -837,12 +854,51 @@ class App:
         )
 
     def show_help(self, topic: str = "help") -> None:
-        if self._help_window is None:
-            self._help_window = HelpWindow()
-        self._help_window.show_topic(topic if isinstance(topic, str) else "help")
-        self._help_window.show()
-        self._help_window.raise_()
-        self._help_window.activateWindow()
+        """V52.3：使用说明 / 命令行参数改为生成 HTML 并用系统浏览器打开。"""
+        self._open_help_in_browser(topic if isinstance(topic, str) else "help")
+
+    def _open_help_in_browser(self, topic: str = "help") -> None:
+        """把帮助写成 UTF-8 HTML 文件，交给系统默认浏览器打开。
+
+        文件放在配置目录的 help/ 下（SNAPTOOL_HOME 或 %APPDATA%/SnapTool），
+        每次打开前重写，保证语言与内容都是最新的；配置目录不可写时退回临时目录。
+        """
+        from hotkeys import config_dir
+        from i18n_docs import help_page_html
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        if topic not in ("help", "cli"):
+            topic = "help"
+        # 文件名带语言与时间戳：切换语言或重复打开时浏览器一定会重新加载，
+        # 不会命中旧文件缓存；同时顺手清掉上一份同前缀文件，避免堆积。
+        base = "cli" if topic == "cli" else "help"
+        name = f"{base}_{LANG.current}_{time.strftime('%Y%m%d_%H%M%S')}.html"
+        html = help_page_html(topic)
+        path: Path | None = None
+        try:
+            out_dir = config_dir() / "help"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / name
+            path.write_text(html, encoding="utf-8")
+            for old in out_dir.glob(f"{base}_*.html"):
+                if old.name != name:
+                    try:
+                        old.unlink()
+                    except OSError:
+                        pass
+        except Exception:  # noqa: BLE001
+            try:
+                import tempfile
+                path = Path(tempfile.gettempdir()) / ("snaptool_" + name)
+                path.write_text(html, encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                path = None
+        if path is None:
+            self._tray_message(app_name(), t("使用说明无法打开"),
+                               QSystemTrayIcon.Warning, 3000)
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def show_about(self) -> None:
         # 非模态单例：截图时能被一起隐藏，也不会阻塞事件循环。
@@ -1197,22 +1253,23 @@ class App:
         self._rec_paused = False
 
     def _choose_record_dir(self) -> None:
-        """V52.2：点「保存位置」选文件夹，保存并刷新面板。
+        """V52.3：点「保存位置」选文件夹，保存并刷新面板。
 
-        V52.1 用 getExistingDirectory 的原生 Windows 文件夹对话框，托盘常驻
-        / 主窗口隐藏时偶发整个界面卡死。改用 Qt 自带的非原生对话框
-        （DontUseNativeDialog），parent 传 None 避免与隐藏主窗口形成模态死等，
-        并对失效目录和异常做兜底。
+        优先用 Windows 原生文件夹选择器（现代资源管理器风格：地址栏 / 导航
+        窗格 / 新建文件夹 / 搜索）。原生 Shell 对话框要求 STA 主线程，若第三方
+        库已把主线程变成 MTA 则自动退回 Qt 对话框，避免 V52.1 那种死机。
+        parent 传 None，并在失败目录 / 异常上做兜底。
         """
         from recording_settings import load_save_dir, save_save_dir
         current = str(load_save_dir())
         if not os.path.isdir(current):
             current = str(Path.home())
+        options = QFileDialog.ShowDirsOnly
+        if not _native_shell_dialog_safe():
+            options |= QFileDialog.DontUseNativeDialog
         try:
             chosen = QFileDialog.getExistingDirectory(
-                None, t("选择录屏保存位置"), current,
-                QFileDialog.DontUseNativeDialog | QFileDialog.ShowDirsOnly,
-            )
+                None, t("选择录屏保存位置"), current, options)
         except Exception:  # noqa: BLE001 —— 对话框异常不能拖死主界面
             chosen = ""
         if not chosen:

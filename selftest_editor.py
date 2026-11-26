@@ -7417,7 +7417,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V52.2", APP_VERSION == "V52.2", APP_VERSION)
+    record("AV1 版本号常量为 V52.3", APP_VERSION == "V52.3", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 
@@ -7551,19 +7551,91 @@ def test_v522_shot_start_and_dir_dialog() -> None:
         ok_ax3 = hk.label() in btn.text()
         record("AX3 截图热键改动同步按钮文案", ok_ax3, f"text={btn.text()}")
 
-        # AX4 保存位置对话框改为非原生 + 目录容错 + 异常兜底
+        # AX4 保存位置对话框有目录容错与异常兜底（V52.3 起原生优先、MTA 回退）
         src = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
         start = src.find("def _choose_record_dir")
         end = src.find("\n    def ", start + 10)
         body = src[start:end] if start >= 0 else ""
         ok_ax4 = (
-            "DontUseNativeDialog" in body
-            and "ShowDirsOnly" in body
+            "ShowDirsOnly" in body
             and "os.path.isdir" in body
             and "except Exception" in body
             and 'None, t("选择录屏保存位置")' in body
         )
-        record("AX4 保存位置改用非原生对话框且防卡死", ok_ax4,
+        record("AX4 保存位置对话框有容错与异常兜底", ok_ax4,
+               f"body_len={len(body)}")
+    finally:
+        if old_home is None:
+            os.environ.pop("SNAPTOOL_HOME", None)
+        else:
+            os.environ["SNAPTOOL_HOME"] = old_home
+
+
+def test_v523_help_browser_and_native_dialog() -> None:
+    """Stage AY：V52.3 说明改用浏览器打开 + 保存位置优先原生对话框。"""
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+
+    import i18n_docs
+    from snapui import MainWindow  # noqa: F401 —— 确保 UI 模块可导入
+
+    print("\n--- Stage AY: V52.3 浏览器帮助 / 原生保存位置 ---")
+    app = QApplication.instance() or QApplication(sys.argv)
+    tmp = tempfile.TemporaryDirectory(prefix="snaptool-ay-")
+    old_home = os.environ.get("SNAPTOOL_HOME")
+    os.environ["SNAPTOOL_HOME"] = tmp.name
+    try:
+        # AY1 浏览器版帮助 HTML 结构完整
+        html = i18n_docs.help_page_html("help")
+        ok_ay1 = (
+            'charset="utf-8"' in html
+            and "viewport" in html
+            and "<title>" in html
+            and "<h2>" in html
+            and html.count("<h2>") >= 11
+        )
+        record("AY1 浏览器版帮助含 charset/title/正文", ok_ay1,
+               f"len={len(html)} h2={html.count('<h2>')}")
+
+        # AY2 7 种非简中语言都能生成浏览器版
+        bad = [c for c in ("zh_TW", "en", "ja", "ko", "fr", "de", "es")
+               if "<title>" not in i18n_docs.help_page_html("help", c)]
+        record("AY2 七语言帮助均可生成浏览器版", not bad, f"缺失={bad}")
+
+        # AY3 落盘为 UTF-8 且内容完整（模拟 _open_help_in_browser 写文件）
+        path = Path(tmp.name) / "help" / "help.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(html, encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
+        ok_ay3 = ('charset="utf-8"' in text and "<h2>" in text and text == html)
+        record("AY3 帮助 HTML 落盘 UTF-8 可读", ok_ay3,
+               f"bytes={path.stat().st_size}")
+
+        # AY4 使用说明走浏览器、不再弹内置窗口
+        src = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
+        ok_ay4 = (
+            "def _open_help_in_browser" in src
+            and "QDesktopServices.openUrl" in src
+            and "self._open_help_in_browser(topic" in src
+            and "self._help_window = HelpWindow()" not in src
+        )
+        record("AY4 使用说明改用浏览器打开", ok_ay4, f"ok={ok_ay4}")
+
+        # AY5 保存位置：原生优先，非 STA 才回退 Qt 对话框
+        start = src.find("def _choose_record_dir")
+        end = src.find("\n    def ", start + 10)
+        body = src[start:end] if start >= 0 else ""
+        ok_ay5 = (
+            "def _native_shell_dialog_safe" in src
+            and "_native_shell_dialog_safe()" in body
+            and "options |= QFileDialog.DontUseNativeDialog" in body
+            and "ShowDirsOnly" in body
+            and "OleInitialize" in src
+        )
+        record("AY5 保存位置原生优先且 MTA 回退", ok_ay5,
                f"body_len={len(body)}")
     finally:
         if old_home is None:
@@ -7632,6 +7704,7 @@ if __name__ == "__main__":
     test_v511_version_in_about()
     test_v521_recording_settings()
     test_v522_shot_start_and_dir_dialog()
+    test_v523_help_browser_and_native_dialog()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]
