@@ -48,8 +48,8 @@ hiddenimports += [
     'i18n', 'i18n_data', 'i18n_docs',
     # v52 录屏：本地模块 + 录制核心（部分模块在函数内导入，静态分析可能漏收）
     'ui_theme', 'hotkeys',
-    # v52.4 原生选择文件夹（snap.py 内延迟导入，显式列出防漏收）
-    'folder_picker',
+    # v52.4 原生选择文件夹 / v52.5 录屏光标叠加（延迟导入，显式列出防漏收）
+    'folder_picker', 'cursor_overlay',
     'recording_settings', 'recording_ui', 'recording_flow',
     'recorder', 'recorder.video', 'recorder.audio',
     'recorder.devices', 'recorder.runlog',

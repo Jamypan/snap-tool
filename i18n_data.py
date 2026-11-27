@@ -1654,6 +1654,17 @@ _ROWS.update({
         "Tipp: Wenn nur Systemton oder nur das Mikrofon aktiviert ist, sind beide Audio-Modi gleich.",
         "Consejo: si solo se activa el sonido del sistema o el micrófono, ambos modos de audio dan el mismo resultado.",
     ),
+    "打开文件夹": (
+        "打开文件夹", "開啟資料夾", "Open Folder",
+        "フォルダーを開く", "폴더 열기",
+        "Ouvrir le dossier", "Ordner öffnen", "Abrir carpeta",
+    ),
+    "在资源管理器中查看录屏文件": (
+        "在资源管理器中查看录屏文件", "在檔案總管中檢視錄影檔", "View recordings in File Explorer",
+        "エクスプローラーで録画ファイルを表示", "파일 탐색기에서 녹화 파일 보기",
+        "Voir les enregistrements dans l'Explorateur", "Aufnahmen im Datei-Explorer anzeigen",
+        "Ver grabaciones en el Explorador de archivos",
+    ),
 
 })
 

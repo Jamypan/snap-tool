@@ -583,6 +583,7 @@ class App:
         self.main_window.record_start_requested.connect(self.start_record)
         self.main_window.record_default_changed.connect(self._on_record_default_changed)
         self.main_window.record_dir_requested.connect(self._choose_record_dir)
+        self.main_window.record_panel().dir_open_requested.connect(self._open_record_dir)
         self.main_window.record_hotkey_requested.connect(self.open_rec_hotkey_settings)
         self.recorder.started.connect(self._on_rec_started)
         self.recorder.stopped.connect(self._on_rec_stopped)
@@ -1276,6 +1277,27 @@ class App:
             panel.set_dir_text(chosen)
         self._tray_message(app_name(), t("录屏保存位置已设为 {path}", path=chosen),
                            QSystemTrayIcon.Information, 2500)
+
+    def _open_record_dir(self) -> None:
+        """V52.5：点「打开文件夹」用系统资源管理器打开录屏保存目录。"""
+        from recording_settings import load_save_dir
+        target = Path(str(load_save_dir()))
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError:  # noqa: BLE001 —— 打不开也要继续尝试打开已有目录
+            pass
+        opened = False
+        try:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            opened = bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))))
+        except Exception:  # noqa: BLE001
+            opened = False
+        if not opened:
+            try:
+                subprocess.Popen(["explorer", str(target)])
+            except Exception:  # noqa: BLE001
+                pass
 
     # ------------------------------------------------------------ 截图
     def start_capture(self, mode=None) -> None:

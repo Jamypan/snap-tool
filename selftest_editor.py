@@ -7417,7 +7417,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V52.4", APP_VERSION == "V52.4", APP_VERSION)
+    record("AV1 版本号常量为 V52.5", APP_VERSION == "V52.5", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 
@@ -7695,6 +7695,76 @@ def test_v524_native_folder_picker() -> None:
     record("AZ5 主程序接入原生选择器并移除旧探针", ok_az5, "ok" if ok_az5 else "未接入")
 
 
+def test_v525_cursor_and_open_folder() -> None:
+    """Stage BA：V52.5 鼠标指针真正画进视频 + 录屏页「打开文件夹」。"""
+    from pathlib import Path
+
+    import numpy as np
+    from PySide6.QtWidgets import QApplication
+
+    import cursor_overlay
+    import i18n
+    import i18n_docs
+    from recording_ui import RecordPanel
+
+    print("\n--- Stage BA: V52.5 鼠标指针 / 打开文件夹 ---")
+
+    # BA1 录制核心接收 show_cursor 并逐帧叠加
+    v_src = (Path(__file__).with_name("recorder") / "video.py").read_text(encoding="utf-8")
+    ok_ba1 = (
+        "show_cursor: bool = False" in v_src
+        and "from cursor_overlay import overlay_cursor" in v_src
+        and "if self.show_cursor:" in v_src
+        and "overlay_cursor(" in v_src
+    )
+    record("BA1 录制核心支持 show_cursor 并叠加", ok_ba1, f"len={len(v_src)}")
+
+    # BA2 面板开关真的传给了录制核心
+    f_src = Path(__file__).with_name("recording_flow.py").read_text(encoding="utf-8")
+    ok_ba2 = 'show_cursor=bool(settings.get("cursor", False))' in f_src
+    record("BA2 面板鼠标开关传入录制线程", ok_ba2, "ok" if ok_ba2 else "未传参")
+
+    # BA3 注入假光标验证 RGBA 合成（不依赖真实鼠标位置）
+    original = cursor_overlay.load_cursor
+    total = 0
+    try:
+        patch = np.zeros((4, 4, 4), dtype=np.uint8)
+        patch[:, :, :3] = 255
+        patch[:, :, 3] = 255
+        cursor_overlay.load_cursor = lambda: (10, 10, 0, 0, patch)
+        frame = np.zeros((40, 40, 3), dtype=np.uint8)
+        out = cursor_overlay.overlay_cursor(frame, 0, 0, 40, 40)
+        total = int(out.sum())
+        ok_ba3 = out is frame and total > 0 and int(out[10:14, 10:14].sum()) > 0
+    finally:
+        cursor_overlay.load_cursor = original
+    record("BA3 光标像素合成到视频帧", ok_ba3, f"sum={total}")
+
+    # BA4 录屏页有「打开文件夹」入口，主程序接了信号
+    app = QApplication.instance() or QApplication(sys.argv)
+    panel = RecordPanel()
+    ui_src = Path(__file__).with_name("recording_ui.py").read_text(encoding="utf-8")
+    snap_src = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
+    ok_ba4 = (
+        "dir_open_requested = Signal()" in ui_src
+        and "open_dir" in panel._rows
+        and "dir_open_requested.connect(self._open_record_dir)" in snap_src
+        and "def _open_record_dir" in snap_src
+        and "QDesktopServices.openUrl" in snap_src
+    )
+    record("BA4 打开文件夹入口已接入", ok_ba4, f"rows={len(panel._rows)}")
+
+    # BA5 八语言帮助都提到「打开文件夹」
+    keywords = {
+        "zh_CN": "打开文件夹", "zh_TW": "開啟資料夾", "en": "Open Folder",
+        "ja": "フォルダーを開く", "ko": "폴더 열기", "fr": "Ouvrir le dossier",
+        "de": "Ordner öffnen", "es": "Abrir carpeta",
+    }
+    bad = [code for code, word in keywords.items()
+           if word not in i18n_docs.help_html(code)]
+    record("BA5 八语言帮助含打开文件夹说明", not bad, f"缺失={bad}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7757,6 +7827,7 @@ if __name__ == "__main__":
     test_v522_shot_start_and_dir_dialog()
     test_v523_help_browser_and_native_dialog()
     test_v524_native_folder_picker()
+    test_v525_cursor_and_open_folder()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

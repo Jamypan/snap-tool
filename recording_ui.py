@@ -220,6 +220,7 @@ class RecordPanel(QWidget):
     about_requested = Signal()
     quit_requested = Signal()
     dir_requested = Signal()
+    dir_open_requested = Signal()    # V52.5：点击「打开文件夹」在资源管理器查看
     hotkey_requested = Signal()      # V52.1：点击「录屏热键」行改键
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -355,6 +356,13 @@ class RecordPanel(QWidget):
         self._row_dir.clicked.connect(lambda _=False: self.dir_requested.emit())
         self._rows["dir"] = self._row_dir
         right.addWidget(self._row_dir)
+        self._row_open_dir = PanelRow(
+            "folder", "打开文件夹", "在资源管理器中查看录屏文件", "", self.card)
+        self._row_open_dir.setCursor(Qt.PointingHandCursor)
+        self._row_open_dir.clicked.connect(
+            lambda _=False: self.dir_open_requested.emit())
+        self._rows["open_dir"] = self._row_open_dir
+        right.addWidget(self._row_open_dir)
         self._row_hotkey = PanelRow("key", "录屏热键", "点击修改，立即生效", "", self.card)
         self._row_hotkey.setCursor(Qt.PointingHandCursor)
         self._row_hotkey.clicked.connect(lambda _=False: self.hotkey_requested.emit())
@@ -480,6 +488,8 @@ class RecordPanel(QWidget):
         self._row_audio_save.set_texts(t("音频保存"), t("录制完成的音频怎么存"))
         self._row_format.set_texts(t("导出格式"), t("GIF 无声 · 体积更小"))
         self._row_dir.set_texts(t("保存位置"), str(load_save_dir()), "")
+        self._row_open_dir.set_texts(
+            t("打开文件夹"), t("在资源管理器中查看录屏文件"), "")
         self.set_hotkey_label(getattr(self, "_hotkey_label", load_rec_hotkey().label()))
         self._lbl_help.setText(t("帮助"))
         self._rows["help"].set_texts(t("使用说明"), t("含录屏操作文档"), "")

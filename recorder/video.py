@@ -17,6 +17,8 @@ import mss
 import numpy as np
 import wave
 
+from cursor_overlay import overlay_cursor
+
 from .devices import get_display_size
 
 PIP_POSITIONS = {
@@ -75,9 +77,11 @@ class ScreenRecorder(threading.Thread):
         pip_scale: float = 0.25,
         region: dict | None = None,
         pause_event: threading.Event | None = None,
+        show_cursor: bool = False,
     ) -> None:
         """region: 可选的 mss 物理像素区域 {"x","y","width","height"}；
         None 表示整屏（沿用 display_index）。v52 框选/窗口录屏传具体区域。
+        show_cursor: v52.5，mss 抓屏不含系统光标，置位时逐帧叠加光标。
         """
         super().__init__(daemon=True)
         self.output_path = output_path
@@ -90,6 +94,7 @@ class ScreenRecorder(threading.Thread):
         self.pip_scale = pip_scale
         self.region = region
         self.pause_event = pause_event          # v52：置位时暂停写帧（控制条暂停键）
+        self.show_cursor = bool(show_cursor)    # v52.5：把系统光标画进每一帧
         self.frames_written = 0
 
     def run(self) -> None:
@@ -180,6 +185,12 @@ class ScreenRecorder(threading.Thread):
                     # 尺寸兜底：某些多显示器布局可能给出奇数尺寸
                     if frame.shape[1] != width or frame.shape[0] != height:
                         frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+
+                    # V52.5：mss 抓屏不含系统光标，按当前鼠标位置逐帧画上去
+                    if self.show_cursor:
+                        frame = overlay_cursor(
+                            frame, monitor["left"], monitor["top"],
+                            shot.width, shot.height)
 
                     process.stdin.write(frame.tobytes())
                     self.frames_written += 1

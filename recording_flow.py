@@ -133,6 +133,7 @@ class RecordingController(QObject):
             pip_scale=pip_scale,
             region=region,
             pause_event=self._pause_event,
+            show_cursor=bool(settings.get("cursor", False)),
         )
         screen.start()
         self._workers.append(("画面", screen))
@@ -163,6 +164,7 @@ class RecordingController(QObject):
         self.paused = False
         self._start_time = time.monotonic()
         log(f"开始录制 | 区域={region} fps={fps} 摄像头={camera_index} "
+            f"鼠标指针={bool(settings.get('cursor', False))} "
             f"系统声={bool(self._system_wav)} 麦克风={bool(self._mic_wav)}")
         self.started.emit()
         return True
