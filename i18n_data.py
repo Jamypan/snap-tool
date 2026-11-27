@@ -384,6 +384,22 @@ _ROWS: dict[str, tuple[str, ...]] = {
         "Copié dans le presse-papiers  {w}×{h}", "In die Zwischenablage kopiert  {w}×{h}",
         "Copiado al portapapeles  {w}×{h}",
     ),
+    "复制失败，请重试": (
+        "复制失败，请重试", "複製失敗，請重試", "Copy failed, please retry",
+        "コピーに失敗しました。もう一度お試しください", "복사 실패, 다시 시도해 주세요",
+        "Échec de la copie, veuillez réessayer", "Kopieren fehlgeschlagen, bitte erneut versuchen",
+        "Error al copiar, inténtelo de nuevo",
+    ),
+    "剪贴板复制说明": (
+        "复制图片会清除剪贴板里原来的文字，粘贴时得到的就是截图；复制失败会明确提示，不会再悄悄保留旧内容。",
+        "複製圖片會清除剪貼簿裡原本的文字，貼上時得到的就是截圖；複製失敗會明確提示，不會再悄悄保留舊內容。",
+        "Copying an image clears any text previously in the clipboard, so pasting gives you the screenshot. If copying fails, you get a clear warning instead of silently keeping the old text.",
+        "画像をコピーするとクリップボード内の以前のテキストが消去され、貼り付けではスクリーンショットが得られます。コピー失敗時は警告を表示し、古いテキストが残ることはありません。",
+        "이미지를 복사하면 클립보드의 이전 텍스트가 지워져 붙여넣기 시 스크린샷이 나옵니다. 복사 실패 시에는 명확히 알려주며 이전 텍스트가 남지 않습니다.",
+        "Copier une image efface le texte précédent du presse-papiers : le collage donne la capture. En cas d'échec, un avertissement clair s'affiche au lieu de garder silencieusement l'ancien texte.",
+        "Beim Kopieren eines Bildes wird zuvor gespeicherter Text aus der Zwischenablage gelöscht, sodass Sie beim Einfügen den Screenshot erhalten. Bei einem Fehler erscheint eine klare Warnung statt den alten Text still zu behalten.",
+        "Copiar una imagen borra el texto anterior del portapapeles, así que al pegar obtendrá la captura. Si falla, aparece un aviso claro en lugar de conservar silenciosamente el texto antiguo.",
+    ),
     "截图_": ("截图_", "截圖_", "Screenshot_", "Screenshot_", "Screenshot_", "Capture_", "Aufnahme_", "Captura_"),
     "长截图_": ("长截图_", "長截圖_", "Longshot_", "Longshot_", "Longshot_", "Capture_longue_", "Scrollaufnahme_", "Captura_larga_"),
     "PNG 图片 (*.png);;JPEG 图片 (*.jpg)": (

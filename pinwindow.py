@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from clipboard_image import put_image as clipboard_put_image
 from i18n import LANG, t
 
 MIN_SCALE = 0.1
@@ -182,10 +183,7 @@ class PinWindow(QWidget):
 
     # ---------------------------------------------------------------- 动作
     def do_copy(self) -> None:
-        try:
-            QApplication.clipboard().setImage(self._base)
-        except Exception:  # noqa: BLE001
-            pass
+        clipboard_put_image(self._base)
 
     def do_save(self) -> None:
         default = Path.home() / "Pictures" / "Screenshots" / "贴图.png"

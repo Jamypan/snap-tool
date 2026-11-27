@@ -268,6 +268,8 @@ def help_html(lang: str | None = None) -> str:
         f"<p>{t('贴图用法')}</p>"
         f"<p class='hint'>{t('贴图操作')}</p>"
     )
+    # v52.6：剪贴板写图会清掉旧文本，失败时明确提示
+    body += f"<p class='hint'>{LANG.translate('剪贴板复制说明', lang=code)}</p>"
     return f"<html><head>{_CSS}</head><body>{body}</body></html>"
 
 

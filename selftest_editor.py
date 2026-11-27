@@ -7417,7 +7417,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V52.5", APP_VERSION == "V52.5", APP_VERSION)
+    record("AV1 版本号常量为 V52.6", APP_VERSION == "V52.6", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 
@@ -7765,6 +7765,103 @@ def test_v525_cursor_and_open_folder() -> None:
     record("BA5 八语言帮助含打开文件夹说明", not bad, f"缺失={bad}")
 
 
+def test_v526_clipboard_copy() -> None:
+    """Stage BB：V52.6 截图复制明确清掉旧文本、写入图片并校验。"""
+    from pathlib import Path
+
+    import clipboard_image
+    import i18n_data
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtWidgets import QApplication
+
+    print("\n--- Stage BB: V52.6 剪贴板复制 ---")
+
+    # BB1 统一走原生写图模块：清空旧内容 + 校验 + 回退
+    src = Path(__file__).with_name("clipboard_image.py").read_text(encoding="utf-8")
+    ok_bb1 = (
+        "EmptyClipboard()" in src
+        and "SetClipboardData(CF_DIB" in src
+        and "GetClipboardData(CF_DIB)" in src
+        and "def put_image" in src
+        and "clip.setImage(img)" in src
+    )
+    record("BB1 写图模块含清旧内容/校验/回退", ok_bb1, f"len={len(src)}")
+
+    # BB2 QImage → DIB 头正确（32bpp、自下而上、长度对齐）
+    img = QImage(6, 4, QImage.Format_ARGB32)
+    img.fill(QColor(0, 0, 0, 0))
+    img.setPixelColor(0, 0, QColor(10, 20, 30, 255))
+    img.setPixelColor(0, 3, QColor(40, 50, 60, 255))
+    dib = clipboard_image._dib_from_qimage(img)
+    hdr = clipboard_image._BITMAPINFOHEADER.from_buffer_copy(dib[:40])
+    ok_bb2 = (
+        hdr.biWidth == 6 and hdr.biHeight == 4
+        and hdr.biBitCount == 32 and hdr.biCompression == 0
+        and len(dib) == 40 + 6 * 4 * 4
+    )
+    record("BB2 DIB 头与像素长度正确", ok_bb2,
+           f"w={hdr.biWidth} h={hdr.biHeight} bpp={hdr.biBitCount} len={len(dib)}")
+
+    # BB3 DIB 像素自下而上，BGRA 字节序正确
+    first = bytes(dib[40:44])
+    ok_bb3 = first == bytes((60, 50, 40, 255))
+    record("BB3 DIB 像素自下而上且 BGRA 正确", ok_bb3, f"first={list(first)}")
+
+    # BB4 原生路径失败时回退 Qt，且旧文本被清掉、图片可读回
+    app = QApplication.instance() or QApplication(sys.argv)
+    clip = app.clipboard()
+    old_put, old_has = clipboard_image._native_put, clipboard_image._native_has_image
+    ok_put, text_after = False, ""
+    try:
+        clipboard_image._native_put = lambda _dib: False
+        clipboard_image._native_has_image = lambda: False
+        clip.setText("旧文本")
+        ok_put = clipboard_image.put_image(img)
+        text_after, img_after = clip.text(), clip.image()
+        ok_bb4 = (
+            ok_put and text_after == ""
+            and img_after.size() == img.size()
+            and img_after.pixelColor(0, 0) == img.pixelColor(0, 0)
+        )
+    finally:
+        clipboard_image._native_put = old_put
+        clipboard_image._native_has_image = old_has
+        clip.clear()
+    record("BB4 复制图片后旧文本被清除", ok_bb4,
+           f"ok={ok_put} text={text_after!r}")
+
+    # BB5 主程序 / 贴图窗口不再直接 setImage，全部走统一入口
+    snap_src = Path(__file__).with_name("snap.py").read_text(encoding="utf-8")
+    pin_src = Path(__file__).with_name("pinwindow.py").read_text(encoding="utf-8")
+    ok_bb5 = (
+        "from clipboard_image import put_image as clipboard_put_image" in snap_src
+        and "QApplication.clipboard().setImage" not in snap_src
+        and "QApplication.clipboard().setImage" not in pin_src
+        and snap_src.count("clipboard_put_image(") >= 3
+        and "clipboard_put_image(self._base)" in pin_src
+    )
+    record("BB5 所有图片复制入口统一", ok_bb5,
+           f"snap调用={snap_src.count('clipboard_put_image(')}")
+
+    # BB6 复制失败不再静默：明确提示 + 警告图标
+    ok_bb6 = (
+        't("复制失败，请重试")' in snap_src
+        and "QSystemTrayIcon.Warning" in snap_src
+    )
+    record("BB6 复制失败有明确提示", ok_bb6)
+
+    # BB7 八语言都有失败提示词条
+    row = i18n_data._ROWS.get("复制失败，请重试", ())
+    record("BB7 八语言失败提示词条齐全", len(row) == 8 and all(row), f"n={len(row)}")
+
+    # BB8 八语言帮助都说明「复制图片会清掉旧文本」
+    import i18n
+    import i18n_docs
+    bad = [code for code in i18n_data.LANGS
+           if i18n.LANG.translate("剪贴板复制说明", lang=code) not in i18n_docs.help_html(code)]
+    record("BB8 八语言帮助含剪贴板说明", not bad, f"缺失={bad}")
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7828,6 +7925,7 @@ if __name__ == "__main__":
     test_v523_help_browser_and_native_dialog()
     test_v524_native_folder_picker()
     test_v525_cursor_and_open_folder()
+    test_v526_clipboard_copy()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

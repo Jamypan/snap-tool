@@ -77,6 +77,7 @@ from hotkeys import (  # noqa: E402
     save_pen_smooth,
     save_pin_hotkey,
 )
+from clipboard_image import put_image as clipboard_put_image  # noqa: E402
 from i18n import LANG, app_name, t  # noqa: E402
 from i18n_docs import cli_help  # noqa: E402
 from recording_flow import RecordingController  # noqa: E402
@@ -498,7 +499,7 @@ class PreviewWindow(QWidget):
             self.setWindowTitle(t("{app} - 长截图预览", app=app))
 
     def _copy(self) -> None:
-        QApplication.clipboard().setImage(self.img)
+        clipboard_put_image(self.img)
         self._copied, self._saved_path = True, None
         self._render_title()
 
@@ -1506,13 +1507,9 @@ class App:
         self._close_overlay()
 
     @staticmethod
-    def _copy_to_clipboard(img: QImage) -> None:
-        """把图像放进系统剪贴板。剪贴板被别的程序锁住时静默跳过，
-        不让一次复制失败拖垮截图主流程。"""
-        try:
-            QApplication.clipboard().setImage(img)
-        except Exception:  # noqa: BLE001
-            pass
+    def _copy_to_clipboard(img: QImage) -> bool:
+        """把图像放进系统剪贴板，明确清掉之前的文本；成功返回 True。"""
+        return clipboard_put_image(img)
 
     def _on_copy_only(self, img: QImage) -> None:
         """遮罩确认阶段点「复制」：复制原图，并关闭截图编辑 / 截屏助手两个窗口。
@@ -1521,15 +1518,15 @@ class App:
         点「确定」打开编辑器。这里不能用默认的 _close_overlay(restore=True)，
         否则截图前隐藏的主窗口 / 旧编辑器会被重新显示出来。
         """
-        self._copy_to_clipboard(img)
+        ok = self._copy_to_clipboard(img)
         self._close_overlay(restore=False)
         self._close_editor_silently()
         self.main_window.hide()
         self._hidden_windows = []
         self._tray_message(
             app_name(),
-            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
-            QSystemTrayIcon.Information,
+            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()) if ok else t("复制失败，请重试"),
+            QSystemTrayIcon.Information if ok else QSystemTrayIcon.Warning,
             1800,
         )
 
@@ -1586,12 +1583,12 @@ class App:
         )
 
     def _on_done(self, img: QImage) -> None:
-        self._copy_to_clipboard(img)
+        ok = self._copy_to_clipboard(img)
         self._close_overlay()
         self._tray_message(
             app_name(),
-            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
-            QSystemTrayIcon.Information,
+            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()) if ok else t("复制失败，请重试"),
+            QSystemTrayIcon.Information if ok else QSystemTrayIcon.Warning,
             1800,
         )
 
@@ -1823,11 +1820,11 @@ class App:
         editor.activateWindow()
 
     def _on_editor_copy(self, img: QImage) -> None:
-        QApplication.clipboard().setImage(img)
+        ok = clipboard_put_image(img)
         self._tray_message(
             app_name(),
-            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()),
-            QSystemTrayIcon.Information,
+            t("已复制到剪贴板  {w}×{h}", w=img.width(), h=img.height()) if ok else t("复制失败，请重试"),
+            QSystemTrayIcon.Information if ok else QSystemTrayIcon.Warning,
             1800,
         )
 

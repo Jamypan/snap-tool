@@ -50,6 +50,8 @@ hiddenimports += [
     'ui_theme', 'hotkeys',
     # v52.4 原生选择文件夹 / v52.5 录屏光标叠加（延迟导入，显式列出防漏收）
     'folder_picker', 'cursor_overlay',
+    # v52.6 剪贴板写图（snap.py / pinwindow.py 顶层导入，显式列出防漏收）
+    'clipboard_image',
     'recording_settings', 'recording_ui', 'recording_flow',
     'recorder', 'recorder.video', 'recorder.audio',
     'recorder.devices', 'recorder.runlog',
