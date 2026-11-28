@@ -93,6 +93,7 @@ from snapeditor import (
     unrotate_point_about,
 )
 from i18n import LANG, app_name, t
+from lic_gate import require_pro
 from ui_theme import (
     CANVAS_BG,
     CREAM,
@@ -276,16 +277,24 @@ class Canvas(QWidget):
         self.update()
 
     def zoom_in(self) -> None:
+        if not require_pro(self):
+            return
         self._set_view_scale(self.view_scale * 1.25)
 
     def zoom_out(self) -> None:
+        if not require_pro(self):
+            return
         self._set_view_scale(self.view_scale / 1.25)
 
     def zoom_actual(self) -> None:
+        if not require_pro(self):
+            return
         self._set_view_scale(1.0)
 
     def zoom_fit(self) -> None:
         """适应窗口：整张图缩放到恰好装下，并重新居中（v45 修复无重绘）。"""
+        if not require_pro(self):
+            return
         self._zoom = 1.0
         self._fit()
         self._place_ocr_layer()                     # 取字行块按新比例重新盖回
@@ -293,6 +302,9 @@ class Canvas(QWidget):
     def wheelEvent(self, ev) -> None:  # noqa: N802
         """Ctrl + 滚轮：以光标所在点为锚点放缩。"""
         if ev.modifiers() & Qt.ControlModifier:
+            if not require_pro(self):
+                ev.accept()
+                return
             delta = ev.angleDelta().y()
             if delta:
                 self._set_view_scale(
@@ -1379,6 +1391,8 @@ class Canvas(QWidget):
         矩形 / 椭圆自身的角度保持不变——它们的几何已由外接矩形映射完成旋转。
         """
         if self.base.isNull() or mode not in ("cw", "ccw", "flip_h", "flip_v"):
+            return
+        if not require_pro(self):
             return
         if self._ocr_active():
             self._hide_ocr_panel()

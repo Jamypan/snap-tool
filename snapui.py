@@ -63,7 +63,7 @@ from ui_theme import (
 # 常量保留简体中文：配置目录名、exe 名、自检与旧版脚本都依赖它，
 # 界面上显示的程序名统一用随语言变化的 app_name()。
 APP_NAME = "截屏助手"
-APP_VERSION = "V52.6"          # 「关于」窗口显示的版本号；改版本只改这一处
+APP_VERSION = "V53"          # 「关于」窗口显示的版本号；改版本只改这一处
 CONTACT_EMAIL = "283096251@qq.com"
 
 # 画笔平滑度档位显示文案（key 用中文原文，走 i18n 翻译）
@@ -243,6 +243,10 @@ code { background:#f3f4f6; padding:1px 4px; }
 <p>左列可开 <b>系统声音</b>（电脑播放的声音）、<b>麦克风</b>（你说话）、<b>录制鼠标指针</b>，以及 <b>摄像头画中画</b>（位置和大小可调）。右列设 <b>画面帧率</b>（15/20/24/30 fps）、<b>音频保存方式</b>、<b>保存位置</b>（默认在「图片\\Screenshots」，文件名 <code>录屏_日期_时间.mp4</code>）。音频保存方式（整合到视频 / 分开存 WAV / 两者都要）和导出格式（MP4 / GIF，GIF 无声）都在这里设好，点「保存位置」可换文件夹，点「<b>打开文件夹</b>」可在资源管理器里查看录屏文件；录制时不再弹确认窗。勾选「录制鼠标指针」后，光标会逐帧画进视频。</p>
 <p>开始录制后<b>本程序所有窗口自动隐藏</b>，屏幕边缘一圈红框表示正在录，底部悬浮控制条显示<b>计时、声音电平、暂停、停止</b>；按录屏热键（默认 <b>F9</b>）或点控制条的停止键结束，暂停后再按一次该键继续。停止后自动合成视频并保存到设定目录，托盘会提示结果。</p>
 <p class="hint">系统声音录制依赖系统的回录设备（立体声混音 / Stereo Mix）；若未检测到，对应开关会不可用。只开一路声音时，视频里的两种音轨方式效果相同。</p>
+<h2>12. 授权与升级（专业版）</h2>
+<p>基础截图功能<b>一直免费</b>。专业版解锁 <b>6 项高级功能</b>：滚动长截图、OCR 取字、旋转 / 镜像、端点箭头、透明色与填充透明度、画布视图放缩。未授权时点这些功能会弹出升级窗口，确认后即可继续使用。</p>
+<p>点主窗口「<b>授权与升级</b>」或托盘同名菜单打开升级窗口：先<b>复制机器码</b>发给签发方，购买后拿到<b>激活码</b>（一机一码），或由签发方给<b>邀请码</b>（须在有效期内兑换）；粘贴进输入框点「立即解锁」，也可「导入 license.dat」。解锁只在<b>本地验签</b>，不联网、不扣款；授权写入 <code>%APPDATA%\\SnapTool\\license.dat</code>，重开程序仍有效。</p>
+<p class="hint">机器码由主板与系统盘序列号生成，只在本机计算、不上传。本机重装不限次数，同一激活码可重复使用；换机需重新签发。邀请码有截止时间，过期无效。</p>
 </body></html>
 """
 
@@ -598,6 +602,10 @@ class CommandPanel(QWidget):
         group(right, "g_help", self._lbl_mode)
         add(right, "help_help", "help", "使用说明", "10 个完整操作文档",
             lambda: owner.help_requested.emit("help"))
+        up_row = add(right, "upgrade", "key", "授权与升级",
+                     "专业版 6 项高级功能 · 一机一码",
+                     lambda: owner.upgrade_requested.emit(), obj="upgrade")
+        up_row.set_pro(True)
         add(right, "about", "smile", "关于", "版本信息 · 联系邮箱",
             lambda: self._owner.about_requested.emit(), obj="about")
 
@@ -691,6 +699,8 @@ class CommandPanel(QWidget):
         self._rows["language"].set_texts(t("界面语言"), t("8 种语言 · 可跟随系统"), "")
         self._rows["pen_smooth"].set_texts(t("画笔平滑度"), t("关闭 / 轻度 / 中等 / 强"), "")
         self._rows["help_help"].set_texts(t("使用说明"), t("10 个完整操作文档"), "")
+        self._rows["upgrade"].set_texts(t("授权与升级"),
+                                        t("专业版 6 项高级功能 · 一机一码"), "")
         self._rows["about"].set_texts(t("关于"), t("版本信息 · 联系邮箱"), "")
         self._btn_quit.setText(t("退出"))
         self._btn_quit._restyle()
@@ -764,6 +774,7 @@ class MainWindow(QMainWindow):
     pin_hotkey_requested = Signal()      # v34 设置贴图热键
     help_requested = Signal(str)         # help / cli
     about_requested = Signal()
+    upgrade_requested = Signal()         # v53 授权与升级
     open_dir_requested = Signal()
     minimize_requested = Signal()
     quit_requested = Signal()

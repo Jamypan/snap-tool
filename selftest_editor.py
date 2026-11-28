@@ -2245,11 +2245,11 @@ def test_long_capture() -> None:
     bad_help = []
     for code in i18n.LANGS:
         html = help_html(code)
-        if (html.count("<h2>") != 11       # v34 第 10 节贴图 + v52 第 11 节录屏
+        if (html.count("<h2>") != 12       # v34 贴图 + v52 录屏 + v53 授权
                 or "9." not in html
                 or "工具条「长截图」" in html):
             bad_help.append(code)
-    ok_p12 = HELP_HTML.count("<h2>") == 11 and not bad_help
+    ok_p12 = HELP_HTML.count("<h2>") == 12 and not bad_help
     record("P12 帮助 8 语言均含独立长截图章节且无旧入口", ok_p12,
            f"异常语言={bad_help} zh_h2={HELP_HTML.count('<h2>')}")
 
@@ -2613,7 +2613,7 @@ def test_long_capture_v17() -> None:
     bad_help_q = []
     for code in i18n.LANGS:
         h = help_html(code) if code != "zh_CN" else HELP_HTML
-        if (h.count("<h2>") != 11          # v34 第 10 节贴图 + v52 第 11 节录屏
+        if (h.count("<h2>") != 12          # v34 贴图 + v52 录屏 + v53 授权
                 or not any(k in h for k in keywords)
                 or any(s in h for s in stale)):
             bad_help_q.append(code)
@@ -5926,7 +5926,8 @@ def test_v38_layout_redesign() -> None:
     app.processEvents()
 
     # AJ1 v39：普通窗口、不再贴底悬浮
-    # v47：移除「打开保存目录 / 默认截图模式 / 命令行参数」三行后共 12 行
+    # v47：移除「打开保存目录 / 默认截图模式 / 命令行参数」三行
+    # v53：新增「授权与升级」行，共 13 行
     # v52：主窗口改为顶部 Tab + QStackedWidget，第 0 页截图、第 1 页录屏
     ok_aj1 = (
         not bool(mw.windowFlags() & Qt.FramelessWindowHint)
@@ -5936,7 +5937,7 @@ def test_v38_layout_redesign() -> None:
         and mw._stack.widget(1) is mw._record_panel
         and mw.current_tab() == "shot"
         and mw._panel.isVisible()
-        and len(mw._panel._rows) == 12
+        and len(mw._panel._rows) == 13
     )
     record("AJ1 主窗口=两列命令面板(普通窗口)", ok_aj1,
            f"central={type(mw.centralWidget()).__name__} rows={len(mw._panel._rows)}")
@@ -7217,13 +7218,13 @@ def test_v47_default_split_rows() -> None:
     left_keys = ("mode_rect", "mode_window", "mode_fullscreen", "long_capture",
                  "ocr", "pin_clipboard")
     right_keys = ("hotkey", "pin_hotkey", "language", "pen_smooth",
-                  "help_help", "about")
+                  "help_help", "upgrade", "about")
     gone = [k for k in ("dir", "default_mode", "help_cli")
             if k in panel._rows]
     long_row = panel._rows["long_capture"]
     ok_as4 = (
         all(k in panel._rows for k in left_keys + right_keys)
-        and len(panel._rows) == 12 and not gone
+        and len(panel._rows) == 13 and not gone
         and long_row.picker() is None
         and not long_row.key_label.isHidden()
         and not long_row.key_label.pixmap().isNull()
@@ -7417,7 +7418,7 @@ def test_v511_version_in_about() -> None:
     from i18n_docs import about_html
     from snapui import ABOUT_HTML, APP_VERSION
 
-    record("AV1 版本号常量为 V52.6", APP_VERSION == "V52.6", APP_VERSION)
+    record("AV1 版本号常量为 V53", APP_VERSION == "V53", APP_VERSION)
     record("AV2 简中关于正文含版本号",
            f"版本：{APP_VERSION}" in ABOUT_HTML, APP_VERSION)
 
@@ -7862,6 +7863,142 @@ def test_v526_clipboard_copy() -> None:
     record("BB8 八语言帮助含剪贴板说明", not bad, f"缺失={bad}")
 
 
+def test_v526_clipboard_native_ptr() -> None:
+    """Stage BC：原生写图的 Win64 句柄必须显式声明为指针，否则剪贴板写不进去。"""
+    from pathlib import Path
+
+    src = Path(__file__).with_name("clipboard_image.py").read_text(encoding="utf-8")
+    print("\n--- Stage BC: V52.6 剪贴板 Win64 句柄修复 ---")
+
+    # BC1 返回句柄的 Win32 API 必须声明为 c_void_p（64 位不被截断）
+    ok_bc1 = (
+        "k32.GlobalAlloc.restype = ctypes.c_void_p" in src
+        and "k32.GlobalLock.restype = ctypes.c_void_p" in src
+        and "u32.SetClipboardData.restype = ctypes.c_void_p" in src
+        and "u32.GetClipboardData.restype = ctypes.c_void_p" in src
+        and "k32.GlobalFree.restype = ctypes.c_void_p" in src
+    )
+    record("BC1 句柄类 API 声明为 c_void_p", ok_bc1)
+
+    # BC2 所有用到的 API 都声明了 argtypes（避免默认 32 位传参）
+    api_names = ["OpenClipboard", "CloseClipboard", "EmptyClipboard",
+                 "SetClipboardData", "GetClipboardData", "EnumClipboardFormats",
+                 "GlobalAlloc", "GlobalLock", "GlobalUnlock", "GlobalFree"]
+    ok_bc2 = all(name + ".argtypes" in src for name in api_names)
+    record("BC2 所有 Win32 API 声明 argtypes", ok_bc2,
+           f"缺失={[n for n in api_names if n + '.argtypes' not in src]}")
+
+    # BC3 _native_put / _native_has_image 使用配置好的句柄而非临时 windll
+    ok_bc3 = (
+        "user32, kernel32 = _user32, _kernel32" in src
+        and "user32 = _user32" in src
+        and "_user32, _kernel32 = _setup_win32()" in src
+        and "ctypes.windll.user32" not in src.split("def _native_put")[1]
+    )
+    record("BC3 原生函数复用已配置句柄", ok_bc3)
+
+    # BC4 写图成功后校验：既有位图，又无文本格式残留
+    ok_bc4 = (
+        "def _native_text_formats()" in src
+        and "if not _native_text_formats():" in src
+        and "_native_put(dib) and _native_has_image()" in src
+    )
+    record("BC4 写图后校验位图且无文本残留", ok_bc4)
+
+
+def test_v53_license() -> None:
+    """Stage BD：V53 离线授权（机器码 / 激活码 / 邀请码 / 闸门）。"""
+    import json
+    import tempfile
+    from pathlib import Path
+
+    import license_core as L
+    import lic_ui
+
+    print("\n--- Stage BD: V53 离线授权 ---")
+
+    old_home = os.environ.get("SNAPTOOL_HOME")
+    td = tempfile.mkdtemp()
+    os.environ["SNAPTOOL_HOME"] = td
+    try:
+        # 用固定机器码做确定性测试，避免依赖真机硬件
+        L._MACHINE_DIGEST = "0123456789abcdef"
+        L.set_pro_override(None)
+
+        # BD1 机器码格式化
+        mc = L.machine_code()
+        ok_bd1 = mc == "0123-4567-89AB-CDEF"
+        record("BD1 机器码格式化正确", ok_bd1, mc)
+
+        # BD2 激活码绑定机器 + 正确兑换
+        code = L.make_activation_code(mc)
+        kind, data = L.parse_code(code)
+        ok_bd2 = kind == "PERM" and data.get("machine") == "0123456789abcdef"
+        record("BD2 激活码绑定本机机器", ok_bd2, code)
+
+        ok, reason = L.activate(code)
+        ok_bd3 = ok and reason == "ok" and L.is_pro() and L.license_status() == "permanent"
+        record("BD3 兑换后授权生效", ok_bd3, f"{ok}/{reason}")
+
+        # BD4 机器码不符被拒
+        wrong = L.make_activation_code("ffffffffffffffff")
+        ok_bd4 = L.activate(wrong)[1] == "machine_mismatch"
+        record("BD4 异机激活码被拒", ok_bd4)
+
+        # BD5 篡改 license.dat 后授权失效
+        p = L.license_path()
+        d = json.loads(p.read_text(encoding="utf-8"))
+        d["type"] = "PERM2"
+        p.write_text(json.dumps(d), encoding="utf-8")
+        ok_bd5 = not L.is_pro()
+        record("BD5 篡改授权文件后失效", ok_bd5)
+
+        # BD6 邀请码：未过期可兑换，过期被拒
+        inv_ok = L.make_invite_code("20991231235959")
+        ok, reason = L.activate(inv_ok)
+        ok_bd6a = ok and L.is_pro()
+        inv_exp = L.make_invite_code("20261128235959")
+        ok2, reason2 = L.activate(inv_exp)
+        ok_bd6 = ok_bd6a and not ok2 and reason2 == "invite_expired"
+        record("BD6 邀请码未过期可兑/过期拒绝", ok_bd6, f"{reason}/{reason2}")
+
+        # BD7 导入篡改的 license.dat 应被拒（签名不符）
+        bad_file = Path(td) / "bad_license.dat"
+        bad_file.write_text(json.dumps({
+            "v": 1, "type": "PERM", "machine": "0123456789abcdef",
+            "time": "x", "source": "code", "sig": "0000",
+        }), encoding="utf-8")
+        ok_bd7 = L.import_license_file(str(bad_file))[1] == "invalid_code"
+        record("BD7 篡改文件导入被拒", ok_bd7)
+
+        # BD8 未授权时 require_pro 弹窗并拦截；已授权放行
+        L.set_pro_override(False)
+        import lic_gate
+        lic_gate._dialog = None
+        ok_bd8 = lic_gate.require_pro() is False
+        record("BD8 未授权闸门拦截", ok_bd8)
+        L.set_pro_override(True)
+        ok_bd8b = lic_gate.require_pro() is True
+        record("BD8b 已授权闸门放行", ok_bd8b)
+        lic_gate._dialog = None
+
+        # BD9 升级窗口两态可构造
+        dlg = lic_ui.UpgradeDialog()
+        ok_bd9 = "升级" in dlg.windowTitle() and dlg._input is not None
+        record("BD9 升级窗口可构造", ok_bd9)
+
+        # BD10 主窗口命令面板有授权行
+        ok_bd10 = "授权与升级" in Path(
+            Path(__file__).with_name("snapui.py")).read_text(encoding="utf-8")
+        record("BD10 主窗口含授权入口", ok_bd10)
+    finally:
+        L.set_pro_override(True)  # 还原，后续测试照常
+        if old_home is None:
+            os.environ.pop("SNAPTOOL_HOME", None)
+        else:
+            os.environ["SNAPTOOL_HOME"] = old_home
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
@@ -7871,6 +8008,11 @@ if __name__ == "__main__":
     print("=" * 66)
 
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # V53：历史测试直接调用高级功能（旋转/放缩/箭头/长截图），
+    # 注入已授权态让闸门放行；Stage BD 会单独切到未授权态验证锁定。
+    from license_core import set_pro_override
+    set_pro_override(True)
 
     test_canvas()
     test_overlay()
@@ -7926,6 +8068,8 @@ if __name__ == "__main__":
     test_v524_native_folder_picker()
     test_v525_cursor_and_open_folder()
     test_v526_clipboard_copy()
+    test_v526_clipboard_native_ptr()
+    test_v53_license()
 
     print("=" * 66)
     failed = [n for n, s, _ in results if s == FAIL]

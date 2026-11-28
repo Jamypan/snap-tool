@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from i18n import LANG, t
+from lic_gate import require_pro
 from ui_theme import (
     CREAM,
     FONT_QSS,
@@ -1382,7 +1383,7 @@ class StylePanel(QWidget):
         self._transparent_btn.setCursor(Qt.PointingHandCursor)
         self._transparent_btn.setFocusPolicy(Qt.NoFocus)
         self._transparent_btn.clicked.connect(
-            lambda _=False: self._emit("color", "#00000000")
+            lambda _=False: self._pro_emit("color", "#00000000")
         )
         self._color_grid.addWidget(self._transparent_btn)
         root.addLayout(self._color_grid)
@@ -1517,7 +1518,7 @@ class StylePanel(QWidget):
         self._bg_border_transparent_btn.setCursor(Qt.PointingHandCursor)
         self._bg_border_transparent_btn.setFocusPolicy(Qt.NoFocus)
         self._bg_border_transparent_btn.clicked.connect(
-            lambda _=False: self._emit("bg_border_color", "#00000000")
+            lambda _=False: self._pro_emit("bg_border_color", "#00000000")
         )
         self._bg_border_grid.addWidget(self._bg_border_transparent_btn)
         root.addLayout(self._bg_border_grid)
@@ -1550,13 +1551,13 @@ class StylePanel(QWidget):
         self._pen_arrow_start = QCheckBox(t("起点加箭头"))
         self._pen_arrow_start.setFocusPolicy(Qt.NoFocus)
         self._pen_arrow_start.toggled.connect(
-            lambda on: self._emit("pen_arrow_start", on)
+            lambda on: self._pro_emit("pen_arrow_start", on)
         )
         root.addWidget(self._pen_arrow_start)
         self._pen_arrow_end = QCheckBox(t("终点加箭头"))
         self._pen_arrow_end.setFocusPolicy(Qt.NoFocus)
         self._pen_arrow_end.toggled.connect(
-            lambda on: self._emit("pen_arrow_end", on)
+            lambda on: self._pro_emit("pen_arrow_end", on)
         )
         root.addWidget(self._pen_arrow_end)
 
@@ -1679,6 +1680,12 @@ class StylePanel(QWidget):
     def _emit(self, key: str, value) -> None:
         self.style_changed.emit({key: value})
 
+    def _pro_emit(self, key: str, value) -> None:
+        """高级样式控件（透明色 / 端点箭头）：未授权弹升级窗并跳过。"""
+        if not require_pro(self):
+            return
+        self._emit(key, value)
+
     def _make_preset_color_buttons(self, key: str) -> list:
         """生成一排预设颜色块，点击即 emit 对应的样式键。
 
@@ -1733,12 +1740,16 @@ class StylePanel(QWidget):
     def _on_fill_alpha(self, value: int) -> None:
         if self._fill_alpha_slider.signalsBlocked():
             return
+        if not require_pro(self):
+            return
         c = QColor(self._fill_rgb)
         c.setAlpha(self._alpha_from(value))
         self._emit("fill_color", c.name(QColor.HexArgb))
 
     def _on_bg_alpha(self, value: int) -> None:
         if self._bg_alpha_slider.signalsBlocked():
+            return
+        if not require_pro(self):
             return
         c = QColor(self._bg_rgb)
         c.setAlpha(self._alpha_from(value))

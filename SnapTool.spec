@@ -52,6 +52,7 @@ hiddenimports += [
     'folder_picker', 'cursor_overlay',
     # v52.6 剪贴板写图（snap.py / pinwindow.py 顶层导入，显式列出防漏收）
     'clipboard_image',
+    'license_core', 'lic_ui', 'lic_gate', 'license_tool',
     'recording_settings', 'recording_ui', 'recording_flow',
     'recorder', 'recorder.video', 'recorder.audio',
     'recorder.devices', 'recorder.runlog',

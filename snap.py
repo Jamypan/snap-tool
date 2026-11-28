@@ -80,6 +80,7 @@ from hotkeys import (  # noqa: E402
 from clipboard_image import put_image as clipboard_put_image  # noqa: E402
 from i18n import LANG, app_name, t  # noqa: E402
 from i18n_docs import cli_help  # noqa: E402
+from lic_gate import require_pro  # noqa: E402
 from recording_flow import RecordingController  # noqa: E402
 from recording_settings import (  # noqa: E402
     load_rec_hotkey,
@@ -575,6 +576,7 @@ class App:
         self.main_window.pin_hotkey_requested.connect(self.open_pin_hotkey_settings)
         self.main_window.help_requested.connect(self.show_help)
         self.main_window.about_requested.connect(self.show_about)
+        self.main_window.upgrade_requested.connect(self.show_upgrade)
         self.main_window.open_dir_requested.connect(self._open_save_dir)
         self.main_window.minimize_requested.connect(self._on_minimized)
         self.main_window.quit_requested.connect(self.quit)
@@ -638,6 +640,10 @@ class App:
         act_dir.triggered.connect(lambda _checked=False: self._open_save_dir())
         self.menu.addAction(act_dir)
         self._tray_actions["dir"] = act_dir
+        act_upgrade = QAction(t("授权与升级…"), self.menu)
+        act_upgrade.triggered.connect(lambda _checked=False: self.show_upgrade())
+        self.menu.addAction(act_upgrade)
+        self._tray_actions["upgrade"] = act_upgrade
         self.menu.addSeparator()
         act_help = QAction(t("使用说明…"), self.menu)
         act_help.triggered.connect(lambda: self.show_help("help"))
@@ -777,6 +783,7 @@ class App:
             ("language", "语言…"), ("dir", "打开保存目录"),
             ("help", "使用说明…"), ("about", "关于…"), ("quit", "退出"),
             ("long_capture", "滚动长截图…"), ("record", "开始 / 停止录屏 (F9)"),
+            ("upgrade", "授权与升级…"),
         ):
             self._tray_actions[key].setText(t(text_key))
         for mode in CAPTURE_MODES:
@@ -896,6 +903,15 @@ class App:
         self._about_box.show()
         self._about_box.raise_()
         self._about_box.activateWindow()
+
+    def show_upgrade(self) -> None:
+        """v53：授权窗口（待激活 / 已激活两态），非模态单例。"""
+        from lic_ui import UpgradeDialog
+        if getattr(self, "_upgrade_box", None) is None:
+            self._upgrade_box = UpgradeDialog(self.main_window)
+        self._upgrade_box.show()
+        self._upgrade_box.raise_()
+        self._upgrade_box.activateWindow()
 
     def _on_mode_changed(self, mode: str) -> None:
         if mode not in CAPTURE_MODES:
@@ -1313,6 +1329,8 @@ class App:
 
     def start_ocr_capture(self) -> None:
         """v38：框选一个区域后直接取字（不打开编辑器）。"""
+        if not require_pro(getattr(self, "main_window", None)):
+            return
         if self.overlay is not None or self.busy is not None:
             return
         self._begin_capture("rect", long_mode=False)
@@ -1326,6 +1344,8 @@ class App:
         窗口后 Overlay.long_shot 直接把客户区交给 _on_long_shot 启动
         StitchWorker，不进编辑器、也不再点「确定」。
         """
+        if not require_pro(getattr(self, "main_window", None)):
+            return
         if self.overlay is not None or self.busy is not None:
             return
         self._begin_capture("window", long_mode=True)
@@ -1613,6 +1633,9 @@ class App:
 
         控制条必须先摆好再启动线程：左键过滤区、抓帧隐藏钩子都依赖它的几何。
         """
+        if not require_pro(getattr(self, "main_window", None)):
+            self._close_overlay()
+            return
         if (
             logical_rect.isNull()
             or logical_rect.width() < 8
@@ -1726,6 +1749,8 @@ class App:
     # ------------------------------------------------------------ OCR
     def _on_ocr(self, img: QImage) -> None:
         """取字：遮罩保持显示，结果逐行盖回原文位置；可拖选/复制，复制后自动收起。"""
+        if not require_pro(getattr(self, "main_window", None)):
+            return
         if img.isNull() or self.overlay is None or self._ocr_busy:
             return
         self._ocr_busy = True
@@ -1846,6 +1871,8 @@ class App:
 
     def _on_editor_ocr(self, img: QImage) -> None:
         """窗口化编辑器里取字：结果逐行盖回原文位置（方案 B）。"""
+        if not require_pro(getattr(self, "main_window", None)):
+            return
         if self._ocr_busy or self.editor is None:
             return
         self._ocr_busy = True
